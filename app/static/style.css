@@ -322,11 +322,109 @@ input:focus, select:focus {
     box-shadow: var(--shadow);
 }
 
-/* ── Actions ─────────────────────────────────────────── */
+/* ── Actions & Change Button ─────────────────────────── */
 .actions {
     text-align: center;
     margin: 20px 0;
 }
+.repas-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+.btn-change {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text-light);
+    transition: all 0.2s;
+}
+.btn-change:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: #fef3e2;
+}
+
+/* ── Modal ───────────────────────────────────────────── */
+.modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.modal-backdrop {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+}
+.modal-content {
+    position: relative;
+    background: var(--surface);
+    border-radius: var(--radius);
+    width: 90%;
+    max-width: 560px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    z-index: 1;
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-header h3 { margin: 0; }
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    color: var(--text-light);
+}
+.modal-close:hover { background: var(--bg); }
+.modal-body {
+    padding: 16px 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+.modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    text-align: right;
+}
+.search-box {
+    margin-bottom: 12px;
+}
+.alternatives-list {
+    max-height: 40vh;
+    overflow-y: auto;
+}
+.alt-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-bottom: 6px;
+    transition: all 0.2s;
+}
+.alt-item:hover { border-color: var(--primary); }
+.alt-name { flex: 1; font-weight: 500; }
+.loading-text, .empty, .error { padding: 20px; text-align: center; color: var(--text-light); }
+.error { color: #c0392b; }
 
 /* ── Loading Overlay ────────────────────────────────── */
 .loading-overlay {

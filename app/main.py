@@ -381,6 +381,129 @@ async def ajouter_recette(
     )
 
 
+@app.get("/api/alternatives/{planning_id}")
+async def api_alternatives(planning_id: int):
+    """Retourne les recettes disponibles non utilisées dans ce planning."""
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        # Recettes déjà dans le planning
+        used_names = {r["recipe_name"] for r in planning.get("recipes", [])}
+
+        # Toutes les recettes Notion
+        recettes = await notion.get_all_recipes()
+        alternatives = [
+            {"nom": r["nom"], "repas": r["repas"], "tags": r["tags"]}
+            for r in recettes
+            if r["nom"] not in used_names and r["repas"] in ("Plat", "Entrée", "Accompagnement", "Légume", "")
+        ]
+
+        return {"alternatives": alternatives}
+    except Exception as e:
+        logger.exception("Erreur récupération alternatives")
+        return {"error": str(e), "alternatives": []}
+
+
+@app.post("/api/update-meal/{planning_id}")
+async def api_update_meal(
+    planning_id: int,
+    request: Request,
+):
+    """Remplace un repas dans le planning et regénère la liste de courses."""
+    import json
+
+    data = await request.json()
+    jour = data.get("jour")
+    moment = data.get("moment")  # "midi" ou "soir"
+    nouvelle_recette = data.get("nouvelle_recette", "")
+
+    if not all([jour, moment, nouvelle_recette]):
+        return {"error": "Paramètres manquants (jour, moment, nouvelle_recette)"}
+
+    try:
+        # Récupérer le planning actuel
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        plats = planning_data["plats"]
+
+        # Chercher et remplacer le plat
+        trouve = False
+        for plat in plats:
+            if plat["jour"] == jour and plat["moment"] == moment:
+                plat["nom_recette"] = nouvelle_recette
+                plat["notion_id"] = ""
+                plat["url"] = ""
+                plat["notion_url"] = ""
+                # Chercher les infos dans Notion
+                recettes = await notion.get_all_recipes()
+                for r in recettes:
+                    if r["nom"].lower().strip() == nouvelle_recette.lower().strip():
+                        plat["notion_id"] = r["id"]
+                        plat["url"] = r.get("url", "")
+                        plat["notion_url"] = r.get("notion_url", "")
+                        break
+                trouve = True
+                break
+
+        if not trouve:
+            return {"error": "Repas non trouvé dans le planning"}
+
+        # Regénérer la liste de courses
+        liste_courses = []
+        courses_map = {}
+
+        for plat in plats:
+            try:
+                ingredients_data = await llm.extract_ingredients(
+                    plat["nom_recette"],
+                    plat.get("url", ""),
+                    planning.get("nb_personnes", 4),
+                )
+                for ing in ingredients_data.get("ingredients", []):
+                    nom_ing = ing["nom"].lower().strip()
+                    if nom_ing in courses_map:
+                        existing = courses_map[nom_ing]
+                        if existing["unite"] == ing.get("unite", ""):
+                            try:
+                                q1 = float(str(existing["quantite"]).replace(",", "."))
+                                q2 = float(str(ing["quantite"]).replace(",", "."))
+                                existing["quantite"] = str(q1 + q2)
+                            except (ValueError, TypeError):
+                                pass
+                    else:
+                        courses_map[nom_ing] = {
+                            "nom": ing["nom"],
+                            "quantite": ing.get("quantite", ""),
+                            "unite": ing.get("unite", ""),
+                        }
+            except Exception:
+                pass
+
+        liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
+        planning_data["liste_courses"] = liste_courses
+
+        # Sauvegarder
+        await db.save_planning(
+            week_start=planning["week_start"],
+            saison=planning["saison"],
+            nb_personnes=planning["nb_personnes"],
+            ingredients_force=planning.get("ingredients_force", ""),
+            data_json=json.dumps(planning_data, ensure_ascii=False),
+            recipes=[{"notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"], "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"]} for p in plats],
+        )
+
+        return {"success": True, "liste_courses": liste_courses, "plats": plats}
+
+    except Exception as e:
+        logger.exception("Erreur update meal")
+        return {"error": str(e)}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": settings.app_title}
