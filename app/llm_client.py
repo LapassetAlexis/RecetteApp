@@ -1,7 +1,8 @@
-"""Client Ollama — génération des plannings et extraction de recettes."""
+"""Client LLM — supporte Ollama (local) et Gemini (cloud)."""
 
 import httpx
 import json
+import re
 from typing import Any
 
 from app.config import settings
@@ -32,38 +33,52 @@ Répond UNIQUEMENT avec une liste numérotée comme ceci, SANS texte avant ni ap
 13 - Jour 7 - midi - Nom exact de la recette
 14 - Jour 7 - soir - Nom exact de la recette"""
 
-SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), tu dois lister les ingrédients nécessaires.
+SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), liste les ingrédients nécessaires.
 
 RÈGLES :
 - Sois précis et réaliste sur les quantités.
 - Adapte les quantités au nombre de personnes indiqué.
 - Regroupe les ingrédients similaires (ex: "oignons" même si utilisé plusieurs fois).
 
-Retourne UNIQUEMENT un JSON valide avec cette structure :
-{
-  "ingredients": [
-    {"nom": "nom ingrédient", "quantite": "quantité", "unite": "unité"},
-    ...
-  ],
-  "cuisson_minutes": 30
-}
+Répond UNIQUEMENT avec ce JSON :
+{"ingredients": [{"nom": "...", "quantite": "...", "unite": "..."}]}
 
-Si l'URL n'est pas accessible, utilise tes connaissances culinaires pour estimer les ingrédients."""
+Pas de texte avant ou après le JSON."""
 
 
 class LLMClient:
-    """Client pour interroger Ollama (modèle local)."""
+    """Client LLM multi-provider (Ollama ou Gemini)."""
 
     def __init__(self) -> None:
-        self.url = f"{settings.ollama_url}/api/chat"
-        self.model = settings.ollama_model
+        self.provider = settings.llm_provider
+        self._setup_provider()
+
+    def _setup_provider(self) -> None:
+        if self.provider == "gemini":
+            self._api_key = settings.gemini_api_key
+            self._model = settings.gemini_model
+            self._url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{self._model}:generateContent?key={self._api_key}"
+            )
+        else:
+            # Ollama (default)
+            self._url = f"{settings.ollama_url}/api/chat"
+            self._model = settings.ollama_model
 
     async def _chat(
         self, system: str, user: str, temperature: float = 0.3
     ) -> str:
-        """Envoie une requête de chat à Ollama et retourne le texte brut."""
+        if self.provider == "gemini":
+            return await self._chat_gemini(system, user, temperature)
+        else:
+            return await self._chat_ollama(system, user, temperature)
+
+    async def _chat_ollama(
+        self, system: str, user: str, temperature: float = 0.3
+    ) -> str:
         payload = {
-            "model": self.model,
+            "model": self._model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -71,12 +86,54 @@ class LLMClient:
             "stream": False,
             "options": {"temperature": temperature},
         }
-
         async with httpx.AsyncClient(timeout=600) as client:
-            resp = await client.post(self.url, json=payload)
+            resp = await client.post(self._url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             return data["message"]["content"]
+
+    async def _chat_gemini(
+        self, system: str, user: str, temperature: float = 0.3
+    ) -> str:
+        payload = {
+            "contents": [{"parts": [{"text": f"{system}\n\n{user}"}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": 2048,
+            },
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(self._url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                raise ValueError("Gemini: aucune réponse")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts)
+
+    async def _chat_ingredients_gemini(
+        self, system: str, user: str, temperature: float = 0.1
+    ) -> str:
+        """Gemini avec contrainte JSON forcée."""
+        payload = {
+            "contents": [{"parts": [{"text": f"{system}\n\n{user}"}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": 1024,
+            },
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(self._url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                raise ValueError("Gemini: aucune réponse")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts)
+
+    # ── Génération planning ──────────────────────────────────────
 
     async def generate_planning(
         self,
@@ -87,14 +144,9 @@ class LLMClient:
         ingredients_force: str,
         recettes_exclues: list[str],
     ) -> list[dict[str, Any]]:
-        """Génère un planning de 4 jours via le LLM."""
         recettes_str = json.dumps(
             [
-                {
-                    "nom": r["nom"],
-                    "type": r["repas"],
-                    "tags": r["tags"],
-                }
+                {"nom": r["nom"], "type": r["repas"], "tags": r["tags"]}
                 for r in recettes
                 if r["repas"] in ("Plat", "Entrée", "Légume", "Accompagnement", "")
             ],
@@ -117,64 +169,59 @@ BASE DE RECETTES DISPONIBLE :
 Choisis exactement 14 recettes (7 jours × 2 repas). Équilibre les repas sur la semaine."""
 
         raw = await self._chat(SYSTEM_PROMPT_PLANNING, user_prompt, temperature=0.3)
+        return self._parse_planning(raw)
 
-        # Parsing de la réponse : liste numérotée ou JSON
+    def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
+        """Parse la réponse du LLM (liste numérotée, markdown ou JSON)."""
         raw = raw.strip()
-        import re
-
         plats = []
 
-        # Essai 1 : détecter un pattern "N - Jour X - midi/soir - NomRecette"
+        # Essai 1 : liste numérotée "N - Jour X - midi - Nom"
         pattern = re.compile(
             r"(?:^|\n)\s*(?:\d+[\s\)\.]+)?(?:[\-\*]?\s*)?Jour\s*(\d+)\s*[\-\–]\s*(midi|soir|déjeuner|dîner)\s*[\-\–]\s*(.+?)(?=\n\s*(?:\d+[\s\)\.]+)?(?:[\-\*]?\s*)?Jour|\n*$)",
             re.IGNORECASE | re.DOTALL
         )
         matches = pattern.findall(raw)
-
         if matches:
             for match in matches:
-                jour = int(match[0])
-                moment = "midi" if match[1].lower() in ("midi", "déjeuner") else "soir"
                 nom = match[2].strip().rstrip(")")
-                # Nettoyer les éventuels tags entre parenthèses
                 if "(" in nom:
                     nom = nom.split("(")[0].strip()
-                plats.append({
-                    "jour": jour,
-                    "moment": moment,
-                    "nom_recette": nom,
-                    "type_repas": "Plat",
-                    "raison": "",
-                    "notion_id": "",
-                    "url": "",
-                    "notion_url": "",
-                })
+                plats.append(self._make_plat(int(match[0]), match[1], nom))
 
-        # Essai 2 : format "1 - Jour 1 - midi - Nom"
+        # Essai 2 : "Jour X - midi - Nom" sans numéro
         if not plats:
             pattern2 = re.compile(
-                r"(?:\d+\s*[\-\–\)\.]\s*)?Jour\s*(\d+)\s*[\-\–]\s*(midi|soir|déjeuner|dîner)\s*[\-\–]\s*(.+)",
+                r"Jour\s*(\d+)\s*[\-\–]\s*(midi|soir|déjeuner|dîner)\s*[\-\–]\s*(.+)",
                 re.IGNORECASE
             )
-            matches2 = pattern2.findall(raw)
-            for match in matches2:
-                jour = int(match[0])
-                moment = "midi" if match[1].lower() in ("midi", "déjeuner") else "soir"
+            for match in pattern2.findall(raw):
                 nom = match[2].strip().rstrip(")")
                 if "(" in nom:
                     nom = nom.split("(")[0].strip()
-                plats.append({
-                    "jour": jour,
-                    "moment": moment,
-                    "nom_recette": nom,
-                    "type_repas": "Plat",
-                    "raison": "",
-                    "notion_id": "",
-                    "url": "",
-                    "notion_url": "",
-                })
+                plats.append(self._make_plat(int(match[0]), match[1], nom))
 
-        # Essai 3 : fallback JSON
+        # Essai 3 : markdown "**Jour N - moment**" + puces
+        if not plats:
+            lines = raw.split("\n")
+            for i, line in enumerate(lines):
+                header_match = re.search(
+                    r"\*\*\s*Jour\s*(\d+)\s*[\-\–]\s*(midi|soir|déjeuner|dîner)\s*\*\*",
+                    line, re.IGNORECASE
+                )
+                if header_match:
+                    jour = int(header_match.group(1))
+                    moment = "midi" if header_match.group(2).lower() in ("midi", "déjeuner") else "soir"
+                    for j in range(i + 1, min(i + 5, len(lines))):
+                        bullet = lines[j].strip().lstrip("*-•").strip()
+                        if bullet and not bullet.startswith("**") and not bullet.startswith("#"):
+                            if "(" in bullet:
+                                bullet = bullet.split("(")[0].strip()
+                            if bullet:
+                                plats.append(self._make_plat(jour, moment, bullet))
+                            break
+
+        # Essai 4 : JSON
         if not plats:
             try:
                 data = json.loads(raw)
@@ -185,75 +232,42 @@ Choisis exactement 14 recettes (7 jours × 2 repas). Équilibre les repas sur la
                     data = json.loads(match.group())
                     return data.get("plats", [])
 
-        # Essai 4 : format "**Jour N - moment**" avec puces (markdown)
-        if not plats:
-            # Pattern: **Jour N - midi/soir** puis les lignes avec *
-            lines = raw.split("\n")
-            current_jour = 0
-            current_moment = ""
-            for i, line in enumerate(lines):
-                # Chercher les en-têtes **Jour N - moment**
-                header_match = re.search(
-                    r"\*\*\s*Jour\s*(\d+)\s*[\-–]\s*(midi|soir|déjeuner|dîner)\s*\*\*",
-                    line, re.IGNORECASE
-                )
-                if header_match:
-                    current_jour = int(header_match.group(1))
-                    raw_moment = header_match.group(2).lower()
-                    current_moment = "midi" if raw_moment in ("midi", "déjeuner") else "soir"
-                    # Chercher la première puce après l'en-tête
-                    for j in range(i + 1, min(i + 5, len(lines))):
-                        bullet = lines[j].strip().lstrip("*-\u2022").strip()
-                        if bullet and not bullet.startswith("**") and not bullet.startswith("#"):
-                            # Enlever tags entre parenthèses
-                            if "(" in bullet:
-                                bullet = bullet.split("(")[0].strip()
-                            if bullet:
-                                plats.append({
-                                    "jour": current_jour,
-                                    "moment": current_moment,
-                                    "nom_recette": bullet,
-                                    "type_repas": "Plat",
-                                    "raison": "",
-                                    "notion_id": "",
-                                    "url": "",
-                                    "notion_url": "",
-                                })
-                            break
-
-        # Essai 5 : lignes avec "midi" ou "soir" contenant un nom de recette
+        # Essai 5 : lignes libres avec "midi/soir : Nom"
         if not plats:
             for line in raw.split("\n"):
                 line = line.strip().strip("-* ")
-                for moment_keyword in ["midi", "soir", "déjeuner", "dîner"]:
-                    if moment_keyword in line.lower():
-                        # Extraire le nom après "midi :" ou "soir :"
-                        parts = re.split(rf"{moment_keyword}\s*[:\-–]\s*", line, flags=re.IGNORECASE)
+                for kw in ["midi", "soir", "déjeuner", "dîner"]:
+                    if kw in line.lower():
+                        parts = re.split(rf"{kw}\s*[::\-]\s*", line, flags=re.IGNORECASE)
                         if len(parts) > 1:
                             nom = parts[1].split("(")[0].strip()
                             if nom:
-                                # Deviner le jour
-                                jour_match = re.search(r"Jour\s*(\d+)", line, re.IGNORECASE)
-                                jour_num = int(jour_match.group(1)) if jour_match else (len(plats) // 2 + 1)
-                                moment_clean = "midi" if moment_keyword in ("midi", "déjeuner") else "soir"
-                                plats.append({
-                                    "jour": jour_num,
-                                    "moment": moment_clean,
-                                    "nom_recette": nom,
-                                    "type_repas": "Plat",
-                                    "raison": "",
-                                    "notion_id": "",
-                                    "url": "",
-                                    "notion_url": "",
-                                })
+                                jour_m = re.search(r"Jour\s*(\d+)", line, re.IGNORECASE)
+                                jour_n = int(jour_m.group(1)) if jour_m else (len(plats) // 2 + 1)
+                                m = "midi" if kw in ("midi", "déjeuner") else "soir"
+                                plats.append(self._make_plat(jour_n, m, nom))
                                 break
 
         if not plats:
             raise ValueError(
-                f"Impossible de parser la réponse du LLM. Réponse reçue :\n{raw[:600]}"
+                f"Impossible de parser la réponse du LLM.\n{raw[:600]}"
             )
 
-        return plats[:14]  # 14 max
+        return plats[:14]
+
+    def _make_plat(self, jour: int, moment: str, nom: str) -> dict:
+        return {
+            "jour": jour,
+            "moment": "midi" if moment.lower() in ("midi", "déjeuner") else "soir",
+            "nom_recette": nom.strip(),
+            "type_repas": "Plat",
+            "raison": "",
+            "notion_id": "",
+            "url": "",
+            "notion_url": "",
+        }
+
+    # ── Extraction ingrédients ───────────────────────────────────
 
     async def extract_ingredients(
         self,
@@ -261,16 +275,20 @@ Choisis exactement 14 recettes (7 jours × 2 repas). Équilibre les repas sur la
         url: str = "",
         nb_personnes: int = 4,
     ) -> dict[str, Any]:
-        """Extrait les ingrédients d'une recette via le LLM."""
         user_prompt = f"""Recette : {nom_recette}
 URL : {url or "non fournie"}
 Nombre de personnes : {nb_personnes}
 
 Liste les ingrédients nécessaires pour préparer cette recette à {nb_personnes} personnes."""
 
-        raw = await self._chat(
-            SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
-        )
+        if self.provider == "gemini":
+            raw = await self._chat_ingredients_gemini(
+                SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+            )
+        else:
+            raw = await self._chat(
+                SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+            )
 
         raw = raw.strip()
         if raw.startswith("```"):
@@ -282,17 +300,16 @@ Liste les ingrédients nécessaires pour préparer cette recette à {nb_personne
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            import re
-
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
                 return json.loads(match.group())
             return {"ingredients": [], "cuisson_minutes": 30}
 
+    # ── Extraction depuis URL ────────────────────────────────────
+
     async def extract_recipe_from_url(
         self, url: str
     ) -> dict[str, Any]:
-        """Depuis une URL, extrait les infos de la recette pour créer la fiche Notion."""
         user_prompt = f"""Analyse l'URL suivante qui contient une recette de cuisine :
 {url}
 
@@ -301,19 +318,10 @@ Extrais les informations suivantes :
 - type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Boisson, Petit dej)
 - tags : une liste de tags pertinents (parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné)
 
-Retourne UNIQUEMENT ce JSON :
-{{
-  "nom": "...",
-  "type_repas": "...",
-  "tags": ["..."]
-}}"""
+Répond UNIQUEMENT ce JSON :
+{{"nom": "...", "type_repas": "...", "tags": ["..."]}}"""
 
-        raw = await self._chat(
-            "",
-            user_prompt,
-            temperature=0.1,
-        )
-
+        raw = await self._chat("", user_prompt, temperature=0.1)
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1]
@@ -324,8 +332,6 @@ Retourne UNIQUEMENT ce JSON :
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            import re
-
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
                 return json.loads(match.group())

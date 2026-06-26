@@ -5,9 +5,17 @@ services:
     ports:
       - "${APP_PORT:-8020}:8000"
     environment:
+      # Notion
       NOTION_TOKEN: "${NOTION_TOKEN}"
+      # Provider LLM : "ollama" (défaut) ou "gemini"
+      LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
+      # Ollama (utilisé si LLM_PROVIDER=ollama)
       OLLAMA_URL: "http://ollama:11434"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5:3b}"
+      # Gemini (utilisé si LLM_PROVIDER=gemini)
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.0-flash-001}"
+      # App
       APP_TITLE: "Menu Planner Tristabeau"
       SECRET_KEY: "${SECRET_KEY:-change-me}"
     volumes:
