@@ -6,34 +6,24 @@ from typing import Any
 
 from app.config import settings
 
-SYSTEM_PROMPT_PLANNING = """Tu es un chef cuisinier spécialisé dans la planification de repas équilibrés pour une famille française.
+SYSTEM_PROMPT_PLANNING = """Tu es un chef cuisinier. Tu planifies des repas équilibrés.
 
-Tu travailles avec une base de données de recettes Notion. Pour chaque recette, tu as : le nom, le type de repas (Plat, Dessert, Entrée, etc.), des tags (Viande, Poisson, Légumes, etc.), et parfois une URL.
+RÈGLES :
+- Choisis EXACTEMENT 8 recettes de la liste ci-dessous (4 jours × midi + soir).
+- Équilibre viande/poisson/végé sur la semaine.
+- Ne prends PAS de recettes listées comme "exclues".
+- Tiens compte de la saison et de la température.
 
-RÈGLES STRICTES :
-1. Choisis EXACTEMENT 8 recettes (4 jours × 2 repas : midi et soir).
-2. Chaque jour doit avoir un midi et un soir cohérents (pas deux fois le même plat).
-3. Équilibre sur les 4 jours : varier viande/poisson/végé, pas de répétition.
-4. Privilégie les recettes étiquetées "Plat" pour les plats principaux.
-5. Tiens compte de la saison et de la température donnée.
-6. Ne JAMAIS sélectionner une recette de la liste "exclues".
-7. Si des ingrédients à forcer sont donnés, privilégie les recettes qui les contiennent.
+Répond UNIQUEMENT avec une liste numérotée comme ceci, SANS texte avant ni après :
 
-Retourne UNIQUEMENT un JSON valide avec cette structure exacte, sans texte autour :
-{
-  "plats": [
-    {
-      "jour": 1,
-      "moment": "midi",
-      "nom_recette": "...",
-      "type_repas": "Plat",
-      "raison": "..."
-    },
-    ...
-  ]
-}
-
-Pour chaque recette, ajoute une "raison" très courte (10-15 mots max) expliquant pourquoi tu l'as choisie."""
+1 - Jour 1 - midi - Nom exact de la recette
+2 - Jour 1 - soir - Nom exact de la recette
+3 - Jour 2 - midi - Nom exact de la recette
+4 - Jour 2 - soir - Nom exact de la recette
+5 - Jour 3 - midi - Nom exact de la recette
+6 - Jour 3 - soir - Nom exact de la recette
+7 - Jour 4 - midi - Nom exact de la recette
+8 - Jour 4 - soir - Nom exact de la recette"""
 
 SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), tu dois lister les ingrédients nécessaires.
 
@@ -121,26 +111,106 @@ Choisis exactement 8 recettes (4 jours × 2 repas). Équilibre les repas sur la 
 
         raw = await self._chat(SYSTEM_PROMPT_PLANNING, user_prompt, temperature=0.3)
 
-        # Nettoyage et parsing du JSON
+        # Parsing de la réponse : liste numérotée ou JSON
         raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw.rsplit("```", 1)[0]
-        raw = raw.strip()
+        import re
 
-        try:
-            data = json.loads(raw)
-            return data.get("plats", [])
-        except json.JSONDecodeError:
-            # Fallback : tenter d'extraire un objet JSON
-            import re
+        plats = []
 
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
+        # Essai 1 : détecter un pattern "N - Jour X - midi/soir - NomRecette"
+        pattern = re.compile(
+            r"(?:^|\n)\s*(?:\d+[\s\)\.]+)?(?:[\-\*]?\s*)?Jour\s*(\d+)\s*[\-\–]\s*(midi|soir|déjeuner|dîner)\s*[\-\–]\s*(.+?)(?=\n\s*(?:\d+[\s\)\.]+)?(?:[\-\*]?\s*)?Jour|\n*$)",
+            re.IGNORECASE | re.DOTALL
+        )
+        matches = pattern.findall(raw)
+
+        if matches:
+            for match in matches:
+                jour = int(match[0])
+                moment = "midi" if match[1].lower() in ("midi", "déjeuner") else "soir"
+                nom = match[2].strip().rstrip(")")
+                # Nettoyer les éventuels tags entre parenthèses
+                if "(" in nom:
+                    nom = nom.split("(")[0].strip()
+                plats.append({
+                    "jour": jour,
+                    "moment": moment,
+                    "nom_recette": nom,
+                    "type_repas": "Plat",
+                    "raison": "",
+                    "notion_id": "",
+                    "url": "",
+                    "notion_url": "",
+                })
+
+        # Essai 2 : format "1 - Jour 1 - midi - Nom"
+        if not plats:
+            pattern2 = re.compile(
+                r"(?:\d+\s*[\-\–\)\.]\s*)?Jour\s*(\d+)\s*[\-\–]\s*(midi|soir|déjeuner|dîner)\s*[\-\–]\s*(.+)",
+                re.IGNORECASE
+            )
+            matches2 = pattern2.findall(raw)
+            for match in matches2:
+                jour = int(match[0])
+                moment = "midi" if match[1].lower() in ("midi", "déjeuner") else "soir"
+                nom = match[2].strip().rstrip(")")
+                if "(" in nom:
+                    nom = nom.split("(")[0].strip()
+                plats.append({
+                    "jour": jour,
+                    "moment": moment,
+                    "nom_recette": nom,
+                    "type_repas": "Plat",
+                    "raison": "",
+                    "notion_id": "",
+                    "url": "",
+                    "notion_url": "",
+                })
+
+        # Essai 3 : fallback JSON
+        if not plats:
+            try:
+                data = json.loads(raw)
                 return data.get("plats", [])
-            raise ValueError(f"Impossible de parser la réponse du LLM:\n{raw[:500]}")
+            except json.JSONDecodeError:
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if match:
+                    data = json.loads(match.group())
+                    return data.get("plats", [])
+
+        # Essai 4 : lignes avec "midi" ou "soir" contenant un nom de recette
+        if not plats:
+            for line in raw.split("\n"):
+                line = line.strip().strip("-* ")
+                for moment_keyword in ["midi", "soir", "déjeuner", "dîner"]:
+                    if moment_keyword in line.lower():
+                        # Extraire le nom après "midi :" ou "soir :"
+                        parts = re.split(rf"{moment_keyword}\s*[:\-–]\s*", line, flags=re.IGNORECASE)
+                        if len(parts) > 1:
+                            nom = parts[1].split("(")[0].strip()
+                            if nom:
+                                # Deviner le jour
+                                jour_match = re.search(r"Jour\s*(\d+)", line, re.IGNORECASE)
+                                jour_num = int(jour_match.group(1)) if jour_match else (len(plats) // 2 + 1)
+                                moment_clean = "midi" if moment_keyword in ("midi", "déjeuner") else "soir"
+                                plats.append({
+                                    "jour": jour_num,
+                                    "moment": moment_clean,
+                                    "nom_recette": nom,
+                                    "type_repas": "Plat",
+                                    "raison": "",
+                                    "notion_id": "",
+                                    "url": "",
+                                    "notion_url": "",
+                                })
+                                break
+
+        if not plats:
+            raise ValueError(
+                f"Impossible de parser la réponse du LLM. Réponse reçue :\n{raw[:600]}"
+            )
+
+        return plats[:8]  # 8 max
 
     async def extract_ingredients(
         self,
