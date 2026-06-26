@@ -2,10 +2,13 @@
 
 import httpx
 import json
+import logging
 import re
 from typing import Any
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_PLANNING = """Tu es un chef cuisinier. Tu planifies des repas équilibrés.
 
@@ -70,7 +73,11 @@ class LLMClient:
         self, system: str, user: str, temperature: float = 0.3
     ) -> str:
         if self.provider == "gemini":
-            return await self._chat_gemini(system, user, temperature)
+            try:
+                return await self._chat_gemini(system, user, temperature)
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini a échoué ({e}). Fallback vers Ollama...")
+                return await self._chat_ollama(system, user, temperature)
         else:
             return await self._chat_ollama(system, user, temperature)
 
@@ -282,9 +289,15 @@ Nombre de personnes : {nb_personnes}
 Liste les ingrédients nécessaires pour préparer cette recette à {nb_personnes} personnes."""
 
         if self.provider == "gemini":
-            raw = await self._chat_ingredients_gemini(
-                SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
-            )
+            try:
+                raw = await self._chat_ingredients_gemini(
+                    SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini ingrédients échoué ({e}). Fallback Ollama...")
+                raw = await self._chat_ollama(
+                    SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                )
         else:
             raw = await self._chat(
                 SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
