@@ -220,15 +220,19 @@ async def generer(
         exclues = await db.get_recent_recipe_names(weeks=4)
         logger.info(f"{len(recettes)} recettes dispo, {len(exclues)} exclues")
 
-        # Filtrer les exclues et sous-échantillonner pour accélérer le LLM
+        # Filtrer les exclues
         import random
         random.seed()
         recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
-        if len(recettes_filtered) > 30:
+        # Gemini peut tout voir (1M tokens), Ollama limité à 30
+        if settings.llm_provider == "gemini":
+            recettes_sample = recettes_filtered
+            logger.info(f"Gemini : envoi de toutes les {len(recettes_sample)} recettes dispo")
+        elif len(recettes_filtered) > 30:
             recettes_sample = random.sample(recettes_filtered, 30)
+            logger.info(f"Ollama : échantillon de {len(recettes_sample)} recettes (sur {len(recettes_filtered)})")
         else:
             recettes_sample = recettes_filtered
-        logger.info(f"Envoi de {len(recettes_sample)} recettes au LLM (sur {len(recettes_filtered)} dispo après filtrage)")
 
         # 3. Générer le planning via Ollama
         plats = await llm.generate_planning(
