@@ -199,53 +199,96 @@ input:focus, select:focus {
 .alert-error { background: #fde8e8; color: #c0392b; border: 1px solid #f5c6c6; }
 .alert-success { background: #e8f8e8; color: #27ae60; border: 1px solid #c6ecc6; }
 
-/* ── Planning Grid ───────────────────────────────────── */
-.planning-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
+/* ── Planning Grid 7 jours ─────────────────────────── */
+.planning-scroll {
+    overflow-x: auto;
     margin-bottom: 24px;
+    -webkit-overflow-scrolling: touch;
 }
-.jour-card { padding: 16px; }
+.planning-grid-7 {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 10px;
+    min-width: 700px;
+}
+.jour-card { padding: 12px; }
 .jour-title {
-    font-size: 1.25rem;
+    font-size: 1rem;
     border-bottom: 2px solid var(--primary);
-    padding-bottom: 8px;
-    margin-bottom: 12px;
+    padding-bottom: 6px;
+    margin-bottom: 10px;
     color: var(--primary-dark);
 }
 .repas-block {
-    padding: 10px;
+    padding: 8px;
     border-radius: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     border-left: 3px solid var(--border);
+    position: relative;
 }
 .repas-block.midi { border-left-color: var(--primary); }
 .repas-block.soir { border-left-color: var(--accent); }
+.repas-check-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+.repas-check {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
 .moment-tag {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
     color: var(--text-light);
 }
 .recipe-name {
     font-weight: 600;
-    margin: 4px 0;
-}
-.raison {
-    display: block;
-    color: var(--text-light);
-    font-style: italic;
+    margin: 3px 0;
     font-size: 0.85rem;
 }
-.recipe-link {
-    display: inline-block;
-    font-size: 0.85rem;
-    color: var(--primary);
-    text-decoration: none;
+.repas-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
     margin-top: 4px;
+    flex-wrap: wrap;
 }
-.recipe-link:hover { text-decoration: underline; }
+.btn-change {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: var(--text-light);
+    transition: all 0.2s;
+}
+.btn-change:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: #fef3e2;
+}
+
+/* ── Bulk action bar ───────────────────────────────── */
+.bulk-bar {
+    position: sticky;
+    bottom: 0;
+    background: var(--surface);
+    border-top: 2px solid var(--primary);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+    z-index: 50;
+    margin-bottom: 20px;
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+}
 
 /* ── Shopping List ───────────────────────────────────── */
 .shopping-list h2 { margin-bottom: 16px; }

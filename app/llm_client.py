@@ -9,10 +9,11 @@ from app.config import settings
 SYSTEM_PROMPT_PLANNING = """Tu es un chef cuisinier. Tu planifies des repas équilibrés.
 
 RÈGLES :
-- Choisis EXACTEMENT 8 recettes de la liste ci-dessous (4 jours × midi + soir).
+- Choisis EXACTEMENT 14 recettes de la liste ci-dessous (7 jours × midi + soir).
 - Équilibre viande/poisson/végé sur la semaine.
 - Ne prends PAS de recettes listées comme "exclues".
 - Tiens compte de la saison et de la température.
+- Varie les plats : pas deux fois la même recette.
 
 Répond UNIQUEMENT avec une liste numérotée comme ceci, SANS texte avant ni après :
 
@@ -23,7 +24,13 @@ Répond UNIQUEMENT avec une liste numérotée comme ceci, SANS texte avant ni ap
 5 - Jour 3 - midi - Nom exact de la recette
 6 - Jour 3 - soir - Nom exact de la recette
 7 - Jour 4 - midi - Nom exact de la recette
-8 - Jour 4 - soir - Nom exact de la recette"""
+8 - Jour 4 - soir - Nom exact de la recette
+9 - Jour 5 - midi - Nom exact de la recette
+10 - Jour 5 - soir - Nom exact de la recette
+11 - Jour 6 - midi - Nom exact de la recette
+12 - Jour 6 - soir - Nom exact de la recette
+13 - Jour 7 - midi - Nom exact de la recette
+14 - Jour 7 - soir - Nom exact de la recette"""
 
 SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), tu dois lister les ingrédients nécessaires.
 
@@ -95,19 +102,19 @@ class LLMClient:
             indent=2,
         )
 
-        user_prompt = f"""Génère un planning de 4 jours pour une famille.
+        user_prompt = f"""Génère un planning de 7 jours pour une famille.
 
 CONTEXTE :
 - Saison : {saison}
 - Température extérieure : {temperature}
 - Nombre de personnes : {nb_personnes}
-- In壓édients à forcer (restes) : {ingredients_force or "aucun"}
+- Ingrédients à forcer (restes) : {ingredients_force or "aucun"}
 - Recettes déjà utilisées récemment (à exclure) : {', '.join(recettes_exclues) or 'aucune'}
 
 BASE DE RECETTES DISPONIBLE :
 {recettes_str}
 
-Choisis exactement 8 recettes (4 jours × 2 repas). Équilibre les repas sur la semaine."""
+Choisis exactement 14 recettes (7 jours × 2 repas). Équilibre les repas sur la semaine."""
 
         raw = await self._chat(SYSTEM_PROMPT_PLANNING, user_prompt, temperature=0.3)
 
@@ -246,7 +253,7 @@ Choisis exactement 8 recettes (4 jours × 2 repas). Équilibre les repas sur la 
                 f"Impossible de parser la réponse du LLM. Réponse reçue :\n{raw[:600]}"
             )
 
-        return plats[:8]  # 8 max
+        return plats[:14]  # 14 max
 
     async def extract_ingredients(
         self,

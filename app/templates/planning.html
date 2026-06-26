@@ -2,38 +2,46 @@
 {% block title %}Planning semaine{% endblock %}
 {% block content %}
 <div class="hero">
-    <h1>📅 Planning généré</h1>
+    <h1>📅 Planning semaine</h1>
     <p>Semaine du <strong>{{ planning.week_start }}</strong>
        — {{ planning.saison }} — {{ planning.nb_personnes }} personne(s)</p>
     {% if planning.ingredients_force and planning.ingredients_force != "" %}
-    <p><small>🥫 In壓édients forcés : {{ planning.ingredients_force }}</small></p>
+    <p><small>🥫 Ingrédients forcés : {{ planning.ingredients_force }}</small></p>
     {% endif %}
 </div>
 
-<div class="planning-grid">
-    {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi'] %}
-    {% for jour in range(1, 5) %}
-    <div class="card jour-card">
-        <h2 class="jour-title">{{ jours[jour-1] }}</h2>
-        {% for plat in plats if plat.jour == jour %}
-        <div class="repas-block {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
-            <span class="moment-tag">{{ plat.moment|capitalize }}</span>
-            <p class="recipe-name">{{ plat.nom_recette }}</p>
-            {% if plat.raison %}
-            <small class="raison">{{ plat.raison }}</small>
-            {% endif %}
-            <div class="repas-actions">
-                {% if plat.notion_url %}
-                <a href="{{ plat.notion_url }}" target="_blank" class="recipe-link">📄 Notion</a>
-                {% elif plat.url %}
-                <a href="{{ plat.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
-                {% endif %}
-                <button class="btn-change" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">↻ Changer</button>
+<div class="planning-scroll">
+    <div class="planning-grid-7">
+        {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
+        {% for jour in range(1, 8) %}
+        <div class="card jour-card">
+            <h2 class="jour-title">{{ jours[jour-1] }}</h2>
+            {% for plat in plats if plat.jour == jour %}
+            <div class="repas-block {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
+                <label class="repas-check-label">
+                    <input type="checkbox" class="repas-check" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
+                    <span class="moment-tag">{{ plat.moment|capitalize }}</span>
+                </label>
+                <p class="recipe-name">{{ plat.nom_recette }}</p>
+                <div class="repas-actions">
+                    {% if plat.notion_url %}
+                    <a href="{{ plat.notion_url }}" target="_blank" class="recipe-link">📄 Notion</a>
+                    {% elif plat.url %}
+                    <a href="{{ plat.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
+                    {% endif %}
+                    <button class="btn-change" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">↻</button>
+                </div>
             </div>
+            {% endfor %}
         </div>
         {% endfor %}
     </div>
-    {% endfor %}
+</div>
+
+<div class="bulk-bar" id="bulk-bar" style="display:none;">
+    <span id="bulk-count">0 sélectionné(s)</span>
+    <button class="btn btn-primary btn-small" id="btn-bulk-change">↻ Changer en masse</button>
+    <button class="btn btn-small" id="btn-bulk-clear">Décocher</button>
 </div>
 
 <!-- Modal de sélection -->
@@ -41,7 +49,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
         <div class="modal-header">
-            <h3>↻ Changer de recette</h3>
+            <h3>↻ Changer les recettes</h3>
             <button class="modal-close" onclick="closeModal()">✕</button>
         </div>
         <div class="modal-body">
@@ -50,7 +58,7 @@
                 <input type="text" id="filter-recipes" placeholder="Filtrer les recettes..." class="input-wide">
             </div>
             <div id="alternatives-list" class="alternatives-list">
-                <p class="loading-text">Chargement des alternatives...</p>
+                <p class="loading-text">Chargement...</p>
             </div>
         </div>
         <div class="modal-footer">
@@ -92,30 +100,71 @@
 </div>
 
 <script>
-let currentJour = null;
-let currentMoment = null;
 const planningId = {{ planning.id }};
+let currentBulk = [];
+const joursSemaine = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
+// ── Gestion multi-sélection ──────────────────────────
+document.querySelectorAll('.repas-check').forEach(cb => {
+    cb.addEventListener('change', updateBulkBar);
+});
+
+function updateBulkBar() {
+    currentBulk = [];
+    document.querySelectorAll('.repas-check:checked').forEach(cb => {
+        currentBulk.push({ jour: parseInt(cb.dataset.jour), moment: cb.dataset.moment });
+    });
+    const bar = document.getElementById('bulk-bar');
+    const count = document.getElementById('bulk-count');
+    if (currentBulk.length > 0) {
+        bar.style.display = 'flex';
+        count.textContent = currentBulk.length + ' sélectionné(s)';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+document.getElementById('btn-bulk-clear').addEventListener('click', () => {
+    document.querySelectorAll('.repas-check:checked').forEach(cb => cb.checked = false);
+    updateBulkBar();
+});
+
+document.getElementById('btn-bulk-change').addEventListener('click', () => {
+    if (currentBulk.length === 0) return;
+    const context = currentBulk.map(b =>
+        `${joursSemaine[b.jour-1]} ${b.moment === 'midi' ? 'midi' : 'soir'}`
+    ).join(', ');
+    document.getElementById('modal-context').textContent =
+        `Changer ${currentBulk.length} repas : ${context}`;
+    document.getElementById('change-modal').style.display = 'flex';
+    document.getElementById('alternatives-list').innerHTML = '<p class="loading-text">⏳ Chargement...</p>';
+    loadAlternatives();
+});
+
+// ── Changement individuel ────────────────────────────
 document.querySelectorAll('.btn-change').forEach(btn => {
-    btn.addEventListener('click', async function() {
-        currentJour = parseInt(this.dataset.jour);
-        currentMoment = this.dataset.moment;
-        const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+    btn.addEventListener('click', function() {
+        const jour = parseInt(this.dataset.jour);
+        const moment = this.dataset.moment;
+        currentBulk = [{ jour, moment }];
         document.getElementById('modal-context').textContent =
-            `Choisis une alternative pour ${jours[currentJour-1]} ${currentMoment === 'midi' ? 'midi' : 'soir'}.`;
+            `Changer ${joursSemaine[jour-1]} ${moment === 'midi' ? 'midi' : 'soir'}.`;
         document.getElementById('change-modal').style.display = 'flex';
         document.getElementById('alternatives-list').innerHTML = '<p class="loading-text">⏳ Chargement...</p>';
-        document.getElementById('filter-recipes').value = '';
-
-        try {
-            const resp = await fetch(`/api/alternatives/${planningId}`);
-            const data = await resp.json();
-            renderAlternatives(data.alternatives || []);
-        } catch(e) {
-            document.getElementById('alternatives-list').innerHTML = '<p class="error">Erreur de chargement.</p>';
-        }
+        loadAlternatives();
     });
 });
+
+// ── Charger les alternatives ─────────────────────────
+async function loadAlternatives() {
+    try {
+        const resp = await fetch(`/api/alternatives/${planningId}`);
+        const data = await resp.json();
+        renderAlternatives(data.alternatives || []);
+    } catch(e) {
+        document.getElementById('alternatives-list').innerHTML = '<p class="error">Erreur de chargement.</p>';
+    }
+}
 
 function renderAlternatives(alternatives) {
     const container = document.getElementById('alternatives-list');
@@ -134,12 +183,10 @@ function renderAlternatives(alternatives) {
 
     document.querySelectorAll('.select-alt').forEach(btn => {
         btn.addEventListener('click', async function() {
-            const nom = this.dataset.nom;
-            await replaceMeal(nom);
+            await replaceMeals(this.dataset.nom);
         });
     });
 
-    // Filtre en temps réel
     document.getElementById('filter-recipes').addEventListener('input', function() {
         const q = this.value.toLowerCase();
         document.querySelectorAll('.alt-item').forEach(item => {
@@ -148,31 +195,59 @@ function renderAlternatives(alternatives) {
     });
 }
 
-async function replaceMeal(nouvelleRecette) {
+// ── Remplacer (un ou plusieurs) ──────────────────────
+async function replaceMeals(nouvelleRecette) {
     document.getElementById('alternatives-list').innerHTML = '<p class="loading-text">⏳ Mise à jour en cours...</p>';
 
     try {
-        const resp = await fetch(`/api/update-meal/${planningId}`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                jour: currentJour,
-                moment: currentMoment,
-                nouvelle_recette: nouvelleRecette
-            })
-        });
-        const data = await resp.json();
-
-        if (data.success) {
-            // Mettre à jour le nom de la recette dans l'UI
-            document.querySelectorAll(`.repas-block[data-jour="${currentJour}"][data-moment="${currentMoment}"] .recipe-name`).forEach(el => {
-                el.textContent = nouvelleRecette;
+        // On remplace chaque repas sélectionné un par un
+        let success = true;
+        for (const slot of currentBulk) {
+            const resp = await fetch(`/api/update-meal/${planningId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    jour: slot.jour,
+                    moment: slot.moment,
+                    nouvelle_recette: nouvelleRecette
+                })
             });
-            // Mettre à jour la liste de courses
-            updateShoppingList(data.liste_courses || []);
+            const data = await resp.json();
+            if (!data.success) {
+                success = false;
+                alert('Erreur : ' + (data.error || 'Inconnue'));
+                break;
+            }
+        }
+
+        if (success) {
+            // Mettre à jour l'UI
+            for (const slot of currentBulk) {
+                document.querySelectorAll(`.repas-block[data-jour="${slot.jour}"][data-moment="${slot.moment}"] .recipe-name`).forEach(el => {
+                    el.textContent = nouvelleRecette;
+                });
+            }
+            // Recharger la liste de courses
+            const resp = await fetch(`/api/alternatives/${planningId}`);
+            const data = await resp.json();
+            // Récupérer le dernier update-meal qui contient la liste de courses à jour
+            const lastUpdate = await fetch(`/api/update-meal/${planningId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    jour: currentBulk[0].jour,
+                    moment: currentBulk[0].moment,
+                    nouvelle_recette: nouvelleRecette
+                })
+            });
+            const lastData = await lastUpdate.json();
+            if (lastData.liste_courses) {
+                updateShoppingList(lastData.liste_courses);
+            }
             closeModal();
+            document.querySelectorAll('.repas-check:checked').forEach(cb => cb.checked = false);
+            updateBulkBar();
         } else {
-            alert('Erreur : ' + (data.error || 'Inconnue'));
             closeModal();
         }
     } catch(e) {
@@ -183,7 +258,7 @@ async function replaceMeal(nouvelleRecette) {
 
 function updateShoppingList(items) {
     const tbody = document.getElementById('shopping-body');
-    if (!items.length) {
+    if (!items || !items.length) {
         tbody.innerHTML = '<tr><td colspan="4">Aucun ingrédient.</td></tr>';
         return;
     }
@@ -199,11 +274,8 @@ function updateShoppingList(items) {
 
 function closeModal() {
     document.getElementById('change-modal').style.display = 'none';
-    currentJour = null;
-    currentMoment = null;
 }
 
-// Fermer au clic sur le fond
 document.querySelector('.modal-backdrop')?.addEventListener('click', closeModal);
 </script>
 {% endblock %}

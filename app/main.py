@@ -224,8 +224,8 @@ async def generer(
         import random
         random.seed()
         recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
-        if len(recettes_filtered) > 15:
-            recettes_sample = random.sample(recettes_filtered, 15)
+        if len(recettes_filtered) > 30:
+            recettes_sample = random.sample(recettes_filtered, 30)
         else:
             recettes_sample = recettes_filtered
         logger.info(f"Envoi de {len(recettes_sample)} recettes au LLM (sur {len(recettes_filtered)} dispo après filtrage)")
