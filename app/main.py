@@ -216,9 +216,19 @@ async def generer(
         exclues = await db.get_recent_recipe_names(weeks=4)
         logger.info(f"{len(recettes)} recettes dispo, {len(exclues)} exclues")
 
+        # Filtrer les exclues et sous-échantillonner pour accélérer le LLM
+        import random
+        random.seed()
+        recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
+        if len(recettes_filtered) > 30:
+            recettes_sample = random.sample(recettes_filtered, 30)
+        else:
+            recettes_sample = recettes_filtered
+        logger.info(f"Envoi de {len(recettes_sample)} recettes au LLM (sur {len(recettes_filtered)} dispo après filtrage)")
+
         # 3. Générer le planning via Ollama
         plats = await llm.generate_planning(
-            recettes=recettes,
+            recettes=recettes_sample,
             saison=saison,
             temperature=temperature,
             nb_personnes=nb_personnes,

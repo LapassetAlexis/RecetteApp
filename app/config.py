@@ -19,7 +19,7 @@ class Settings:
         default_factory=lambda: os.getenv("OLLAMA_URL", "http://ollama:11434")
     )
     ollama_model: str = field(
-        default_factory=lambda: os.getenv("OLLAMA_MODEL", "mistral")
+        default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
     )
 
     # App
