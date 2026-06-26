@@ -91,6 +91,7 @@ class NotionClient:
             "id": page["id"],
             "nom": nom,
             "url": url,
+            "notion_url": page.get("url", ""),
             "repas": repas,
             "tags": tags,
             "note": note,

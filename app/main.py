@@ -247,6 +247,7 @@ async def generer(
                 if r["nom"].lower().strip() == plat["nom_recette"].lower().strip():
                     plat["notion_id"] = r["id"]
                     plat["url"] = r.get("url", "")
+                    plat["notion_url"] = r.get("notion_url", "")
                     break
 
             # Extraire les ingrédients

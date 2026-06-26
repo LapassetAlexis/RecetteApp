@@ -22,8 +22,10 @@
             {% if plat.raison %}
             <small class="raison">{{ plat.raison }}</small>
             {% endif %}
-            {% if plat.url %}
-            <a href="{{ plat.url }}" target="_blank" class="recipe-link">🔗 Voir la recette</a>
+            {% if plat.notion_url %}
+            <a href="{{ plat.notion_url }}" target="_blank" class="recipe-link">📄 Voir sur Notion</a>
+            {% elif plat.url %}
+            <a href="{{ plat.url }}" target="_blank" class="recipe-link">🔗 Lien original</a>
             {% endif %}
         </div>
         {% endfor %}
