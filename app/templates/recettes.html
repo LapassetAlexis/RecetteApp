@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Recettes{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>📖 Livre de recettes</h1>
+    <p>{{ total }} recettes dans la base Notion</p>
+</div>
+
+<div class="stats-bar">
+    {% for type, count in par_type %}
+    <span class="stat-chip">{{ type }} : {{ count }}</span>
+    {% endfor %}
+</div>
+
+<div class="recettes-grid">
+    {% for recette in recettes %}
+    <div class="card recipe-card">
+        <h3>{{ recette.nom }}</h3>
+        <div class="recipe-meta">
+            {% if recette.repas %}
+            <span class="chip chip-repas">{{ recette.repas }}</span>
+            {% endif %}
+            {% if recette.etat %}
+            <span class="chip chip-etat">{{ recette.etat }}</span>
+            {% endif %}
+            {% if recette.note %}
+            <span class="chip chip-note">{{ recette.note }}</span>
+            {% endif %}
+        </div>
+        {% if recette.tags %}
+        <div class="recipe-tags">
+            {% for tag in recette.tags %}
+            <span class="tag">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if recette.url %}
+        <a href="{{ recette.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

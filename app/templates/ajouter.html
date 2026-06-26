@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Ajouter une recette{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>➕ Ajouter une recette</h1>
+    <p>Colle une URL de recette, ou saisis les infos manuellement.</p>
+</div>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="POST" action="/ajouter-recette" class="card form-ajouter">
+    <div class="form-group">
+        <label for="url">🔗 URL de la recette (lien ou vidéo)</label>
+        <input type="url" id="url" name="url" placeholder="https://..." class="input-wide">
+        <small>Le LLM analysera le lien pour extraire le nom et les infos automatiquement.</small>
+    </div>
+
+    <hr class="separator">
+
+    <div class="form-group">
+        <label for="nom">📝 Nom de la recette</label>
+        <input type="text" id="nom" name="nom" placeholder="Tarte aux pommes..." class="input-wide">
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="repas">🍽️ Type de repas</label>
+            <select id="repas" name="repas">
+                <option value="">— Auto —</option>
+                {% for opt in repas_options %}
+                <option value="{{ opt }}">{{ opt }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>🏷️ Tags</label>
+        <div class="tags-grid">
+            {% for tag in tag_options %}
+            <label class="tag-checkbox">
+                <input type="checkbox" name="tags" value="{{ tag }}">
+                <span>{{ tag }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-lg">
+        💾 Ajouter la recette
+    </button>
+</form>
+{% endblock %}

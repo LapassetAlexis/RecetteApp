@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Générer un planning{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>📅 Planning de la semaine</h1>
+    <p>Génère 4 jours de repas équilibrés pour toute la famille.</p>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="POST" action="/generer" class="card form-planning">
+    <div class="form-row">
+        <div class="form-group">
+            <label for="week_start">Semaine du</label>
+            <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
+        </div>
+        <div class="form-group">
+            <label for="nb_personnes">👨‍👩‍👧‍👧 Nombre de personnes</label>
+            <input type="number" id="nb_personnes" name="nb_personnes" value="{{ nb_personnes }}" min="1" max="20" required>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="saison">🌤️ Saison</label>
+            <select id="saison" name="saison">
+                <option value="Printemps" {% if saison_default == "Printemps" %}selected{% endif %}>Printemps</option>
+                <option value="Été" {% if saison_default == "Été" %}selected{% endif %}>Été</option>
+                <option value="Automne" {% if saison_default == "Automne" %}selected{% endif %}>Automne</option>
+                <option value="Hiver" {% if saison_default == "Hiver" %}selected{% endif %}>Hiver</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="temperature">🌡️ Température extérieure</label>
+            <select id="temperature" name="temperature">
+                <option value="Froid (< 10°C)">Froid (&lt; 10°C)</option>
+                <option value="Frais (10-18°C)" selected>Frais (10-18°C)</option>
+                <option value="Doux (18-25°C)">Doux (18-25°C)</option>
+                <option value="Chaud (> 25°C)">Chaud (&gt; 25°C)</option>
+                <option value="Canicule (> 35°C)">Canicule (&gt; 35°C)</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="ingredients_force">🥫 Ingrédients à écouler (restes)</label>
+        <input type="text" id="ingredients_force" name="ingredients_force" placeholder="Ex: courgettes, œufs, poulet" class="input-wide">
+        <small>Séparés par des virgules — laisse vide si rien à forcer.</small>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-lg">
+        🔄 Générer 4 jours de repas
+    </button>
+</form>
+
+{% if planning_id %}
+<div class="card text-center">
+    <p>📋 Dernier planning généré :</p>
+    <a href="/planning/{{ planning_id }}" class="btn btn-secondary">Voir le dernier planning →</a>
+</div>
+{% endif %}
+{% endblock %}

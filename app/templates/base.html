@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Menu Planner{% endblock %} — Tristabeau</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="/" class="nav-brand">🍽️ Menu Planner</a>
+            <div class="nav-links">
+                <a href="/">Générer</a>
+                <a href="/recettes">Recettes</a>
+                <a href="/ajouter">Ajouter</a>
+                <a href="/historique">Historique</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>Menu Planner — hébergé sur le homelab Tristabeau ⚡</p>
+    </footer>
+</body>
+</html>

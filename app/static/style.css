@@ -1,0 +1,359 @@
+/* ── Base ─────────────────────────────────────────────── */
+:root {
+    --bg: #f5f0eb;
+    --surface: #ffffff;
+    --text: #2d2a24;
+    --text-light: #6b6560;
+    --primary: #e67e22;
+    --primary-dark: #d35400;
+    --secondary: #27ae60;
+    --accent: #8e44ad;
+    --border: #e0dbd5;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --radius: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* ── Navigation ──────────────────────────────────────── */
+.nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+}
+.nav-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+}
+.nav-brand {
+    font-size: 1.3rem;
+    font-weight: 700;
+    text-decoration: none;
+    color: var(--primary-dark);
+}
+.nav-links { display: flex; gap: 8px; }
+.nav-links a {
+    text-decoration: none;
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+.nav-links a:hover { background: var(--bg); }
+
+/* ── Layout ──────────────────────────────────────────── */
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px;
+}
+.hero {
+    text-align: center;
+    padding: 30px 0;
+}
+.hero h1 { font-size: 2rem; margin-bottom: 8px; }
+.hero p { color: var(--text-light); font-size: 1.05rem; }
+
+/* ── Cartes ──────────────────────────────────────────── */
+.card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+}
+.text-center { text-align: center; }
+
+/* ── Formulaire ──────────────────────────────────────── */
+.form-group {
+    margin-bottom: 16px;
+}
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 0.95rem;
+}
+.form-group small {
+    display: block;
+    color: var(--text-light);
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+.form-row {
+    display: flex;
+    gap: 20px;
+}
+.form-row .form-group { flex: 1; }
+.separator {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 20px 0;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="number"],
+input[type="date"],
+select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    background: var(--surface);
+    transition: border-color 0.2s;
+}
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+.input-wide { width: 100%; }
+
+/* ── Tags / Checkboxes ──────────────────────────────── */
+.tags-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.tag-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+.tag-checkbox:hover { border-color: var(--primary); }
+.tag-checkbox input:checked + span {
+    background: var(--primary);
+    color: white;
+    border-radius: 20px;
+}
+.tag-checkbox input { display: none; }
+.tag-checkbox span {
+    padding: 2px 8px;
+    border-radius: 20px;
+}
+
+/* ── Boutons ─────────────────────────────────────────── */
+.btn {
+    display: inline-block;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-secondary {
+    background: var(--secondary);
+    color: white;
+}
+.btn-secondary:hover {
+    background: #219a52;
+}
+.btn-lg {
+    padding: 14px 28px;
+    font-size: 1.1rem;
+    width: 100%;
+}
+.btn-small {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+/* ── Alerts ──────────────────────────────────────────── */
+.alert {
+    padding: 14px 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-weight: 500;
+}
+.alert-error { background: #fde8e8; color: #c0392b; border: 1px solid #f5c6c6; }
+.alert-success { background: #e8f8e8; color: #27ae60; border: 1px solid #c6ecc6; }
+
+/* ── Planning Grid ───────────────────────────────────── */
+.planning-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.jour-card { padding: 16px; }
+.jour-title {
+    font-size: 1.25rem;
+    border-bottom: 2px solid var(--primary);
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+    color: var(--primary-dark);
+}
+.repas-block {
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--border);
+}
+.repas-block.midi { border-left-color: var(--primary); }
+.repas-block.soir { border-left-color: var(--accent); }
+.moment-tag {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-light);
+}
+.recipe-name {
+    font-weight: 600;
+    margin: 4px 0;
+}
+.raison {
+    display: block;
+    color: var(--text-light);
+    font-style: italic;
+    font-size: 0.85rem;
+}
+.recipe-link {
+    display: inline-block;
+    font-size: 0.85rem;
+    color: var(--primary);
+    text-decoration: none;
+    margin-top: 4px;
+}
+.recipe-link:hover { text-decoration: underline; }
+
+/* ── Shopping List ───────────────────────────────────── */
+.shopping-list h2 { margin-bottom: 16px; }
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    color: var(--text-light);
+}
+.table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+}
+.check-col {
+    width: 40px;
+    text-align: center;
+}
+.course-check {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+.course-check:checked + td { text-decoration: line-through; }
+
+/* ── Recettes Grid ───────────────────────────────────── */
+.recettes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+.recipe-card h3 {
+    font-size: 1.05rem;
+    margin-bottom: 8px;
+}
+.recipe-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.chip {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+.chip-repas { background: #fef3e2; color: #e67e22; }
+.chip-etat { background: #e8f8e8; color: #27ae60; }
+.chip-note { background: #f0e8ff; color: #8e44ad; }
+.recipe-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.tag {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: var(--bg);
+    color: var(--text-light);
+}
+
+/* ── Stats ───────────────────────────────────────────── */
+.stats-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+.stat-chip {
+    padding: 6px 14px;
+    background: var(--surface);
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    box-shadow: var(--shadow);
+}
+
+/* ── Actions ─────────────────────────────────────────── */
+.actions {
+    text-align: center;
+    margin: 20px 0;
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+.footer {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-light);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+@media (max-width: 768px) {
+    .planning-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .form-row {
+        flex-direction: column;
+        gap: 0;
+    }
+    .nav-inner {
+        flex-direction: column;
+        gap: 8px;
+    }
+}
+@media (max-width: 480px) {
+    .planning-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Planning semaine{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>📅 Planning généré</h1>
+    <p>Semaine du <strong>{{ planning.week_start }}</strong>
+       — {{ planning.saison }} — {{ planning.nb_personnes }} personne(s)</p>
+    {% if planning.ingredients_force and planning.ingredients_force != "" %}
+    <p><small>🥫 Ingrédients forcés : {{ planning.ingredients_force }}</small></p>
+    {% endif %}
+</div>
+
+<div class="planning-grid">
+    {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi'] %}
+    {% for jour in range(1, 5) %}
+    <div class="card jour-card">
+        <h2 class="jour-title">{{ jours[jour-1] }}</h2>
+        {% for plat in plats if plat.jour == jour %}
+        <div class="repas-block {{ plat.moment }}">
+            <span class="moment-tag">{{ plat.moment|capitalize }}</span>
+            <p class="recipe-name">{{ plat.nom_recette }}</p>
+            {% if plat.raison %}
+            <small class="raison">{{ plat.raison }}</small>
+            {% endif %}
+            {% if plat.url %}
+            <a href="{{ plat.url }}" target="_blank" class="recipe-link">🔗 Voir la recette</a>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+<div class="card shopping-list">
+    <h2>🛒 Liste de courses</h2>
+    {% if liste_courses %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Ingrédient</th>
+                <th>Quantité</th>
+                <th>Unité</th>
+                <th class="check-col">✔</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in liste_courses %}
+            <tr class="course-row">
+                <td>{{ item.nom|capitalize }}</td>
+                <td>{{ item.quantite }}</td>
+                <td>{{ item.unite }}</td>
+                <td class="check-col"><input type="checkbox" class="course-check"></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>Aucun ingrédient listé.</p>
+    {% endif %}
+</div>
+
+<div class="actions">
+    <a href="/" class="btn btn-primary">🔄 Nouveau planning</a>
+</div>
+{% endblock %}

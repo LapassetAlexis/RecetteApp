@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Historique{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>📚 Historique des plannings</h1>
+</div>
+
+{% if plannings %}
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Semaine du</th>
+                <th>Saison</th>
+                <th>Personnes</th>
+                <th>Créé le</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in plannings %}
+            <tr>
+                <td><strong>{{ p.week_start }}</strong></td>
+                <td>{{ p.saison }}</td>
+                <td>{{ p.nb_personnes }}</td>
+                <td>{{ p.created_at[:10] }}</td>
+                <td><a href="/planning/{{ p.id }}" class="btn btn-small">Voir</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card text-center">
+    <p>Aucun planning généré pour le moment.</p>
+    <a href="/" class="btn btn-primary">Générer un planning →</a>
+</div>
+{% endif %}
+{% endblock %}
