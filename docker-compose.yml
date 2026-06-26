@@ -3,9 +3,13 @@ services:
     build: .
     container_name: menu-planner
     ports:
-      - "8020:8000"
-    env_file:
-      - .env
+      - "${APP_PORT:-8020}:8000"
+    environment:
+      NOTION_TOKEN: "${NOTION_TOKEN}"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-mistral}"
+      APP_TITLE: "Menu Planner Tristabeau"
+      SECRET_KEY: "${SECRET_KEY:-change-me}"
     volumes:
       - menu-planner-data:/data
     depends_on:
@@ -19,20 +23,12 @@ services:
     image: ollama/ollama:latest
     container_name: menu-planner-ollama
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama-models:/root/.ollama
     restart: unless-stopped
     networks:
       - menu-planner-net
-    # Pour utiliser le GPU NVIDIA (commenter si pas dispo)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
 
 volumes:
   menu-planner-data:
