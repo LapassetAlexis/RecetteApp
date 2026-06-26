@@ -7,7 +7,7 @@ services:
     environment:
       NOTION_TOKEN: "${NOTION_TOKEN}"
       OLLAMA_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5:3b}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:1b}"
       APP_TITLE: "Menu Planner Tristabeau"
       SECRET_KEY: "${SECRET_KEY:-change-me}"
     volumes:
