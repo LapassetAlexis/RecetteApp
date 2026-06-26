@@ -10,7 +10,7 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<form method="POST" action="/generer" class="card form-planning">
+<form method="POST" action="/generer" class="card form-planning" id="planning-form">
     <div class="form-row">
         <div class="form-group">
             <label for="week_start">Semaine du</label>
@@ -50,10 +50,20 @@
         <small>Séparés par des virgules — laisse vide si rien à forcer.</small>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg">
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-generer">
         🔄 Générer 4 jours de repas
     </button>
 </form>
+
+<!-- Overlay de chargement -->
+<div id="loading-overlay" class="loading-overlay" style="display:none;">
+    <div class="loading-box">
+        <div class="spinner-big"></div>
+        <h2>🍳 Génération en cours...</h2>
+        <p>Le chef élabore votre menu avec les recettes disponibles.</p>
+        <p class="loading-tip">(Ça peut prendre 1 à 3 minutes — Mistral réfléchit 🤔)</p>
+    </div>
+</div>
 
 {% if planning_id %}
 <div class="card text-center">
@@ -61,4 +71,12 @@
     <a href="/planning/{{ planning_id }}" class="btn btn-secondary">Voir le dernier planning →</a>
 </div>
 {% endif %}
+
+<script>
+document.getElementById('planning-form').addEventListener('submit', function() {
+    document.getElementById('loading-overlay').style.display = 'flex';
+    document.getElementById('btn-generer').disabled = true;
+    document.getElementById('btn-generer').innerHTML = '⏳ Génération en cours...';
+});
+</script>
 {% endblock %}

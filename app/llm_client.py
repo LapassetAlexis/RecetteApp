@@ -75,7 +75,7 @@ class LLMClient:
             "options": {"temperature": temperature},
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=600) as client:
             resp = await client.post(self.url, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -97,10 +97,9 @@ class LLMClient:
                     "nom": r["nom"],
                     "type": r["repas"],
                     "tags": r["tags"],
-                    "url": r["url"],
                 }
                 for r in recettes
-                if r["repas"] in ("Plat", "", "Entrée", "Légume", "Accompagnement")
+                if r["repas"] in ("Plat", "Entrée", "Légume", "Accompagnement", "")
             ],
             ensure_ascii=False,
             indent=2,
