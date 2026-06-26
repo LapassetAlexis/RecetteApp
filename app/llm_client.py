@@ -178,7 +178,43 @@ Choisis exactement 8 recettes (4 jours × 2 repas). Équilibre les repas sur la 
                     data = json.loads(match.group())
                     return data.get("plats", [])
 
-        # Essai 4 : lignes avec "midi" ou "soir" contenant un nom de recette
+        # Essai 4 : format "**Jour N - moment**" avec puces (markdown)
+        if not plats:
+            # Pattern: **Jour N - midi/soir** puis les lignes avec *
+            lines = raw.split("\n")
+            current_jour = 0
+            current_moment = ""
+            for i, line in enumerate(lines):
+                # Chercher les en-têtes **Jour N - moment**
+                header_match = re.search(
+                    r"\*\*\s*Jour\s*(\d+)\s*[\-–]\s*(midi|soir|déjeuner|dîner)\s*\*\*",
+                    line, re.IGNORECASE
+                )
+                if header_match:
+                    current_jour = int(header_match.group(1))
+                    raw_moment = header_match.group(2).lower()
+                    current_moment = "midi" if raw_moment in ("midi", "déjeuner") else "soir"
+                    # Chercher la première puce après l'en-tête
+                    for j in range(i + 1, min(i + 5, len(lines))):
+                        bullet = lines[j].strip().lstrip("*-\u2022").strip()
+                        if bullet and not bullet.startswith("**") and not bullet.startswith("#"):
+                            # Enlever tags entre parenthèses
+                            if "(" in bullet:
+                                bullet = bullet.split("(")[0].strip()
+                            if bullet:
+                                plats.append({
+                                    "jour": current_jour,
+                                    "moment": current_moment,
+                                    "nom_recette": bullet,
+                                    "type_repas": "Plat",
+                                    "raison": "",
+                                    "notion_id": "",
+                                    "url": "",
+                                    "notion_url": "",
+                                })
+                            break
+
+        # Essai 5 : lignes avec "midi" ou "soir" contenant un nom de recette
         if not plats:
             for line in raw.split("\n"):
                 line = line.strip().strip("-* ")

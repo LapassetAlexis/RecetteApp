@@ -7,7 +7,7 @@ until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do
 done
 echo "✅ Ollama prêt."
 
-MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+MODEL=${OLLAMA_MODEL:-qwen2.5:3b}
 echo "📦 Vérification du modèle $MODEL..."
 if ! curl -s "http://ollama:11434/api/show" -d "{\"name\": \"$MODEL\"}" | grep -q "license"; then
     echo "📥 Téléchargement de $MODEL (premier lancement, peut prendre 2-5 min)..."

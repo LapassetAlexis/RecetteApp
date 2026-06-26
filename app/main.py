@@ -16,6 +16,8 @@ from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
 
+VERSION = "1.1.0"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,8 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 db = Database()
 notion = NotionClient()
 llm = LLMClient()
+# Version dans tous les templates
+templates.env.globals["version"] = VERSION
 
 REPAS_OPTIONS = [
     "Plat",
