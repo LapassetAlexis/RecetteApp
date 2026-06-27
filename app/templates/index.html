@@ -57,14 +57,13 @@
 
     <div class="form-r">
         <div class="form-g">
-            <label for="etat">📋 État des recettes</label>
-            <select id="etat" name="etat">
-                <option value="">Tous les états</option>
-                <option value="À essayer">À essayer</option>
-                <option value="Réussie">Réussie</option>
-                <option value="Testée">Testée</option>
-                <option value="Prochaine recette">Prochaine recette</option>
+            <label for="midis_same">🍳 Même plat du midi pendant</label>
+            <select id="midis_same" name="midis_same">
+                <option value="1" {{ 'selected' if midis_same == 1 else '' }}>1 jour (midi différent chaque jour)</option>
+                <option value="2" {{ 'selected' if midis_same == 2 else '' }}>2 jours consécutifs</option>
+                <option value="3" {{ 'selected' if midis_same == 3 else '' }}>3 jours consécutifs</option>
             </select>
+            <small>Ex: 3 jours = je cuisine une fois pour lundi, mardi, mercredi midi.</small>
         </div>
         <div class="form-g">
             <label for="ingredients_force">🥫 Restes à écouler</label>
@@ -92,6 +91,7 @@
             const temp = document.getElementById('temperature')?.value || 'tempérée';
             const nb = document.getElementById('nb_personnes')?.value || 4;
             const restes = document.getElementById('ingredients_force')?.value || 'aucun';
+            const midis = document.getElementById('midis_same')?.value || '1';
             const consignes = document.getElementById('custom_prompt')?.value || 'Aucune.';
             preview.textContent = `Génère un planning de 7 jours pour une famille.
 
@@ -100,6 +100,7 @@ CONTEXTE :
 - Température : ${temp}
 - Personnes : ${nb}
 - Restes à écouler : ${restes}
+- Même midi : ${midis} jour(s) consécutif(s)
 
 CONSIGNES DE LA FAMILLE :
 ${consignes}
@@ -107,8 +108,7 @@ ${consignes}
 BASE DE RECETTES : 30 recettes sélectionnées aléatoirement
 (sur 97 disponibles, filtrées par tes critères)
 
-Choisis 14 recettes (7j × midi+soir), sans doublon sur la semaine.
-Équilibre viande/poisson/végé.`;
+RÈGLE : ${midis > 1 ? 'Le même plat du midi peut être répété ' + midis + ' jours consécutifs. Les soirs sont tous différents (repas légers).' : 'Tous les repas sont différents.'}`;
             preview.style.display = 'block';
             this.textContent = '🙈 Cacher le prompt';
         } else {

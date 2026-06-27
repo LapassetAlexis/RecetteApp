@@ -190,6 +190,7 @@ class LLMClient:
         ingredients_force: str,
         recettes_exclues: list[str],
         custom_prompt: str = "",
+        midis_same: int = 1,
     ) -> list[dict[str, Any]]:
         recettes_str = json.dumps(
             [
@@ -216,7 +217,13 @@ BASE DE RECETTES DISPONIBLE :
 CONSIGNES SPÉCIFIQUES DE LA FAMILLE :
 {custom_prompt or "Aucune consigne particulière."}
 
-Choisis exactement 14 recettes (7 jours × 2 repas). Équilibre les repas sur la semaine."""
+RÈGLE DE RÉPÉTITION DES MIDIS :
+Le même plat du midi peut être répété {midis_same} jour(s) consécutif(s).
+Exemple : si midi_same=3, lundi midi = mardi midi = mercredi midi (je cuisine une fois pour 3 jours).
+Les soirs sont TOUS différents (repas légers, sur le pouce).
+
+Choisis exactement 14 créneaux (7 jours × midi + soir), mais avec REPETITION des midis.
+Donc moins de 14 recettes uniques. Écris bien le nom de la recette pour chaque créneau."""
 
         raw = await self._chat(SYSTEM_PROMPT_PLANNING, user_prompt, temperature=0.3)
         return self._parse_planning(raw)
