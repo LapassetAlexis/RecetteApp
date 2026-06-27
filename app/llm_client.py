@@ -113,7 +113,7 @@ class LLMClient:
     async def _chat_groq(
         self, system: str, user: str, temperature: float = 0.3
     ) -> str:
-        """Groq (API compatible OpenAI)."""
+        """Groq (API compatible OpenAI). Avec gestion rate limit."""
         payload = {
             "model": self._model,
             "messages": [
@@ -123,15 +123,17 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": 2048,
         }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                self._url,
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
+            resp = await client.post(self._url, json=payload, headers=headers)
+            if resp.status_code == 429:
+                logger.warning("⚠️ Groq rate limit (429). Attente 2s puis retry...")
+                import asyncio
+                await asyncio.sleep(2)
+                resp = await client.post(self._url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]
