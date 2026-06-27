@@ -79,7 +79,12 @@
         {% endfor %}
     </div>
     {% else %}
-    <p class="empty">Aucun ingrédient.</p>
+    <div class="card" style="text-align:center;padding:30px;">
+        <p style="font-size:1.2rem;margin-bottom:10px;">📋 Planning validé !</p>
+        <p style="color:var(--t2);margin-bottom:16px;">Génère la liste de courses maintenant.</p>
+        <button class="btn btn-primary btn-lg" id="btn-shop" onclick="genShop()">🛒 Générer la liste de courses</button>
+        <p id="shop-status" class="loading-tip" style="margin-top:10px;"></p>
+    </div>
     {% endif %}
 </div>
 
@@ -145,6 +150,17 @@ function usl(items) {
     document.getElementById('shop-n').textContent=items?.length||0;
     if(!items||!items.length){g.innerHTML='<p class="empty">Aucun.</p>';return;}
     g.innerHTML=items.map(i=>`<label class="shop-i"><input type="checkbox" class="shop-c"> <span>${i.nom.charAt(0).toUpperCase()+i.nom.slice(1)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('');
+}
+async function genShop() {
+    const btn=document.getElementById('btn-shop');
+    const st=document.getElementById('shop-status');
+    btn.disabled=true; btn.textContent='⏳ Génération...'; st.textContent='Extraction des ingrédients en cours...';
+    try {
+        const r=await fetch(`/generate-shopping/${pid}`,{method:'POST'});
+        const d=await r.json();
+        if(d.success) { window.location.reload(); }
+        else { st.textContent='Erreur: '+(d.error||'?'); btn.disabled=false; btn.textContent='🛒 Réessayer'; }
+    } catch(e) { st.textContent='Erreur réseau'; btn.disabled=false; btn.textContent='🛒 Réessayer'; }
 }
 function c(){document.getElementById('modal').style.display='none';}
 document.querySelector('.modal-bg')?.addEventListener('click',c);

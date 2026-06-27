@@ -270,60 +270,24 @@ async def generer(
                     plat["notion_url"] = r.get("notion_url", "")
                     break
 
-        # 5. Extraire les ingrédients en 1 appel batch (dédoublonné)
-        liste_courses = []
-        try:
-            liste_courses = await llm.batch_extract_ingredients(plats, nb_personnes)
-        except Exception as e:
-            logger.warning(f"Batch échoué ({e}), extraction individuelle...")
-            courses_map = {}
-            for plat in plats:
-                try:
-                    d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), nb_personnes)
-                    for ing in d.get("ingredients", []):
-                        k = ing["nom"].lower().strip()
-                        if k in courses_map and courses_map[k]["unite"] == ing.get("unite", ""):
-                            try:
-                                q1 = float(str(courses_map[k]["quantite"]).replace(",", "."))
-                                q2 = float(str(ing["quantite"]).replace(",", "."))
-                                courses_map[k]["quantite"] = str(q1 + q2)
-                            except: pass
-                        else:
-                            courses_map[k] = {"nom": ing["nom"], "quantite": ing.get("quantite", ""), "unite": ing.get("unite", "")}
-                except: pass
-            liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
-
-        # Ajouter les ingrédients forcés manquants
-        if ingredients_force:
-            forces = [i.strip() for i in ingredients_force.split(",")]
-            existing = {i["nom"].lower() for i in liste_courses}
-            for f in forces:
-                if f.lower() not in existing:
-                    liste_courses.append({"nom": f, "quantite": "", "unite": ""})
-
-        # 6. Sauvegarder en base
+        # 5. Sauvegarder le planning (sans liste de courses pour l'instant)
         data = {
             "plats": plats,
-            "liste_courses": liste_courses,
+            "liste_courses": [],
         }
-        recipes_to_save = [
-            {
-                "notion_id": p.get("notion_id", ""),
-                "recipe_name": p["nom_recette"],
-                "repas_type": p.get("type_repas", ""),
-                "jour": p["jour"],
-                "moment": p["moment"],
-            }
-            for p in plats
-        ]
-
         planning_id = await db.save_planning(
             week_start=week_start,
             saison=saison,
             nb_personnes=nb_personnes,
             ingredients_force=ingredients_force,
             data_json=json.dumps(data, ensure_ascii=False),
-            recipes=recipes_to_save,
+            recipes=[{
+                "notion_id": p.get("notion_id", ""),
+                "recipe_name": p["nom_recette"],
+                "repas_type": p.get("type_repas", ""),
+                "jour": p["jour"],
+                "moment": p["moment"],
+            } for p in plats],
         )
 
         return RedirectResponse(url=f"/planning/{planning_id}", status_code=303)
@@ -340,6 +304,67 @@ async def generer(
                 "custom_prompt": custom_prompt,
             },
         )
+
+
+@app.post("/generate-shopping/{planning_id}")
+async def generate_shopping(planning_id: int, request: Request):
+    """Génère la liste de courses pour un planning existant."""
+    import json
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        plats = planning_data.get("plats", [])
+
+        if not plats:
+            return {"error": "Aucun plat dans ce planning"}
+
+        liste_courses = []
+        try:
+            liste_courses = await llm.batch_extract_ingredients(plats, planning["nb_personnes"])
+        except Exception as e:
+            logger.warning(f"Batch échoué ({e}), extraction individuelle...")
+            courses_map = {}
+            for plat in plats:
+                try:
+                    d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
+                    for ing in d.get("ingredients", []):
+                        k = ing["nom"].lower().strip()
+                        if k in courses_map and courses_map[k]["unite"] == ing.get("unite", ""):
+                            try:
+                                q1 = float(str(courses_map[k]["quantite"]).replace(",", "."))
+                                q2 = float(str(ing["quantite"]).replace(",", "."))
+                                courses_map[k]["quantite"] = str(q1 + q2)
+                            except: pass
+                        else:
+                            courses_map[k] = {"nom": ing["nom"], "quantite": ing.get("quantite", ""), "unite": ing.get("unite", "")}
+                except: pass
+            liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
+
+        # Ajouter les ingrédients forcés
+        force = planning.get("ingredients_force", "")
+        if force:
+            for f in [i.strip() for i in force.split(",") if i.strip()]:
+                if f.lower() not in {i["nom"].lower() for i in liste_courses}:
+                    liste_courses.append({"nom": f, "quantite": "", "unite": ""})
+
+        # Mettre à jour le planning
+        import aiosqlite
+        async with aiosqlite.connect(settings.database_path) as db_conn:
+            planning_data["liste_courses"] = liste_courses
+            await db_conn.execute(
+                "UPDATE planning_history SET data_json = ? WHERE id = ?",
+                (json.dumps(planning_data, ensure_ascii=False), planning_id),
+            )
+            await db_conn.commit()
+
+        return {"success": True, "liste_courses": liste_courses}
+
+    except Exception as e:
+        logger.exception("Erreur génération liste courses")
+        return {"error": str(e)}
 
 
 @app.post("/ajouter-recette")
