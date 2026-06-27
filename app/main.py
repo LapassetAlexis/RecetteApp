@@ -227,7 +227,7 @@ async def generer(
         # Gemini/Groq peut tout voir, Ollama limité à 30
         if settings.llm_provider in ("gemini", "groq"):
             recettes_sample = recettes_filtered
-            logger.info(f"Gemini : envoi de toutes les {len(recettes_sample)} recettes dispo")
+            logger.info(f"{settings.llm_provider.capitalize()} : envoi de toutes les {len(recettes_sample)} recettes dispo")
         elif len(recettes_filtered) > 30:
             recettes_sample = random.sample(recettes_filtered, 30)
             logger.info(f"Ollama : échantillon de {len(recettes_sample)} recettes (sur {len(recettes_filtered)})")

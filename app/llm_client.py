@@ -94,8 +94,9 @@ class LLMClient:
     async def _chat_ollama(
         self, system: str, user: str, temperature: float = 0.3
     ) -> str:
+        url = f"{settings.ollama_url}/api/chat"
         payload = {
-            "model": self._model,
+            "model": settings.ollama_model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -104,7 +105,7 @@ class LLMClient:
             "options": {"temperature": temperature},
         }
         async with httpx.AsyncClient(timeout=600) as client:
-            resp = await client.post(self._url, json=payload)
+            resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             return data["message"]["content"]
