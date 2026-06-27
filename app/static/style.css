@@ -208,12 +208,12 @@ input:focus, select:focus {
 }
 .week-scroll {
     display: flex;
-    gap: 10px;
-    min-width: 560px;
+    gap: 8px;
+    min-width: 700px;
 }
 .day-column {
     flex: 1;
-    min-width: 80px;
+    min-width: 85px;
     background: var(--surface);
     border-radius: var(--radius);
     overflow: hidden;
