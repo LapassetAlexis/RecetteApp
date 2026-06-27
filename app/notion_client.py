@@ -1,10 +1,12 @@
 """Client Notion API — lecture / écriture de la base de recettes."""
 
 import httpx
+import logging
 from typing import Any
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 NOTION_VERSION = "2022-06-28"
 BASE_URL = "https://api.notion.com/v1"
 
@@ -137,34 +139,77 @@ class NotionClient:
             resp.raise_for_status()
             return resp.json()
 
-    # ── Mise à jour ───────────────────────────────────────────────
+    # ── Mise à jour avec ingrédients ─────────────────────────────
 
-    async def update_recipe(
+    async def update_ingredients(
         self,
         page_id: str,
-        nom: str | None = None,
-        url: str | None = None,
-        repas: str | None = None,
-        tags: list[str] | None = None,
-        note: str | None = None,
-        etat: str | None = None,
+        ingredients_text: str,
     ) -> dict[str, Any]:
-        """Met à jour une page existante."""
-        properties: dict[str, Any] = {}
+        """Ajoute/met à jour le champ Ingrédients sur une page Notion."""
+        properties = {
+            "Ingrédients": {
+                "rich_text": [{"text": {"content": ingredients_text[:2000]}}]
+            }
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={"properties": properties},
+                timeout=30,
+            )
+            if resp.status_code == 404:
+                # Le champ n'existe pas encore, on le crée via update database
+                logger.info("Champ Ingrédients inexistant, tentative d'ajout...")
+            resp.raise_for_status()
+            return resp.json()
 
-        if nom is not None:
-            properties["Nom"] = {"title": [{"text": {"content": nom}}]}
-        if url is not None:
-            properties["URL"] = {"url": url}
-        if repas is not None:
-            properties["Repas"] = {"select": {"name": repas}}
-        if tags is not None:
-            properties["Tag"] = {"multi_select": [{"name": t} for t in tags]}
-        if note is not None:
-            properties["Note"] = {"select": {"name": note}}
-        if etat is not None:
-            properties["État"] = {"status": {"name": etat}}
+    async def ensure_ingredients_field(self) -> bool:
+        """Vérifie/crée le champ Ingrédients dans la base Notion."""
+        # D'abord vérifier si le champ existe
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{BASE_URL}/databases/{self.database_id}",
+                headers=self._headers,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            db = resp.json()
+            if "Ingrédients" in db.get("properties", {}):
+                return True
 
+            # Créer le champ
+            update = {
+                "properties": {
+                    "Ingrédients": {
+                        "rich_text": {}
+                    }
+                }
+            }
+            resp = await client.patch(
+                f"{BASE_URL}/databases/{self.database_id}",
+                headers=self._headers,
+                json=update,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            logger.info("✅ Champ Ingrédients créé dans Notion")
+            return True
+
+    # ── Mise à jour de la note ──────────────────────────────────
+
+    async def update_rating(
+        self,
+        page_id: str,
+        note: str,
+    ) -> dict[str, Any]:
+        """Met à jour la note d'une recette (⭐ à ⭐⭐⭐⭐⭐)."""
+        properties = {
+            "Note": {
+                "select": {"name": note}
+            }
+        }
         async with httpx.AsyncClient() as client:
             resp = await client.patch(
                 f"{BASE_URL}/pages/{page_id}",

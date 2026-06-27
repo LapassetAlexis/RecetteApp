@@ -3,7 +3,7 @@
 {% block content %}
 <div class="hero">
     <h1>📖 Livre de recettes</h1>
-    <p>{{ total }} recettes dans la base Notion</p>
+    <p>{{ total }} recettes dans Notion</p>
 </div>
 
 <div class="stats-bar">
@@ -23,9 +23,6 @@
             {% if recette.etat %}
             <span class="chip chip-etat">{{ recette.etat }}</span>
             {% endif %}
-            {% if recette.note %}
-            <span class="chip chip-note">{{ recette.note }}</span>
-            {% endif %}
         </div>
         {% if recette.tags %}
         <div class="recipe-tags">
@@ -34,10 +31,39 @@
             {% endfor %}
         </div>
         {% endif %}
+        <div class="recipe-stars" data-id="{{ recette.id }}" data-note="{{ recette.note }}">
+            {% for s in range(5) %}
+            <span class="star" data-val="{{ '⭐' * (s+1) }}" style="cursor:pointer;font-size:1.2rem;opacity:{{ recette.note|length > s and 1 or 0.2 }};">★</span>
+            {% endfor %}
+        </div>
         {% if recette.url %}
         <a href="{{ recette.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
         {% endif %}
     </div>
     {% endfor %}
 </div>
+
+<script>
+document.querySelectorAll('.recipe-stars').forEach(container => {
+    const stars = container.querySelectorAll('.star');
+    const pageId = container.dataset.id;
+    stars.forEach(star => {
+        star.addEventListener('click', async function() {
+            const val = this.dataset.val;
+            try {
+                const r = await fetch(`/api/rate/${pageId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({note: val})
+                });
+                const d = await r.json();
+                if (d.success) {
+                    const noteLen = val.length;
+                    stars.forEach((s, i) => s.style.opacity = i < noteLen ? '1' : '0.2');
+                }
+            } catch(e) { console.error(e); }
+        });
+    });
+});
+</script>
 {% endblock %}

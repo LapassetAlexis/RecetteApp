@@ -69,6 +69,10 @@ TAG_OPTIONS = [
 async def startup():
     await db.init()
     logger.info("Base SQLite initialisée")
+    try:
+        await notion.ensure_ingredients_field()
+    except Exception as e:
+        logger.warning(f"Impossible de créer le champ Ingrédients Notion: {e}")
 
 
 # ── Pages ──────────────────────────────────────────────────────────
@@ -357,10 +361,42 @@ async def generate_shopping(planning_id: int, request: Request):
             )
             await db_conn.commit()
 
+        # Sauvegarder les ingrédients dans Notion pour chaque recette
+        for plat in plats:
+            nid = plat.get("notion_id", "")
+            nom = plat.get("nom_recette", "")
+            if nid:
+                # Chercher les ingrédients de cette recette dans la liste
+                recette_ings = [i for i in liste_courses if i.get("nom")]
+                if recette_ings:
+                    txt = "\n".join(
+                        f"- {i['nom']}" + (f" : {i['quantite']} {i['unite']}" if i.get('quantite') else "")
+                        for i in recette_ings
+                    )
+                    try:
+                        await notion.update_ingredients(nid, txt)
+                    except Exception as e:
+                        logger.warning(f"Impossible de sauvegarder les ingrédients pour {nom}: {e}")
+
         return {"success": True, "liste_courses": liste_courses}
 
     except Exception as e:
         logger.exception("Erreur génération liste courses")
+        return {"error": str(e)}
+
+
+@app.post("/api/rate/{page_id}")
+async def api_rate(page_id: str, request: Request):
+    """Note une recette (⭐ à ⭐⭐⭐⭐⭐)."""
+    try:
+        data = await request.json()
+        note = data.get("note", "")
+        if note not in ("⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"):
+            return {"error": "Note invalide"}
+        await notion.update_rating(page_id, note)
+        return {"success": True}
+    except Exception as e:
+        logger.exception("Erreur notation")
         return {"error": str(e)}
 
 
