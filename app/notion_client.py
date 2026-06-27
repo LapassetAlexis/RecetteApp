@@ -155,22 +155,58 @@ class NotionClient:
         page_id: str,
         ingredients_text: str,
     ) -> dict[str, Any]:
-        """Ajoute/met à jour le champ Ingrédients sur une page Notion."""
-        properties = {
-            "Ingrédients": {
-                "rich_text": [{"text": {"content": ingredients_text[:2000]}}]
+        """Ajoute les ingrédients dans le corps de la page Notion (en blocks)."""
+        lines = [l.strip() for l in ingredients_text.split("\n") if l.strip()]
+        children = []
+        for line in lines:
+            # Enlever le tiret si présent
+            text = line.lstrip("- ").strip()
+            if text:
+                children.append({
+                    "object": "block",
+                    "type": "bulleted_list_item",
+                    "bulleted_list_item": {
+                        "rich_text": [{"type": "text", "text": {"content": text[:200]}}]
+                    }
+                })
+
+        if not children:
+            return {}
+
+        # Ajouter un heading "Ingrédients" suivi des items
+        blocks = [
+            {
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{"type": "text", "text": {"content": "🥦 Ingrédients"}}]
+                }
             }
-        }
+        ] + children
+
         async with httpx.AsyncClient() as client:
             resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
+                f"{BASE_URL}/blocks/{page_id}/children",
                 headers=self._headers,
-                json={"properties": properties},
+                json={"children": blocks},
                 timeout=30,
             )
+            # Si le block endpoint ne fonctionne pas (ancienne méthode), tenter append
             if resp.status_code == 404:
-                # Le champ n'existe pas encore, on le crée via update database
-                logger.info("Champ Ingrédients inexistant, tentative d'ajout...")
+                resp = await client.patch(
+                    f"{BASE_URL}/blocks/{page_id}/children",
+                    headers=self._headers,
+                    json={"children": blocks},
+                    timeout=30,
+                )
+            if resp.status_code == 400:
+                # Tentative avec l'endpoint correct
+                resp = await client.patch(
+                    f"https://api.notion.com/v1/blocks/{page_id}/children",
+                    headers=self._headers,
+                    json={"children": blocks},
+                    timeout=30,
+                )
             resp.raise_for_status()
             return resp.json()
 
