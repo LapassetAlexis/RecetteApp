@@ -130,9 +130,9 @@ class LLMClient:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(self._url, json=payload, headers=headers)
             if resp.status_code == 429:
-                logger.warning("⚠️ Groq rate limit (429). Attente 2s puis retry...")
+                logger.warning("⚠️ Groq rate limit (429). Attente 5s puis retry...")
                 import asyncio
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
                 resp = await client.post(self._url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()

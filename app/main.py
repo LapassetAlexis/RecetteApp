@@ -1,5 +1,6 @@
 """App FastAPI — Menu Planner avec génération IA."""
 
+import asyncio
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -257,6 +258,10 @@ async def generer(
                     plat["url"] = r.get("url", "")
                     plat["notion_url"] = r.get("notion_url", "")
                     break
+
+            # Pause pour éviter le rate limit Groq
+            if settings.llm_provider in ("gemini", "groq"):
+                await asyncio.sleep(1)
 
             # Extraire les ingrédients
             try:
