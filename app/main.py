@@ -269,17 +269,35 @@ async def generer(
                     plat["notion_url"] = r.get("notion_url", "")
                     break
 
-            # Pause pour éviter le rate limit Groq
+            # Pause entre chaque appel API (sauf Ollama)
             if settings.llm_provider in ("gemini", "groq"):
-                await asyncio.sleep(1)
+                await asyncio.sleep(1.5)
 
-            # Extraire les ingrédients
+            # Extraire les ingrédients (avec cache)
             try:
-                ingredients_data = await llm.extract_ingredients(
-                    plat["nom_recette"],
-                    plat.get("url", ""),
-                    nb_personnes,
-                )
+                # Vérifier le cache local
+                cached = None
+                notion_id = plat.get("notion_id", "")
+                if notion_id:
+                    cached = await db.get_enriched(notion_id)
+                if cached and cached.get("ingredients"):
+                    import json
+                    ing_list = json.loads(cached["ingredients"])
+                    ingredients_data = {"ingredients": ing_list, "cuisson_minutes": cached.get("cuisson_minutes", 0)}
+                else:
+                    ingredients_data = await llm.extract_ingredients(
+                        plat["nom_recette"],
+                        plat.get("url", ""),
+                        nb_personnes,
+                    )
+                    # Mettre en cache
+                    if notion_id and ingredients_data.get("ingredients"):
+                        await db.save_enriched(
+                            notion_id=notion_id,
+                            recipe_name=plat["nom_recette"],
+                            ingredients=json.dumps(ingredients_data["ingredients"]),
+                            cuisson_minutes=ingredients_data.get("cuisson_minutes", 0),
+                        )
                 for ing in ingredients_data.get("ingredients", []):
                     nom_ing = ing["nom"].lower().strip()
                     if nom_ing in courses_map:
