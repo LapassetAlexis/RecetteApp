@@ -155,11 +155,33 @@ class NotionClient:
         page_id: str,
         ingredients_text: str,
     ) -> dict[str, Any]:
-        """Ajoute les ingrédients dans le corps de la page Notion (en blocks)."""
+        """Ajoute les ingrédients dans la propriété Ingrédients (colonne Notion)."""
+        # Essayer d'abord la propriété (colonne du tableau)
+        properties = {
+            "Ingrédients": {
+                "rich_text": [{"text": {"content": ingredients_text[:2000]}}]
+            }
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={"properties": properties, "icon": {"emoji": "🥗"}},
+                timeout=30,
+            )
+            if resp.status_code == 400:
+                # La propriété n'existe pas → écrire en blocks dans le corps
+                return await self._append_ingredients_blocks(page_id, ingredients_text)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def _append_ingredients_blocks(
+        self, page_id: str, ingredients_text: str
+    ) -> dict[str, Any]:
+        """Fallback : écrit les ingrédients en blocks dans le corps de la page."""
         lines = [l.strip() for l in ingredients_text.split("\n") if l.strip()]
         children = []
         for line in lines:
-            # Enlever le tiret si présent
             text = line.lstrip("- ").strip()
             if text:
                 children.append({
@@ -169,19 +191,13 @@ class NotionClient:
                         "rich_text": [{"type": "text", "text": {"content": text[:200]}}]
                     }
                 })
-
         if not children:
             return {}
 
-        # Ajouter un heading "Ingrédients" suivi des items
         blocks = [
-            {
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [{"type": "text", "text": {"content": "🥦 Ingrédients"}}]
-                }
-            }
+            {"object": "block", "type": "heading_3", "heading_3": {
+                "rich_text": [{"type": "text", "text": {"content": "📝 Ingrédients"}}]
+            }}
         ] + children
 
         async with httpx.AsyncClient() as client:
@@ -191,22 +207,6 @@ class NotionClient:
                 json={"children": blocks},
                 timeout=30,
             )
-            # Si le block endpoint ne fonctionne pas (ancienne méthode), tenter append
-            if resp.status_code == 404:
-                resp = await client.patch(
-                    f"{BASE_URL}/blocks/{page_id}/children",
-                    headers=self._headers,
-                    json={"children": blocks},
-                    timeout=30,
-                )
-            if resp.status_code == 400:
-                # Tentative avec l'endpoint correct
-                resp = await client.patch(
-                    f"https://api.notion.com/v1/blocks/{page_id}/children",
-                    headers=self._headers,
-                    json={"children": blocks},
-                    timeout=30,
-                )
             resp.raise_for_status()
             return resp.json()
 
