@@ -64,6 +64,10 @@ class LLMClient:
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{self._model}:generateContent?key={self._api_key}"
             )
+        elif self.provider == "groq":
+            self._api_key = settings.groq_api_key
+            self._model = settings.groq_model
+            self._url = "https://api.groq.com/openai/v1/chat/completions"
         else:
             # Ollama (default)
             self._url = f"{settings.ollama_url}/api/chat"
@@ -77,6 +81,12 @@ class LLMClient:
                 return await self._chat_gemini(system, user, temperature)
             except Exception as e:
                 logger.warning(f"⚠️ Gemini a échoué ({e}). Fallback vers Ollama...")
+                return await self._chat_ollama(system, user, temperature)
+        elif self.provider == "groq":
+            try:
+                return await self._chat_groq(system, user, temperature)
+            except Exception as e:
+                logger.warning(f"⚠️ Groq a échoué ({e}). Fallback vers Ollama...")
                 return await self._chat_ollama(system, user, temperature)
         else:
             return await self._chat_ollama(system, user, temperature)
@@ -98,6 +108,32 @@ class LLMClient:
             resp.raise_for_status()
             data = resp.json()
             return data["message"]["content"]
+
+    async def _chat_groq(
+        self, system: str, user: str, temperature: float = 0.3
+    ) -> str:
+        """Groq (API compatible OpenAI)."""
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": temperature,
+            "max_tokens": 2048,
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                self._url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
 
     async def _chat_gemini(
         self, system: str, user: str, temperature: float = 0.3
@@ -288,13 +324,18 @@ Nombre de personnes : {nb_personnes}
 
 Liste les ingrédients nécessaires pour préparer cette recette à {nb_personnes} personnes."""
 
-        if self.provider == "gemini":
+        if self.provider in ("gemini", "groq"):
             try:
-                raw = await self._chat_ingredients_gemini(
-                    SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
-                )
+                if self.provider == "gemini":
+                    raw = await self._chat_ingredients_gemini(
+                        SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                    )
+                else:
+                    raw = await self._chat(
+                        SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                    )
             except Exception as e:
-                logger.warning(f"⚠️ Gemini ingrédients échoué ({e}). Fallback Ollama...")
+                logger.warning(f"⚠️ {self.provider} ingrédients échoué ({e}). Fallback Ollama...")
                 raw = await self._chat_ollama(
                     SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
                 )

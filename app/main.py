@@ -224,8 +224,8 @@ async def generer(
         import random
         random.seed()
         recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
-        # Gemini peut tout voir (1M tokens), Ollama limité à 30
-        if settings.llm_provider == "gemini":
+        # Gemini/Groq peut tout voir, Ollama limité à 30
+        if settings.llm_provider in ("gemini", "groq"):
             recettes_sample = recettes_filtered
             logger.info(f"Gemini : envoi de toutes les {len(recettes_sample)} recettes dispo")
         elif len(recettes_filtered) > 30:

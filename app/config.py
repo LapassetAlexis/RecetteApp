@@ -14,7 +14,7 @@ class Settings:
         )
     )
 
-    # Provider LLM (ollama ou gemini)
+    # Provider LLM (ollama, gemini ou groq)
     llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "ollama"))
 
     # Ollama
@@ -28,6 +28,10 @@ class Settings:
     # Gemini
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
     gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001"))
+
+    # Groq
+    groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
+    groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama3-8b-8192"))
 
     # App
     app_title: str = field(default_factory=lambda: os.getenv("APP_TITLE", "Menu Planner"))
