@@ -4,6 +4,10 @@
 <div class="hero">
     <h1>📖 Livre de recettes</h1>
     <p>{{ total }} recettes dans Notion</p>
+    <div style="margin-top:8px;">
+        <button class="btn btn-sm btn-secondary" id="btn-enrich" onclick="enrichAll()">🔄 Enrichir toutes les recettes</button>
+        <span id="enrich-status" style="margin-left:8px;font-size:0.85rem;color:var(--t2);"></span>
+    </div>
 </div>
 
 <div class="stats-bar">
@@ -68,5 +72,20 @@ document.querySelectorAll('.recipe-stars').forEach(container => {
         });
     });
 });
+async function enrichAll() {
+    const btn = document.getElementById('btn-enrich');
+    const st = document.getElementById('enrich-status');
+    btn.disabled = true; st.textContent = '⏳ Enrichissement en cours...';
+    try {
+        const r = await fetch('/api/enrich-all', {method:'POST'});
+        const d = await r.json();
+        if (d.success) {
+            st.textContent = `✅ ${d.enriched}/${d.total} enrichies (${d.skipped} ignorées, ${d.errors} erreurs)`;
+        } else {
+            st.textContent = '❌ ' + (d.error || 'Erreur');
+        }
+    } catch(e) { st.textContent = '❌ Erreur réseau'; }
+    btn.disabled = false;
+}
 </script>
 {% endblock %}

@@ -400,6 +400,75 @@ async def api_rate(page_id: str, request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/enrich-all")
+async def api_enrich_all():
+    """Parcourt toutes les recettes Notion et ajoute les ingrédients manquants."""
+    try:
+        recettes = await notion.get_all_recipes()
+        total = len(recettes)
+        enriched = 0
+        skipped = 0
+        errors = 0
+
+        for r in recettes:
+            nid = r["id"]
+            nom = r["nom"]
+            if not nid or not nom:
+                skipped += 1
+                continue
+
+            # Chercher dans le cache local
+            cached = await db.get_enriched(nid)
+            ingredients_txt = ""
+
+            if cached and cached.get("ingredients"):
+                import json
+                try:
+                    ing_list = json.loads(cached["ingredients"])
+                    if ing_list:
+                        ingredients_txt = "\n".join(
+                            f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
+                            for i in ing_list
+                        )
+                except: pass
+
+            # Sinon, extraire via LLM
+            if not ingredients_txt and r.get("url"):
+                try:
+                    d = await llm.extract_ingredients(nom, r.get("url", ""))
+                    ings = d.get("ingredients", [])
+                    if ings:
+                        ingredients_txt = "\n".join(
+                            f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
+                            for i in ings
+                        )
+                        # Mettre en cache
+                        await db.save_enriched(nid, nom, ingredients=json.dumps(ings))
+                except: pass
+
+            if ingredients_txt:
+                try:
+                    await notion.update_ingredients(nid, ingredients_txt)
+                    enriched += 1
+                except Exception as e:
+                    logger.warning(f"Erreur écriture pour {nom}: {e}")
+                    errors += 1
+            else:
+                skipped += 1
+
+        return {
+            "success": True,
+            "total": total,
+            "enriched": enriched,
+            "skipped": skipped,
+            "errors": errors,
+        }
+
+    except Exception as e:
+        logger.exception("Erreur enrichissement masse")
+        return {"error": str(e)}
+
+
 @app.post("/ajouter-recette")
 async def ajouter_recette(
     request: Request,
