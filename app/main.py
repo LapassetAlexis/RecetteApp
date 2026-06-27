@@ -408,6 +408,7 @@ async def ajouter_recette(
     repas: str = Form(""),
     tags: list[str] = Form([]),
     moment: str = Form(""),
+    ingredients_manual: str = Form(""),
 ):
     """Ajoute une recette depuis une URL ou manuellement."""
     error = None
@@ -436,9 +437,17 @@ async def ajouter_recette(
                 tags=tags,
                 moment=moment,
             )
+            page_id = result.get("id", "")
             recette_url = result.get("url", "")
             success = f"Recette « {nom} » ajoutée avec succès !"
             logger.info(f"Recette ajoutée: {nom} → {recette_url}")
+
+            # Sauvegarder les ingrédients saisis manuellement
+            if ingredients_manual and page_id:
+                try:
+                    await notion.update_ingredients(page_id, ingredients_manual)
+                except Exception as e:
+                    logger.warning(f"Impossible de sauvegarder les ingrédients: {e}")
 
     except Exception as e:
         logger.exception("Erreur ajout recette")
