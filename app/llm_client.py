@@ -190,6 +190,7 @@ class LLMClient:
         ingredients_force: str,
         recettes_exclues: list[str],
         custom_prompt: str = "",
+        midi_groups: str = "1,1,2,2,2,3,4",
     ) -> list[dict[str, Any]]:
         recettes_str = json.dumps(
             [
@@ -200,6 +201,23 @@ class LLMClient:
             ensure_ascii=False,
             indent=2,
         )
+
+        # Construire la description des groupes de midis
+        jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+        groups = [int(x) for x in midi_groups.split(",")]
+        by_group: dict[int, list[int]] = {}
+        for i, g in enumerate(groups):
+            by_group.setdefault(g, []).append(i)
+        midi_lines = []
+        for g in sorted(by_group):
+            idxs = by_group[g]
+            names = [jours[i] for i in idxs]
+            count = len(idxs)
+            if count == 1:
+                midi_lines.append(f"- {names[0]} midi : plat différent")
+            else:
+                midi_lines.append(f"- {' + '.join(names)} midi : même plat (cuisiné pour {count})")
+        midi_desc = "\n".join(midi_lines)
 
         user_prompt = f"""Génère un planning de 7 jours pour une famille.
 
@@ -216,11 +234,8 @@ BASE DE RECETTES DISPONIBLE :
 CONSIGNES SPÉCIFIQUES DE LA FAMILLE :
 {custom_prompt or "Aucune consigne particulière."}
 
-RÈGLE DE RÉPÉTITION DES MIDIS :
-- Lundi + Mardi = même plat (cuisiné pour 2)
-- Mercredi + Jeudi + Vendredi = même plat (cuisiné pour 3)
-- Samedi = plat différent
-- Dimanche = plat différent
+RÉPARTITION DES MIDIS :
+{midi_desc}
 - Les soirs : TOUS différents, repas sur le pouce (légers, rapides, un soir restes)
 
 Choisis exactement 14 créneaux (7 jours × midi + soir), avec les répétitions ci-dessus."""

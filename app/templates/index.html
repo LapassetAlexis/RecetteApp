@@ -55,20 +55,30 @@
         <small>Laisse vide pour tout inclure.</small>
     </div>
 
+    <!-- Configuration visuelle des groupes de midis -->
+    <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <strong>🍳 Organisation des midis</strong>
+            <button type="button" id="reset-groups" class="btn btn-ghost btn-sm" style="font-size:0.75rem;">↺ Défaut</button>
+        </div>
+        <div id="midi-groups" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;">
+            {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
+            {% set default_groups = [1,1,2,2,2,3,4] %}
+            {% for i in range(7) %}
+            <div class="day-group" data-idx="{{ i }}" data-group="{{ default_groups[i] }}" style="cursor:pointer;padding:8px 4px;border-radius:8px;font-size:0.75rem;font-weight:600;transition:all 0.2s;">
+                <div style="font-size:0.7rem;color:var(--t2);margin-bottom:2px;">{{ jours[i] }}</div>
+                <div class="group-label" style="padding:4px 0;border-radius:6px;">G{{ default_groups[i] }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        <div id="group-legend" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;font-size:0.75rem;color:var(--t2);"></div>
+        <input type="hidden" name="midi_groups" id="midi-groups-input" value="1,1,2,2,2,3,4">
+        <small style="margin-top:6px;display:block;">Clique sur un jour pour changer son groupe. Même groupe = même plat cuisiné.</small>
+    </div>
+
     <div class="form-g">
         <label for="ingredients_force">🥫 Restes à écouler</label>
         <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
-    </div>
-
-    <div class="card" style="background:var(--bg);font-size:0.85rem;margin-bottom:16px;">
-        <strong>🍳 Organisation de la semaine :</strong>
-        <ul style="margin:6px 0 0 16px;color:var(--t2);">
-            <li><strong>Lundi → Mardi</strong> midi : même plat (cuisiné pour 2)</li>
-            <li><strong>Mercredi → Vendredi</strong> midi : même plat (cuisiné pour 3)</li>
-            <li><strong>Samedi</strong> midi : plat différent</li>
-            <li><strong>Dimanche</strong> midi : plat différent</li>
-            <li><strong>Soirs</strong> : tous différents, repas sur le pouce</li>
-        </ul>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
@@ -107,25 +117,86 @@
 {% endif %}
 
 <script>
-const PROMPT_TPL = `Génère un planning de 7 jours pour une famille.
+const JOURS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const JOURS_COURT = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const GROUP_COLORS = [
+    '#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b','#f39c12','#1abc9c'
+];
 
-CONTEXTE :
-- Saison : {{SAISON}}
-- Température : {{TEMP}}
-- Personnes : {{NB}}
-- Restes à écouler : {{RESTES}}
+// ── Gestion des groupes de midis ────────────────────
+function getGroups() {
+    return document.getElementById('midi-groups-input').value.split(',').map(Number);
+}
 
-CONSIGNES DE LA FAMILLE :
-{{CONSIGNES}}
+function setGroups(groups) {
+    document.getElementById('midi-groups-input').value = groups.join(',');
+    renderGroups();
+    updatePromptPreview();
+}
 
-BASE DE RECETTES : 30 recettes disponibles.
+function renderGroups() {
+    const groups = getGroups();
+    const els = document.querySelectorAll('.day-group');
+    const legend = document.getElementById('group-legend');
+    const uniqueGroups = [...new Set(groups)];
+    const used = new Set();
 
-RÉPARTITION DES MIDIS :
-- Lundi + Mardi = même plat
-- Mercredi + Jeudi + Vendredi = même plat
-- Samedi = plat différent
-- Dimanche = plat différent
-- Soirs : TOUS différents, repas sur le pouce (légers, rapides, un soir restes)`;
+    els.forEach((el, i) => {
+        const g = groups[i];
+        const color = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
+        el.style.background = color + '22';
+        el.style.border = '2px solid ' + color;
+        el.querySelector('.group-label').style.background = color;
+        el.querySelector('.group-label').style.color = '#fff';
+        el.querySelector('.group-label').textContent = g;
+    });
+
+    // Légende
+    legend.innerHTML = uniqueGroups.map(g => {
+        const days = groups.map((v, i) => v === g ? JOURS_COURT[i] : null).filter(Boolean);
+        const color = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
+        return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${color}22;border:1px solid ${color};">
+            <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>
+            ${days.join(' + ')} ${days.length > 0 ? '= même plat' : ''}
+        </span>`;
+    }).join('');
+    legend.innerHTML += '<span style="color:var(--t2)">· Soirs : tous différents</span>';
+}
+
+document.querySelectorAll('.day-group').forEach(el => {
+    el.addEventListener('click', function() {
+        const groups = getGroups();
+        const idx = parseInt(this.dataset.idx);
+        // Cycle: augmenter le groupe de 1 (max = max+1)
+        const maxG = Math.max(...groups);
+        const newG = groups[idx] >= maxG ? maxG + 1 : groups[idx] + 1;
+        groups[idx] = newG;
+        setGroups(groups);
+    });
+});
+
+document.getElementById('reset-groups')?.addEventListener('click', function() {
+    setGroups([1,1,2,2,2,3,4]);
+});
+
+// ── Construction du prompt ─────────────────────────
+function buildMidiDesc(groups) {
+    const uniq = [...new Set(groups)];
+    const lines = [];
+    // Grouper par valeur
+    const byGroup = {};
+    groups.forEach((g, i) => { if (!byGroup[g]) byGroup[g] = []; byGroup[g].push(i); });
+    Object.entries(byGroup).forEach(([g, days]) => {
+        const names = days.map(d => JOURS[d]);
+        const count = days.length;
+        if (count === 1) {
+            lines.push(`- ${names[0]} midi : plat différent`);
+        } else {
+            lines.push(`- ${names.join(' + ')} midi : même plat (cuisiné pour ${count})`);
+        }
+    });
+    return lines.join('\n');
+}
 
 function buildPrompt() {
     const s = document.getElementById('saison')?.value || 'printemps';
@@ -133,21 +204,41 @@ function buildPrompt() {
     const n = document.getElementById('nb_personnes')?.value || 4;
     const r = document.getElementById('ingredients_force')?.value || 'aucun';
     const c = document.getElementById('custom_prompt')?.value || 'Aucune.';
-    return PROMPT_TPL
-        .replace('{{SAISON}}', s)
-        .replace('{{TEMP}}', t)
-        .replace('{{NB}}', n)
-        .replace('{{RESTES}}', r)
-        .replace('{{CONSIGNES}}', c);
+    const groups = getGroups();
+    const midiDesc = buildMidiDesc(groups);
+    return `Génère un planning de 7 jours pour une famille.
+
+CONTEXTE :
+- Saison : ${s}
+- Température : ${t}
+- Personnes : ${n}
+- Restes à écouler : ${r}
+
+CONSIGNES DE LA FAMILLE :
+${c}
+
+BASE DE RECETTES : 30 recettes disponibles.
+
+RÉPARTITION DES MIDIS :
+${midiDesc}
+- Soirs : TOUS différents, repas sur le pouce (légers, rapides, un soir restes)`;
+}
+
+// ── Preview ─────────────────────────────────────────
+function updatePromptPreview() {
+    const area = document.getElementById('preview-area');
+    if (area && document.getElementById('preview-box').style.display !== 'none') {
+        area.value = buildPrompt();
+        document.getElementById('preview-status').textContent = '✅ Mis à jour';
+    }
 }
 
 document.getElementById('preview-btn')?.addEventListener('click', function() {
     const box = document.getElementById('preview-box');
-    const area = document.getElementById('preview-area');
     if (box.style.display === 'none') {
-        area.value = buildPrompt();
+        document.getElementById('preview-area').value = buildPrompt();
         box.style.display = 'block';
-        this.textContent = '🙈 Cacher l\'aperçu';
+        this.textContent = '🙈 Cacher';
         document.getElementById('preview-status').textContent = '✅ À jour';
     } else {
         box.style.display = 'none';
@@ -155,17 +246,14 @@ document.getElementById('preview-btn')?.addEventListener('click', function() {
     }
 });
 
-// Auto-rafraîchir l'aperçu quand les champs changent
+// Auto-rafraîchir l'aperçu
 ['saison','temperature','nb_personnes','ingredients_force','custom_prompt'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', function() {
-        const area = document.getElementById('preview-area');
-        if (area && document.getElementById('preview-box').style.display !== 'none') {
-            area.value = buildPrompt();
-            document.getElementById('preview-status').textContent = '✅ Mis à jour';
-        }
-    });
+    if (el) el.addEventListener('input', updatePromptPreview);
 });
+
+// Initialiser l'affichage
+renderGroups();
 
 // Loading
 document.getElementById('pf').addEventListener('submit', function() {

@@ -200,6 +200,7 @@ async def generer(
     tags: list[str] = Form([]),
     etat: str = Form(""),
     custom_prompt: str = Form(""),
+    midi_groups: str = Form("1,1,2,2,2,3,4"),
 ):
     """Génère un planning via le LLM et sauvegarde."""
     try:
@@ -253,6 +254,7 @@ async def generer(
             ingredients_force=ingredients_force,
             recettes_exclues=list(exclues),
             custom_prompt=custom_prompt,
+            midi_groups=midi_groups,
         )
 
         # 4. Associer chaque plat aux infos Notion
