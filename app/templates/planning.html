@@ -13,28 +13,22 @@
 </div>
 
 <!-- Planning 7 jours -->
-<div class="week-container">
+<div class="week-wrapper">
     <div class="week-scroll">
-        {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
+        {% set jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
         {% for jour in range(1, 8) %}
-        <div class="day-column">
-            <div class="day-header">{{ jours[jour-1][:3] }}<span class="day-full"> {{ jours[jour-1] }}</span></div>
+        <div class="day-col">
+            <div class="day-head">{{ jours[jour-1][:3] }}</div>
             {% for plat in plats if plat.jour == jour %}
-            <div class="meal-card {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
-                <div class="meal-top">
-                    <label class="meal-check">
-                        <input type="checkbox" class="repas-check" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
-                        <span class="meal-badge {{ plat.moment }}">{{ plat.moment == 'midi' and '☀️' or '🌙' }}</span>
-                    </label>
-                    <button class="meal-change btn-change" data-jour="{{ jour }}" data-moment="{{ plat.moment }}" title="Changer">↻</button>
+            <div class="meal {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
+                <div class="meal-head">
+                    <label class="meal-cb"><input type="checkbox" class="ck" data-jour="{{ jour }}" data-moment="{{ plat.moment }}"> <span>{{ plat.moment == 'midi' and '☀️' or '🌙' }}</span></label>
+                    <button class="meal-ch" data-jour="{{ jour }}" data-moment="{{ plat.moment }}" title="Changer">↻</button>
                 </div>
                 <div class="meal-name">{{ plat.nom_recette }}</div>
                 <div class="meal-links">
-                    {% if plat.notion_url %}
-                    <a href="{{ plat.notion_url }}" target="_blank" class="meal-link">📄</a>
-                    {% elif plat.url %}
-                    <a href="{{ plat.url }}" target="_blank" class="meal-link">🔗</a>
-                    {% endif %}
+                    {% if plat.notion_url %}<a href="{{ plat.notion_url }}" target="_blank" class="meal-lk">📄</a>{% endif %}
+                    {% if plat.url and not plat.notion_url %}<a href="{{ plat.url }}" target="_blank" class="meal-lk">🔗</a>{% endif %}
                 </div>
             </div>
             {% endfor %}
@@ -43,176 +37,116 @@
     </div>
 </div>
 
-<!-- Barre d'action groupée -->
-<div class="bulk-bar" id="bulk-bar" style="display:none;">
-    <span id="bulk-count" class="bulk-count">0 sélectionné</span>
-    <button class="btn btn-primary btn-small" id="btn-bulk-change">↻ Changer en masse</button>
-    <button class="btn btn-ghost btn-small" id="btn-bulk-clear">✕</button>
+<!-- Barre action groupée -->
+<div class="bulk" id="bulk" style="display:none">
+    <span id="bulk-nb">0</span>
+    <button class="btn btn-sm" id="bulk-go">↻ Changer</button>
+    <button class="btn btn-sm btn-ghost" id="bulk-clr">✕</button>
 </div>
 
-<!-- Modal alternatives -->
-<div id="change-modal" class="modal" style="display:none;">
-    <div class="modal-backdrop"></div>
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3>↻ Changer les recettes</h3>
-            <button class="modal-close" onclick="closeModal()">✕</button>
+<!-- Modal -->
+<div id="modal" class="modal" style="display:none">
+    <div class="modal-bg"></div>
+    <div class="modal-box">
+        <div class="modal-top">
+            <h3>↻ Changer</h3>
+            <button class="modal-x" onclick="c()">✕</button>
         </div>
         <div class="modal-body">
-            <p id="modal-context" class="modal-context"></p>
-            <div class="search-box">
-                <input type="text" id="filter-recipes" placeholder="Filtrer..." class="input-wide">
-            </div>
-            <div id="alternatives-list" class="alternatives-list">
-                <p class="loading-text">Chargement...</p>
-            </div>
+            <p id="modal-ctx" class="modal-ctx"></p>
+            <input type="text" id="flt" placeholder="Filtrer..." class="inp">
+            <div id="alt-list"></div>
         </div>
-        <div class="modal-footer">
-            <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+        <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm" onclick="c()">Annuler</button>
         </div>
     </div>
 </div>
 
 <!-- Liste de courses -->
-<div class="card shopping-card">
-    <div class="shopping-header">
+<div class="card">
+    <div class="shop-h">
         <h2>🛒 Liste de courses</h2>
-        <span class="shopping-count">{{ liste_courses|length }} ingrédients</span>
+        <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
     </div>
     {% if liste_courses %}
-    <div class="shopping-grid" id="shopping-grid">
+    <div class="shop-g" id="shop-g">
         {% for item in liste_courses %}
-        <label class="shopping-item">
-            <input type="checkbox" class="shop-check">
-            <span class="shop-name">{{ item.nom|capitalize }}</span>
-            {% if item.quantite %}<span class="shop-qty">{{ item.quantite }} {{ item.unite }}</span>{% endif %}
+        <label class="shop-i">
+            <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
+            {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
         </label>
         {% endfor %}
     </div>
     {% else %}
-    <p class="empty">Aucun ingrédient listé.</p>
+    <p class="empty">Aucun ingrédient.</p>
     {% endif %}
 </div>
 
-<div class="actions">
+<div class="act">
     <a href="/" class="btn btn-primary">🔄 Nouveau planning</a>
 </div>
 
 <script>
-const planningId = {{ planning.id }};
-let currentBulk = [];
-const joursSemaine = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const pid = {{ planning.id }};
+let bul = [];
+const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
-// Multi-sélection
-document.querySelectorAll('.repas-check').forEach(cb => cb.addEventListener('change', updateBulkBar));
-
-function updateBulkBar() {
-    currentBulk = [];
-    document.querySelectorAll('.repas-check:checked').forEach(cb =>
-        currentBulk.push({ jour: parseInt(cb.dataset.jour), moment: cb.dataset.moment })
-    );
-    const bar = document.getElementById('bulk-bar');
-    document.getElementById('bulk-count').textContent = currentBulk.length + ' sélectionné' + (currentBulk.length > 1 ? 's' : '');
-    bar.style.display = currentBulk.length > 0 ? 'flex' : 'none';
+document.querySelectorAll('.ck').forEach(c => c.addEventListener('change', u));
+function u() {
+    bul = []; document.querySelectorAll('.ck:checked').forEach(c => bul.push({j:+c.dataset.jour,m:c.dataset.moment}));
+    const b = document.getElementById('bulk');
+    if (bul.length) { b.style.display='flex'; document.getElementById('bulk-nb').textContent=bul.length+' sélectionné'+(bul.length>1?'s':''); }
+    else b.style.display='none';
 }
-
-document.getElementById('btn-bulk-clear').addEventListener('click', () => {
-    document.querySelectorAll('.repas-check:checked').forEach(cb => cb.checked = false);
-    updateBulkBar();
+document.getElementById('bulk-clr').onclick = ()=>{ document.querySelectorAll('.ck:checked').forEach(c=>c.checked=false); u(); };
+document.getElementById('bulk-go').onclick = ()=>{
+    if (!bul.length) return;
+    document.getElementById('modal-ctx').textContent = bul.map(b=>js[b.j-1]+' '+b.m).join(', ');
+    document.getElementById('modal').style.display='flex';
+    document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
+    la();
+};
+document.querySelectorAll('.meal-ch').forEach(b=>b.onclick=function(){
+    bul=[{j:+this.dataset.jour,m:this.dataset.moment}];
+    document.getElementById('modal-ctx').textContent=js[bul[0].j-1]+' '+bul[0].m;
+    document.getElementById('modal').style.display='flex';
+    document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
+    la();
 });
 
-document.getElementById('btn-bulk-change').addEventListener('click', () => {
-    if (!currentBulk.length) return;
-    document.getElementById('modal-context').textContent =
-        currentBulk.map(b => `${joursSemaine[b.jour-1]} ${b.moment}`).join(', ');
-    document.getElementById('change-modal').style.display = 'flex';
-    document.getElementById('alternatives-list').innerHTML = '<p class="loading-text">⏳ Chargement...</p>';
-    loadAlternatives();
-});
-
-// Changement individuel
-document.querySelectorAll('.btn-change').forEach(btn => {
-    btn.addEventListener('click', function() {
-        currentBulk = [{ jour: parseInt(this.dataset.jour), moment: this.dataset.moment }];
-        document.getElementById('modal-context').textContent =
-            `${joursSemaine[currentBulk[0].jour-1]} ${currentBulk[0].moment}`;
-        document.getElementById('change-modal').style.display = 'flex';
-        document.getElementById('alternatives-list').innerHTML = '<p class="loading-text">⏳ Chargement...</p>';
-        loadAlternatives();
-    });
-});
-
-async function loadAlternatives() {
-    try {
-        const resp = await fetch(`/api/alternatives/${planningId}`);
-        const data = await resp.json();
-        renderAlternatives(data.alternatives || []);
-    } catch(e) {
-        document.getElementById('alternatives-list').innerHTML = '<p class="error">Erreur</p>';
+async function la() {
+    const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
+    const alts=d.alternatives||[];
+    const el=document.getElementById('alt-list');
+    if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
+    el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${a.repas?`<span class="chip chip-r">${a.repas}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');
+    document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>rpl(b.dataset.n));
+    document.getElementById('flt').oninput=function(){const q=this.value.toLowerCase();document.querySelectorAll('.alt').forEach(e=>e.style.display=e.dataset.n.includes(q)?'flex':'none');};
+}
+async function rpl(n) {
+    document.getElementById('alt-list').innerHTML='<p class="empty">⏳ Mise à jour...</p>';
+    let ok=true;
+    for(const s of bul) {
+        const r=await fetch(`/api/update-meal/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:s.j,moment:s.m,nouvelle_recette:n})});
+        const d=await r.json();
+        if(!d.success){ok=false;alert('Erreur');break;}
     }
+    if(ok) {
+        for(const s of bul) document.querySelector(`.meal[data-jour="${s.j}"][data-moment="${s.m}"] .meal-name`).textContent=n;
+        const r=await fetch(`/api/update-meal/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:bul[0].j,moment:bul[0].m,nouvelle_recette:n})});
+        const d=await r.json();
+        if(d.liste_courses) usl(d.liste_courses);
+    }
+    c(); document.querySelectorAll('.ck:checked').forEach(c=>c.checked=false); u();
 }
-
-function renderAlternatives(alts) {
-    const container = document.getElementById('alternatives-list');
-    if (!alts.length) { container.innerHTML = '<p class="empty">Aucune alternative.</p>'; return; }
-    container.innerHTML = alts.map(a => `
-        <div class="alt-item" data-nom="${a.nom.toLowerCase()}">
-            <span class="alt-name">${a.nom}</span>
-            ${a.repas ? `<span class="chip chip-repas">${a.repas}</span>` : ''}
-            <button class="btn btn-primary btn-small select-alt" data-nom="${a.nom}">Choisir</button>
-        </div>
-    `).join('');
-    document.querySelectorAll('.select-alt').forEach(btn =>
-        btn.addEventListener('click', () => replaceMeals(btn.dataset.nom))
-    );
-    document.getElementById('filter-recipes').oninput = function() {
-        const q = this.value.toLowerCase();
-        document.querySelectorAll('.alt-item').forEach(el =>
-            el.style.display = el.dataset.nom.includes(q) ? 'flex' : 'none'
-        );
-    };
+function usl(items) {
+    const g=document.getElementById('shop-g');
+    document.getElementById('shop-n').textContent=items?.length||0;
+    if(!items||!items.length){g.innerHTML='<p class="empty">Aucun.</p>';return;}
+    g.innerHTML=items.map(i=>`<label class="shop-i"><input type="checkbox" class="shop-c"> <span>${i.nom.charAt(0).toUpperCase()+i.nom.slice(1)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('');
 }
-
-async function replaceMeals(nouvelleRecette) {
-    document.getElementById('alternatives-list').innerHTML = '<p class="loading-text">⏳ Mise à jour...</p>';
-    try {
-        let ok = true;
-        for (const slot of currentBulk) {
-            const resp = await fetch(`/api/update-meal/${planningId}`, {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ jour: slot.jour, moment: slot.moment, nouvelle_recette: nouvelleRecette })
-            });
-            const data = await resp.json();
-            if (!data.success) { ok = false; alert('Erreur: ' + (data.error || '?')); break; }
-        }
-        if (ok) {
-            for (const slot of currentBulk)
-                document.querySelector(`.meal-card[data-jour="${slot.jour}"][data-moment="${slot.moment}"] .meal-name`).textContent = nouvelleRecette;
-            const r = await fetch(`/api/update-meal/${planningId}`, { method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ jour: currentBulk[0].jour, moment: currentBulk[0].moment, nouvelle_recette: nouvelleRecette }) });
-            const d = await r.json();
-            if (d.liste_courses) updateShoppingList(d.liste_courses);
-            closeModal();
-            document.querySelectorAll('.repas-check:checked').forEach(cb => cb.checked = false);
-            updateBulkBar();
-        } else closeModal();
-    } catch(e) { alert('Erreur: ' + e.message); closeModal(); }
-}
-
-function updateShoppingList(items) {
-    const grid = document.getElementById('shopping-grid');
-    document.querySelector('.shopping-count').textContent = (items?.length || 0) + ' ingrédients';
-    if (!items || !items.length) { grid.innerHTML = '<p class="empty">Aucun ingrédient.</p>'; return; }
-    grid.innerHTML = items.map(i =>
-        `<label class="shopping-item">
-            <input type="checkbox" class="shop-check">
-            <span class="shop-name">${i.nom.charAt(0).toUpperCase() + i.nom.slice(1)}</span>
-            ${i.quantite ? `<span class="shop-qty">${i.quantite} ${i.unite}</span>` : ''}
-        </label>`
-    ).join('');
-}
-
-function closeModal() { document.getElementById('change-modal').style.display = 'none'; }
-document.querySelector('.modal-backdrop')?.addEventListener('click', closeModal);
+function c(){document.getElementById('modal').style.display='none';}
+document.querySelector('.modal-bg')?.addEventListener('click',c);
 </script>
 {% endblock %}
