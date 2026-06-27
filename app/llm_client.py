@@ -219,11 +219,12 @@ CONSIGNES SPÉCIFIQUES DE LA FAMILLE :
 
 RÈGLE DE RÉPÉTITION DES MIDIS :
 Le même plat du midi peut être répété {midis_same} jour(s) consécutif(s).
-Exemple : si midi_same=3, lundi midi = mardi midi = mercredi midi (je cuisine une fois pour 3 jours).
-Les soirs sont TOUS différents (repas légers, sur le pouce).
+CONSIGNES DE RÉPÉTITION :
+- Si midis_same=2 : Lundi=Mardi, Mercredi=Jeudi, Vendredi, Samedi, Dimanche = différents
+- Si midis_same=3 : Lundi=Mardi=Mercredi, Jeudi=Vendredi, Samedi, Dimanche = différents
+- Les soirs sont TOUS différents (repas légers, sur le pouce).
 
-Choisis exactement 14 créneaux (7 jours × midi + soir), mais avec REPETITION des midis.
-Donc moins de 14 recettes uniques. Écris bien le nom de la recette pour chaque créneau."""
+Choisis exactement 14 créneaux (7 jours × midi + soir), avec répétition des midis."""
 
         raw = await self._chat(SYSTEM_PROMPT_PLANNING, user_prompt, temperature=0.3)
         return self._parse_planning(raw)

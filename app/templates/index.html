@@ -75,46 +75,78 @@
 
     <div class="form-g">
         <label for="custom_prompt">✏️ Instructions personnalisées pour l'IA
-            <button type="button" id="toggle-prompt" class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:0.75rem;">📝 Voir le prompt complet</button>
+            <button type="button" id="toggle-prompt" class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:0.75rem;">📝 Aperçu du prompt final</button>
         </label>
-        <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, cuisiner pour 2 midis dans la semaine, un soir par semaine restes...">{{ custom_prompt or "" }}</textarea>
-        <div id="prompt-preview" style="display:none;margin-top:10px;background:var(--bg);padding:12px;border-radius:8px;font-size:0.8rem;white-space:pre-wrap;font-family:monospace;max-height:300px;overflow-y:auto;"></div>
-        <small>L'IA tiendra compte de ces habitudes pour choisir les recettes.</small>
+        <textarea id="custom_prompt" name="custom_prompt" rows="5" class="inp" placeholder="Ex: le soir on mange léger, cuisiner pour 2 midis dans la semaine, un soir par semaine restes...">{{ custom_prompt or "" }}</textarea>
+        <small>Ce texte est injecté dans les consignes données à l'IA.</small>
+        <div id="prompt-preview" style="display:none;margin-top:10px;">
+            <div style="font-size:0.8rem;font-weight:600;margin-bottom:4px;">🧠 Prompt complet envoyé à l'IA :</div>
+            <textarea id="prompt-editor" rows="12" class="inp" style="font-family:monospace;font-size:0.78rem;white-space:pre;background:var(--bg);"></textarea>
+            <div style="display:flex;gap:6px;margin-top:6px;">
+                <button type="button" class="btn btn-sm btn-primary" id="apply-prompt">✅ Appliquer mes modifs</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="reset-prompt">↺ Réinitialiser</button>
+            </div>
+            <small style="margin-top:4px;display:block;">Modifie le texte ci-dessus et clique "Appliquer" pour personnaliser le prompt final.</small>
+        </div>
     </div>
 
     <script>
-    // Affichage du prompt complet
-    document.getElementById('toggle-prompt')?.addEventListener('click', function() {
-        const preview = document.getElementById('prompt-preview');
-        if (preview.style.display === 'none') {
-            const saison = document.getElementById('saison')?.value || 'printemps';
-            const temp = document.getElementById('temperature')?.value || 'tempérée';
-            const nb = document.getElementById('nb_personnes')?.value || 4;
-            const restes = document.getElementById('ingredients_force')?.value || 'aucun';
-            const midis = document.getElementById('midis_same')?.value || '1';
-            const consignes = document.getElementById('custom_prompt')?.value || 'Aucune.';
-            preview.textContent = `Génère un planning de 7 jours pour une famille.
+    // Assemblage et édition du prompt complet
+    function buildPrompt() {
+        const s = document.getElementById('saison')?.value || 'printemps';
+        const t = document.getElementById('temperature')?.value || 'tempérée';
+        const n = document.getElementById('nb_personnes')?.value || 4;
+        const r = document.getElementById('ingredients_force')?.value || 'aucun';
+        const m = document.getElementById('midis_same')?.value || '1';
+        const c = document.getElementById('custom_prompt')?.value || 'Aucune.';
+        return `Génère un planning de 7 jours pour une famille.
 
 CONTEXTE :
-- Saison : ${saison}
-- Température : ${temp}
-- Personnes : ${nb}
-- Restes à écouler : ${restes}
-- Même midi : ${midis} jour(s) consécutif(s)
+- Saison : ${s}
+- Température : ${t}
+- Personnes : ${n}
+- Restes à écouler : ${r}
+- Répétition midis : ${m}
 
 CONSIGNES DE LA FAMILLE :
-${consignes}
+${c}
 
-BASE DE RECETTES : 30 recettes sélectionnées aléatoirement
-(sur 97 disponibles, filtrées par tes critères)
+BASE DE RECETTES : 30 recettes disponibles.
 
-RÈGLE : ${midis > 1 ? 'Le même plat du midi peut être répété ' + midis + ' jours consécutifs. Les soirs sont tous différents (repas légers).' : 'Tous les repas sont différents.'}`;
-            preview.style.display = 'block';
-            this.textContent = '🙈 Cacher le prompt';
+RÈGLE DE RÉPÉTITION DES MIDIS :
+${m > 1 ? 'Lundi+Mardi+Mercredi = même plat, Jeudi+Vendredi = même plat, Samedi différent, Dimanche différent. Soirs tous différents.' : 'Tous les repas sont différents.'}`;
+    }
+    document.getElementById('toggle-prompt')?.addEventListener('click', function() {
+        const div = document.getElementById('prompt-preview');
+        const ed = document.getElementById('prompt-editor');
+        if (div.style.display === 'none') {
+            ed.value = buildPrompt();
+            div.style.display = 'block';
+            this.textContent = '🙈 Cacher';
         } else {
-            preview.style.display = 'none';
-            this.textContent = '📝 Voir le prompt complet';
+            div.style.display = 'none';
+            this.textContent = '📝 Aperçu du prompt final';
         }
+    });
+    document.getElementById('reset-prompt')?.addEventListener('click', function() {
+        document.getElementById('prompt-editor').value = buildPrompt();
+    });
+    document.getElementById('apply-prompt')?.addEventListener('click', function() {
+        let full = document.getElementById('prompt-editor').value;
+        // Extraire la section CONSIGNES pour la mettre dans custom_prompt
+        const match = full.match(/CONSIGNES DE LA FAMILLE :\n([\s\S]*?)(?=\n\nBASE|$)/);
+        if (match) {
+            document.getElementById('custom_prompt').value = match[1].trim();
+        } else {
+            // Si le format a changé, on met tout ce qui est après "CONSIGNES"
+            const parts = full.split('CONSIGNES DE LA FAMILLE :');
+            if (parts.length > 1) {
+                const after = parts[1].split('\n\n')[0];
+                document.getElementById('custom_prompt').value = after.trim();
+            }
+        }
+        document.getElementById('prompt-preview').style.display = 'none';
+        document.getElementById('toggle-prompt').textContent = '📝 Aperçu du prompt final';
     });
     </script>
 
