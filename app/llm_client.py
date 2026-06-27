@@ -189,6 +189,7 @@ class LLMClient:
         nb_personnes: int,
         ingredients_force: str,
         recettes_exclues: list[str],
+        custom_prompt: str = "",
     ) -> list[dict[str, Any]]:
         recettes_str = json.dumps(
             [
@@ -211,6 +212,9 @@ CONTEXTE :
 
 BASE DE RECETTES DISPONIBLE :
 {recettes_str}
+
+CONSIGNES SPÉCIFIQUES DE LA FAMILLE :
+{custom_prompt or "Aucune consigne particulière."}
 
 Choisis exactement 14 recettes (7 jours × 2 repas). Équilibre les repas sur la semaine."""
 

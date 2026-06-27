@@ -10,20 +10,19 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<form method="POST" action="/generer" class="card form-planning" id="planning-form">
-    <div class="form-row">
-        <div class="form-group">
+<form method="POST" action="/generer" class="card" id="pf">
+    <div class="form-r">
+        <div class="form-g">
             <label for="week_start">Semaine du</label>
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
         </div>
-        <div class="form-group">
-            <label for="nb_personnes">👨‍👩‍👧‍👧 Nombre de personnes</label>
+        <div class="form-g">
+            <label for="nb_personnes">👨‍👩‍👧‍👧 Personnes</label>
             <input type="number" id="nb_personnes" name="nb_personnes" value="{{ nb_personnes }}" min="1" max="20" required>
         </div>
     </div>
-
-    <div class="form-row">
-        <div class="form-group">
+    <div class="form-r">
+        <div class="form-g">
             <label for="saison">🌤️ Saison</label>
             <select id="saison" name="saison">
                 <option value="Printemps" {% if saison_default == "Printemps" %}selected{% endif %}>Printemps</option>
@@ -32,8 +31,8 @@
                 <option value="Hiver" {% if saison_default == "Hiver" %}selected{% endif %}>Hiver</option>
             </select>
         </div>
-        <div class="form-group">
-            <label for="temperature">🌡️ Température extérieure</label>
+        <div class="form-g">
+            <label for="temperature">🌡️ Température</label>
             <select id="temperature" name="temperature">
                 <option value="Froid (< 10°C)">Froid (&lt; 10°C)</option>
                 <option value="Frais (10-18°C)" selected>Frais (10-18°C)</option>
@@ -44,39 +43,70 @@
         </div>
     </div>
 
-    <div class="form-group">
-        <label for="ingredients_force">🥫 Ingrédients à écouler (restes)</label>
-        <input type="text" id="ingredients_force" name="ingredients_force" placeholder="Ex: courgettes, œufs, poulet" class="input-wide">
-        <small>Séparés par des virgules — laisse vide si rien à forcer.</small>
+    <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
+
+    <div class="form-g">
+        <label>🏷️ Tags à inclure (optionnel)</label>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+            {% for tag in tag_options %}
+            <label class="tgl"><input type="checkbox" name="tags" value="{{ tag }}"><span>{{ tag }}</span></label>
+            {% endfor %}
+        </div>
+        <small>Laisse vide pour tout inclure.</small>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg" id="btn-generer">
+    <div class="form-r">
+        <div class="form-g">
+            <label for="etat">📋 État des recettes</label>
+            <select id="etat" name="etat">
+                <option value="">Tous les états</option>
+                <option value="À essayer">À essayer</option>
+                <option value="Réussie">Réussie</option>
+                <option value="Testée">Testée</option>
+                <option value="Prochaine recette">Prochaine recette</option>
+            </select>
+        </div>
+        <div class="form-g">
+            <label for="ingredients_force">🥫 Restes à écouler</label>
+            <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
+        </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
+
+    <div class="form-g">
+        <label for="custom_prompt">✏️ Instructions personnalisées pour l'IA</label>
+        <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, cuisiner pour 2 midis dans la semaine, un soir par semaine restes...">{{ custom_prompt or "" }}</textarea>
+        <small>L'IA tiendra compte de ces habitudes pour choisir les recettes.</small>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-g">
         🔄 Générer 7 jours de repas
     </button>
 </form>
 
-<!-- Overlay de chargement -->
-<div id="loading-overlay" class="loading-overlay" style="display:none;">
+<!-- Loading -->
+<div id="load" class="loading-overlay" style="display:none">
     <div class="loading-box">
         <div class="spinner-big"></div>
         <h2>🍳 Génération en cours...</h2>
-        <p>Le chef élabore votre menu avec les recettes disponibles.</p>
-        <p class="loading-tip">(Avec Groq : 10-30 secondes ⚡ — Ollama : 2-3 min 🐢)</p>
+        <p>Le chef élabore votre menu.</p>
+        <p class="loading-tip">Groq ⚡ 10-30s · Ollama 🐢 2-3min</p>
     </div>
 </div>
 
 {% if planning_id %}
-<div class="card text-center">
-    <p>📋 Dernier planning généré :</p>
-    <a href="/planning/{{ planning_id }}" class="btn btn-secondary">Voir le dernier planning →</a>
+<div class="card" style="text-align:center">
+    <p>📋 Dernier planning :</p>
+    <a href="/planning/{{ planning_id }}" class="btn btn-secondary">Voir →</a>
 </div>
 {% endif %}
 
 <script>
-document.getElementById('planning-form').addEventListener('submit', function() {
-    document.getElementById('loading-overlay').style.display = 'flex';
-    document.getElementById('btn-generer').disabled = true;
-    document.getElementById('btn-generer').innerHTML = '⏳ Génération en cours...';
+document.getElementById('pf').addEventListener('submit', function() {
+    document.getElementById('load').style.display='flex';
+    document.getElementById('btn-g').disabled=true;
+    document.getElementById('btn-g').textContent='⏳ Génération...';
 });
 </script>
 {% endblock %}

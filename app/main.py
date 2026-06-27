@@ -197,6 +197,9 @@ async def generer(
     temperature: str = Form(""),
     nb_personnes: int = Form(4),
     ingredients_force: str = Form(""),
+    tags: list[str] = Form([]),
+    etat: str = Form(""),
+    custom_prompt: str = Form(""),
 ):
     """Génère un planning via le LLM et sauvegarde."""
     try:
@@ -214,10 +217,19 @@ async def generer(
                     "error": "Aucune recette trouvée dans Notion. Ajoutez-en d'abord !",
                     "repas_options": REPAS_OPTIONS,
                     "tag_options": TAG_OPTIONS,
+                    "custom_prompt": custom_prompt,
                 },
             )
 
-        # 2. Récupérer les recettes récemment utilisées (éviter répétitions)
+        # 2. Filtrer par tags si sélectionnés
+        if tags and tags[0]:  # tags non vide
+            recettes = [r for r in recettes if any(t in r["tags"] for t in tags)]
+
+        # 3. Filtrer par état si sélectionné
+        if etat:
+            recettes = [r for r in recettes if r["etat"] == etat]
+
+        # 4. Récupérer les recettes récemment utilisées (éviter répétitions)
         exclues = await db.get_recent_recipe_names(weeks=4)
         logger.info(f"{len(recettes)} recettes dispo, {len(exclues)} exclues")
 
@@ -240,6 +252,7 @@ async def generer(
             nb_personnes=nb_personnes,
             ingredients_force=ingredients_force,
             recettes_exclues=list(exclues),
+            custom_prompt=custom_prompt,
         )
 
         # 4. Pour chaque plat sélectionné, extraire les ingrédients
@@ -333,6 +346,7 @@ async def generer(
                 "error": f"Erreur : {str(e)}",
                 "repas_options": REPAS_OPTIONS,
                 "tag_options": TAG_OPTIONS,
+                "custom_prompt": custom_prompt,
             },
         )
 
