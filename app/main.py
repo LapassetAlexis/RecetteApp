@@ -105,10 +105,8 @@ async def index(request: Request):
             "saison_default": saison_default,
             "nb_personnes": 4,
             "planning_id": planning_id,
-            "midis_same": 1,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
-            "custom_prompt": "",
         },
     )
 
@@ -202,7 +200,6 @@ async def generer(
     tags: list[str] = Form([]),
     etat: str = Form(""),
     custom_prompt: str = Form(""),
-    midis_same: int = Form(1),
 ):
     """Génère un planning via le LLM et sauvegarde."""
     try:
@@ -221,7 +218,6 @@ async def generer(
                     "repas_options": REPAS_OPTIONS,
                     "tag_options": TAG_OPTIONS,
                     "custom_prompt": custom_prompt,
-                    "midis_same": midis_same,
                 },
             )
 
@@ -257,7 +253,6 @@ async def generer(
             ingredients_force=ingredients_force,
             recettes_exclues=list(exclues),
             custom_prompt=custom_prompt,
-            midis_same=midis_same,
         )
 
         # 4. Associer chaque plat aux infos Notion

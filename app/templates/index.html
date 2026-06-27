@@ -55,104 +55,38 @@
         <small>Laisse vide pour tout inclure.</small>
     </div>
 
-    <div class="form-r">
-        <div class="form-g">
-            <label for="midis_same">🍳 Même plat du midi pendant</label>
-            <select id="midis_same" name="midis_same">
-                <option value="1" {{ 'selected' if midis_same == 1 else '' }}>1 jour (midi différent chaque jour)</option>
-                <option value="2" {{ 'selected' if midis_same == 2 else '' }}>2 jours consécutifs</option>
-                <option value="3" {{ 'selected' if midis_same == 3 else '' }}>3 jours consécutifs</option>
-            </select>
-            <small>Ex: 3 jours = je cuisine une fois pour lundi, mardi, mercredi midi.</small>
-        </div>
-        <div class="form-g">
-            <label for="ingredients_force">🥫 Restes à écouler</label>
-            <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
-        </div>
+    <div class="form-g">
+        <label for="ingredients_force">🥫 Restes à écouler</label>
+        <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
+    </div>
+
+    <div class="card" style="background:var(--bg);font-size:0.85rem;margin-bottom:16px;">
+        <strong>🍳 Organisation de la semaine :</strong>
+        <ul style="margin:6px 0 0 16px;color:var(--t2);">
+            <li><strong>Lundi → Mardi</strong> midi : même plat (cuisiné pour 2)</li>
+            <li><strong>Mercredi → Vendredi</strong> midi : même plat (cuisiné pour 3)</li>
+            <li><strong>Samedi</strong> midi : plat différent</li>
+            <li><strong>Dimanche</strong> midi : plat différent</li>
+            <li><strong>Soirs</strong> : tous différents, repas sur le pouce</li>
+        </ul>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
 
     <div class="form-g">
-        <label for="custom_prompt">✏️ Instructions personnalisées pour l'IA
-            <button type="button" id="toggle-prompt" class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:0.75rem;">📝 Aperçu du prompt final</button>
-        </label>
-        <textarea id="custom_prompt" name="custom_prompt" rows="5" class="inp" placeholder="Ex: le soir on mange léger, cuisiner pour 2 midis dans la semaine, un soir par semaine restes...">{{ custom_prompt or "" }}</textarea>
-        <small>Ce texte est injecté dans les consignes données à l'IA.</small>
-        <div id="prompt-preview" style="display:none;margin-top:10px;">
-            <div style="font-size:0.8rem;font-weight:600;margin-bottom:4px;">🧠 Prompt complet envoyé à l'IA :</div>
-            <textarea id="prompt-editor" rows="12" class="inp" style="font-family:monospace;font-size:0.78rem;white-space:pre;background:var(--bg);"></textarea>
-            <div style="display:flex;gap:6px;margin-top:6px;">
-                <button type="button" class="btn btn-sm btn-primary" id="apply-prompt">✅ Appliquer mes modifs</button>
-                <button type="button" class="btn btn-ghost btn-sm" id="reset-prompt">↺ Réinitialiser</button>
-            </div>
-            <small style="margin-top:4px;display:block;">Modifie le texte ci-dessus et clique "Appliquer" pour personnaliser le prompt final.</small>
+        <label for="custom_prompt">✏️ Mes consignes pour l'IA</label>
+        <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, un soir par semaine restes du midi...">{{ custom_prompt or "" }}</textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+            <button type="button" id="preview-btn" class="btn btn-ghost btn-sm">📝 Aperçu du prompt final</button>
+            <span id="preview-status" style="font-size:0.8rem;color:var(--t2);"></span>
+        </div>
+        <div id="preview-box" style="display:none;margin-top:8px;">
+            <textarea id="preview-area" rows="12" class="inp" readonly style="font-family:monospace;font-size:0.78rem;background:var(--bg);"></textarea>
+            <small style="margin-top:4px;display:block;">Lecture seule. Modifie les champs ci-dessus puis clique "Appliquer" pour mettre à jour.</small>
         </div>
     </div>
 
-    <script>
-    // Assemblage et édition du prompt complet
-    function buildPrompt() {
-        const s = document.getElementById('saison')?.value || 'printemps';
-        const t = document.getElementById('temperature')?.value || 'tempérée';
-        const n = document.getElementById('nb_personnes')?.value || 4;
-        const r = document.getElementById('ingredients_force')?.value || 'aucun';
-        const m = document.getElementById('midis_same')?.value || '1';
-        const c = document.getElementById('custom_prompt')?.value || 'Aucune.';
-        return `Génère un planning de 7 jours pour une famille.
-
-CONTEXTE :
-- Saison : ${s}
-- Température : ${t}
-- Personnes : ${n}
-- Restes à écouler : ${r}
-- Répétition midis : ${m}
-
-CONSIGNES DE LA FAMILLE :
-${c}
-
-BASE DE RECETTES : 30 recettes disponibles.
-
-RÈGLE DE RÉPÉTITION DES MIDIS :
-${m > 1 ? 'Lundi+Mardi+Mercredi = même plat, Jeudi+Vendredi = même plat, Samedi différent, Dimanche différent. Soirs tous différents.' : 'Tous les repas sont différents.'}`;
-    }
-    document.getElementById('toggle-prompt')?.addEventListener('click', function() {
-        const div = document.getElementById('prompt-preview');
-        const ed = document.getElementById('prompt-editor');
-        if (div.style.display === 'none') {
-            ed.value = buildPrompt();
-            div.style.display = 'block';
-            this.textContent = '🙈 Cacher';
-        } else {
-            div.style.display = 'none';
-            this.textContent = '📝 Aperçu du prompt final';
-        }
-    });
-    document.getElementById('reset-prompt')?.addEventListener('click', function() {
-        document.getElementById('prompt-editor').value = buildPrompt();
-    });
-    document.getElementById('apply-prompt')?.addEventListener('click', function() {
-        let full = document.getElementById('prompt-editor').value;
-        // Extraire la section CONSIGNES pour la mettre dans custom_prompt
-        const match = full.match(/CONSIGNES DE LA FAMILLE :\n([\s\S]*?)(?=\n\nBASE|$)/);
-        if (match) {
-            document.getElementById('custom_prompt').value = match[1].trim();
-        } else {
-            // Si le format a changé, on met tout ce qui est après "CONSIGNES"
-            const parts = full.split('CONSIGNES DE LA FAMILLE :');
-            if (parts.length > 1) {
-                const after = parts[1].split('\n\n')[0];
-                document.getElementById('custom_prompt').value = after.trim();
-            }
-        }
-        document.getElementById('prompt-preview').style.display = 'none';
-        document.getElementById('toggle-prompt').textContent = '📝 Aperçu du prompt final';
-    });
-    </script>
-
-    <button type="submit" class="btn btn-primary btn-lg" id="btn-g">
-        🔄 Générer 7 jours de repas
-    </button>
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-g">🔄 Générer 7 jours de repas</button>
 </form>
 
 <!-- Loading -->
@@ -173,6 +107,67 @@ ${m > 1 ? 'Lundi+Mardi+Mercredi = même plat, Jeudi+Vendredi = même plat, Samed
 {% endif %}
 
 <script>
+const PROMPT_TPL = `Génère un planning de 7 jours pour une famille.
+
+CONTEXTE :
+- Saison : {{SAISON}}
+- Température : {{TEMP}}
+- Personnes : {{NB}}
+- Restes à écouler : {{RESTES}}
+
+CONSIGNES DE LA FAMILLE :
+{{CONSIGNES}}
+
+BASE DE RECETTES : 30 recettes disponibles.
+
+RÉPARTITION DES MIDIS :
+- Lundi + Mardi = même plat
+- Mercredi + Jeudi + Vendredi = même plat
+- Samedi = plat différent
+- Dimanche = plat différent
+- Soirs : TOUS différents, repas sur le pouce (légers, rapides, un soir restes)`;
+
+function buildPrompt() {
+    const s = document.getElementById('saison')?.value || 'printemps';
+    const t = document.getElementById('temperature')?.value || 'tempérée';
+    const n = document.getElementById('nb_personnes')?.value || 4;
+    const r = document.getElementById('ingredients_force')?.value || 'aucun';
+    const c = document.getElementById('custom_prompt')?.value || 'Aucune.';
+    return PROMPT_TPL
+        .replace('{{SAISON}}', s)
+        .replace('{{TEMP}}', t)
+        .replace('{{NB}}', n)
+        .replace('{{RESTES}}', r)
+        .replace('{{CONSIGNES}}', c);
+}
+
+document.getElementById('preview-btn')?.addEventListener('click', function() {
+    const box = document.getElementById('preview-box');
+    const area = document.getElementById('preview-area');
+    if (box.style.display === 'none') {
+        area.value = buildPrompt();
+        box.style.display = 'block';
+        this.textContent = '🙈 Cacher l\'aperçu';
+        document.getElementById('preview-status').textContent = '✅ À jour';
+    } else {
+        box.style.display = 'none';
+        this.textContent = '📝 Aperçu du prompt final';
+    }
+});
+
+// Auto-rafraîchir l'aperçu quand les champs changent
+['saison','temperature','nb_personnes','ingredients_force','custom_prompt'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', function() {
+        const area = document.getElementById('preview-area');
+        if (area && document.getElementById('preview-box').style.display !== 'none') {
+            area.value = buildPrompt();
+            document.getElementById('preview-status').textContent = '✅ Mis à jour';
+        }
+    });
+});
+
+// Loading
 document.getElementById('pf').addEventListener('submit', function() {
     document.getElementById('load').style.display='flex';
     document.getElementById('btn-g').disabled=true;
