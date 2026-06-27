@@ -369,7 +369,8 @@ async def generate_shopping(planning_id: int, request: Request):
                 # Chercher les ingrédients de cette recette dans la liste
                 recette_ings = [i for i in liste_courses if i.get("nom")]
                 if recette_ings:
-                    txt = "\n".join(
+                    nb = planning.get("nb_personnes", 4)
+                    txt = f"Pour {nb} personnes :\n" + "\n".join(
                         f"- {i['nom']}" + (f" : {i['quantite']} {i['unite']}" if i.get('quantite') else "")
                         for i in recette_ings
                     )
