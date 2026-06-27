@@ -164,16 +164,42 @@ function renderGroups() {
 }
 
 document.querySelectorAll('.day-group').forEach(el => {
-    el.addEventListener('click', function() {
+    el.addEventListener('click', function(e) {
         const groups = getGroups();
         const idx = parseInt(this.dataset.idx);
-        // Cycle: augmenter le groupe de 1 (max = max+1)
         const maxG = Math.max(...groups);
-        const newG = groups[idx] >= maxG ? maxG + 1 : groups[idx] + 1;
-        groups[idx] = newG;
-        setGroups(groups);
+        // Menu contextuel léger
+        const existing = document.querySelector('.group-picker');
+        if (existing) existing.remove();
+        if (this.querySelector('.group-picker')) return;
+
+        const picker = document.createElement('div');
+        picker.className = 'group-picker';
+        for (let g = 1; g <= maxG + 1; g++) {
+            const dot = document.createElement('div');
+            const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
+            dot.style.cssText = `width:24px;height:24px;border-radius:50%;background:${col};cursor:pointer;border:2px solid ${g === groups[idx] ? '#333' : 'transparent'};display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;`;
+            dot.textContent = g;
+            dot.addEventListener('click', function(ev) {
+                ev.stopPropagation();
+                groups[idx] = g;
+                setGroups(groups);
+                picker.remove();
+            });
+            picker.appendChild(dot);
+        }
+        // Positionner
+        this.style.position = 'relative';
+        this.appendChild(picker);
+        e.stopPropagation();
     });
 });
+
+// Fermer le picker au clic ailleurs
+document.addEventListener('click', function() {
+    document.querySelectorAll('.group-picker').forEach(p => p.remove());
+});
+
 
 document.getElementById('reset-groups')?.addEventListener('click', function() {
     setGroups([1,1,2,2,2,3,4]);
