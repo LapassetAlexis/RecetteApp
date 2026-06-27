@@ -407,6 +407,7 @@ async def ajouter_recette(
     nom: str = Form(""),
     repas: str = Form(""),
     tags: list[str] = Form([]),
+    moment: str = Form(""),
 ):
     """Ajoute une recette depuis une URL ou manuellement."""
     error = None
@@ -433,6 +434,7 @@ async def ajouter_recette(
                 url=url,
                 repas=repas,
                 tags=tags,
+                moment=moment,
             )
             recette_url = result.get("url", "")
             success = f"Recette « {nom} » ajoutée avec succès !"

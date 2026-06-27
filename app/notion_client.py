@@ -89,6 +89,11 @@ class NotionClient:
         if p["État"]["status"]:
             etat = p["État"]["status"]["name"]
 
+        # Moment (select) - peut ne pas exister
+        moment = ""
+        if "Moment" in p and p["Moment"]["select"]:
+            moment = p["Moment"]["select"]["name"]
+
         return {
             "id": page["id"],
             "nom": nom,
@@ -98,6 +103,7 @@ class NotionClient:
             "tags": tags,
             "note": note,
             "etat": etat,
+            "moment": moment,
         }
 
     # ── Création d'une fiche ──────────────────────────────────────
@@ -109,6 +115,7 @@ class NotionClient:
         repas: str = "",
         tags: list[str] | None = None,
         etat: str = "À essayer",
+        moment: str = "",
     ) -> dict[str, Any]:
         """Crée une nouvelle page dans la base de recettes."""
         properties: dict[str, Any] = {
@@ -123,6 +130,8 @@ class NotionClient:
             properties["Tag"] = {
                 "multi_select": [{"name": t} for t in tags]
             }
+        if moment:
+            properties["Moment"] = {"select": {"name": moment}}
 
         body = {
             "parent": {"database_id": self.database_id},
@@ -166,8 +175,7 @@ class NotionClient:
             return resp.json()
 
     async def ensure_ingredients_field(self) -> bool:
-        """Vérifie/crée le champ Ingrédients dans la base Notion."""
-        # D'abord vérifier si le champ existe
+        """Vérifie/crée le champ Ingrédients + Moment dans la base Notion."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{BASE_URL}/databases/{self.database_id}",
@@ -176,25 +184,31 @@ class NotionClient:
             )
             resp.raise_for_status()
             db = resp.json()
-            if "Ingrédients" in db.get("properties", {}):
-                return True
+            props = db.get("properties", {})
+            update_props = {}
 
-            # Créer le champ
-            update = {
-                "properties": {
-                    "Ingrédients": {
-                        "rich_text": {}
+            if "Ingrédients" not in props:
+                update_props["Ingrédients"] = {"rich_text": {}}
+
+            if "Moment" not in props:
+                update_props["Moment"] = {
+                    "select": {
+                        "options": [
+                            {"name": "Midi", "color": "orange"},
+                            {"name": "Soir", "color": "purple"},
+                            {"name": "Les deux", "color": "green"},
+                        ]
                     }
                 }
-            }
-            resp = await client.patch(
-                f"{BASE_URL}/databases/{self.database_id}",
-                headers=self._headers,
-                json=update,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            logger.info("✅ Champ Ingrédients créé dans Notion")
+
+            if update_props:
+                await client.patch(
+                    f"{BASE_URL}/databases/{self.database_id}",
+                    headers=self._headers,
+                    json={"properties": update_props},
+                    timeout=30,
+                )
+                logger.info(f"✅ Champs créés dans Notion: {list(update_props.keys())}")
             return True
 
     # ── Mise à jour de la note ──────────────────────────────────

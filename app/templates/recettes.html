@@ -23,6 +23,9 @@
             {% if recette.etat %}
             <span class="chip chip-etat">{{ recette.etat }}</span>
             {% endif %}
+            {% if recette.moment %}
+            <span class="chip chip-moment">{{ recette.moment }}</span>
+            {% endif %}
         </div>
         {% if recette.tags %}
         <div class="recipe-tags">

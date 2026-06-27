@@ -194,7 +194,7 @@ class LLMClient:
     ) -> list[dict[str, Any]]:
         recettes_str = json.dumps(
             [
-                {"nom": r["nom"], "type": r["repas"], "tags": r["tags"]}
+                {"nom": r["nom"], "type": r["repas"], "tags": r["tags"], "moment": r.get("moment", "")}
                 for r in recettes
                 if r["repas"] in ("Plat", "Entrée", "Légume", "Accompagnement", "")
             ],

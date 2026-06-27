@@ -100,6 +100,7 @@ textarea { resize:vertical; }
 .chip-repas { background:#fef3e2; color:var(--pr); }
 .chip-etat { background:#e8f8e8; color:var(--sc); }
 .chip-note { background:#f0e8ff; color:var(--ac); }
+.chip-moment { background:#e8f0fe; color:#2980b9; }
 
 /* ── Shopping ────────────────────────────────── */
 .shop-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
