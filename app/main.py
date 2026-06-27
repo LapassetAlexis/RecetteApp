@@ -255,13 +255,9 @@ async def generer(
             custom_prompt=custom_prompt,
         )
 
-        # 4. Pour chaque plat sélectionné, extraire les ingrédients
-        liste_courses: list[dict] = []
-        courses_map: dict[str, dict] = {}  # dédoublonnage
-
+        # 4. Associer chaque plat aux infos Notion
         for plat in plats:
             plat["notion_id"] = ""
-            # Chercher dans la base Notion
             for r in recettes:
                 if r["nom"].lower().strip() == plat["nom_recette"].lower().strip():
                     plat["notion_id"] = r["id"]
@@ -269,63 +265,35 @@ async def generer(
                     plat["notion_url"] = r.get("notion_url", "")
                     break
 
-            # Pause entre chaque appel API (sauf Ollama)
-            if settings.llm_provider in ("gemini", "groq"):
-                await asyncio.sleep(1.5)
-
-            # Extraire les ingrédients (avec cache)
-            try:
-                # Vérifier le cache local
-                cached = None
-                notion_id = plat.get("notion_id", "")
-                if notion_id:
-                    cached = await db.get_enriched(notion_id)
-                if cached and cached.get("ingredients"):
-                    import json
-                    ing_list = json.loads(cached["ingredients"])
-                    ingredients_data = {"ingredients": ing_list, "cuisson_minutes": cached.get("cuisson_minutes", 0)}
-                else:
-                    ingredients_data = await llm.extract_ingredients(
-                        plat["nom_recette"],
-                        plat.get("url", ""),
-                        nb_personnes,
-                    )
-                    # Mettre en cache
-                    if notion_id and ingredients_data.get("ingredients"):
-                        await db.save_enriched(
-                            notion_id=notion_id,
-                            recipe_name=plat["nom_recette"],
-                            ingredients=json.dumps(ingredients_data["ingredients"]),
-                            cuisson_minutes=ingredients_data.get("cuisson_minutes", 0),
-                        )
-                for ing in ingredients_data.get("ingredients", []):
-                    nom_ing = ing["nom"].lower().strip()
-                    if nom_ing in courses_map:
-                        # Additionner les quantités si même unité
-                        existing = courses_map[nom_ing]
-                        if existing["unite"] == ing.get("unite", ""):
+        # 5. Extraire les ingrédients en 1 appel batch (dédoublonné)
+        liste_courses = []
+        try:
+            liste_courses = await llm.batch_extract_ingredients(plats, nb_personnes)
+        except Exception as e:
+            logger.warning(f"Batch échoué ({e}), extraction individuelle...")
+            courses_map = {}
+            for plat in plats:
+                try:
+                    d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), nb_personnes)
+                    for ing in d.get("ingredients", []):
+                        k = ing["nom"].lower().strip()
+                        if k in courses_map and courses_map[k]["unite"] == ing.get("unite", ""):
                             try:
-                                q1 = float(str(existing["quantite"]).replace(",", "."))
+                                q1 = float(str(courses_map[k]["quantite"]).replace(",", "."))
                                 q2 = float(str(ing["quantite"]).replace(",", "."))
-                                existing["quantite"] = str(q1 + q2)
-                            except (ValueError, TypeError):
-                                pass
-                    else:
-                        courses_map[nom_ing] = {
-                            "nom": ing["nom"],
-                            "quantite": ing.get("quantite", ""),
-                            "unite": ing.get("unite", ""),
-                        }
-            except Exception as e:
-                logger.warning(f"Erreur extraction ingrédients pour {plat['nom_recette']}: {e}")
+                                courses_map[k]["quantite"] = str(q1 + q2)
+                            except: pass
+                        else:
+                            courses_map[k] = {"nom": ing["nom"], "quantite": ing.get("quantite", ""), "unite": ing.get("unite", "")}
+                except: pass
+            liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
 
-        liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
-
-        # 5. Ajouter les ingrédients forcés à la liste de courses si pas déjà présents
+        # Ajouter les ingrédients forcés manquants
         if ingredients_force:
             forces = [i.strip() for i in ingredients_force.split(",")]
+            existing = {i["nom"].lower() for i in liste_courses}
             for f in forces:
-                if f.lower() not in courses_map:
+                if f.lower() not in existing:
                     liste_courses.append({"nom": f, "quantite": "", "unite": ""})
 
         # 6. Sauvegarder en base

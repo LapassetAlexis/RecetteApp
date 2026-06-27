@@ -75,10 +75,48 @@
     <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
 
     <div class="form-g">
-        <label for="custom_prompt">✏️ Instructions personnalisées pour l'IA</label>
+        <label for="custom_prompt">✏️ Instructions personnalisées pour l'IA
+            <button type="button" id="toggle-prompt" class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:0.75rem;">📝 Voir le prompt complet</button>
+        </label>
         <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, cuisiner pour 2 midis dans la semaine, un soir par semaine restes...">{{ custom_prompt or "" }}</textarea>
+        <div id="prompt-preview" style="display:none;margin-top:10px;background:var(--bg);padding:12px;border-radius:8px;font-size:0.8rem;white-space:pre-wrap;font-family:monospace;max-height:300px;overflow-y:auto;"></div>
         <small>L'IA tiendra compte de ces habitudes pour choisir les recettes.</small>
     </div>
+
+    <script>
+    // Affichage du prompt complet
+    document.getElementById('toggle-prompt')?.addEventListener('click', function() {
+        const preview = document.getElementById('prompt-preview');
+        if (preview.style.display === 'none') {
+            const saison = document.getElementById('saison')?.value || 'printemps';
+            const temp = document.getElementById('temperature')?.value || 'tempérée';
+            const nb = document.getElementById('nb_personnes')?.value || 4;
+            const restes = document.getElementById('ingredients_force')?.value || 'aucun';
+            const consignes = document.getElementById('custom_prompt')?.value || 'Aucune.';
+            preview.textContent = `Génère un planning de 7 jours pour une famille.
+
+CONTEXTE :
+- Saison : ${saison}
+- Température : ${temp}
+- Personnes : ${nb}
+- Restes à écouler : ${restes}
+
+CONSIGNES DE LA FAMILLE :
+${consignes}
+
+BASE DE RECETTES : 30 recettes sélectionnées aléatoirement
+(sur 97 disponibles, filtrées par tes critères)
+
+Choisis 14 recettes (7j × midi+soir), sans doublon sur la semaine.
+Équilibre viande/poisson/végé.`;
+            preview.style.display = 'block';
+            this.textContent = '🙈 Cacher le prompt';
+        } else {
+            preview.style.display = 'none';
+            this.textContent = '📝 Voir le prompt complet';
+        }
+    });
+    </script>
 
     <button type="submit" class="btn btn-primary btn-lg" id="btn-g">
         🔄 Générer 7 jours de repas
