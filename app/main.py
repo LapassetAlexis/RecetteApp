@@ -192,7 +192,6 @@ async def detail_recette(request: Request, page_id: str):
                     else:
                         cook_content += f"@{i['nom']}\n"
             except: pass
-        cook_content += "\nInstructions à compléter..."
 
         recipe_obj = parse_cook(cook_content)
         html_content = cook_to_html(recipe_obj)
