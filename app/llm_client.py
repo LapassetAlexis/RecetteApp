@@ -459,9 +459,10 @@ Extrais les informations suivantes :
 - type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Boisson, Petit dej)
 - tags : une liste de tags pertinents (parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné)
 - instructions : les étapes de cuisson, sous forme de liste en français, chaque étape sur une nouvelle ligne
+- image_url : l'URL de l'image principale de la recette (si trouvée sur la page)
 
 Répond UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "étape 1\\nétape 2\\nétape 3"}}"""
+{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "...", "image_url": "..."}}"""
 
         raw = await self._chat("", user_prompt, temperature=0.1)
         raw = raw.strip()

@@ -493,6 +493,7 @@ async def api_analyze_url(request: Request):
             "tags": tags,
             "ingredients": ingredients,
             "instructions": info.get("instructions", ""),
+            "image_url": info.get("image_url", ""),
             "moment": "Les deux",
         }
 
@@ -618,6 +619,8 @@ async def ajouter_recette(
                 try:
                     if ingredients_manual:
                         await notion.update_ingredients(page_id, ingredients_manual)
+                    if instructions_manual:
+                        await notion.append_instructions(page_id, instructions_manual)
                     # Sauvegarder en cache local
                     import json
                     if ingredients_manual:

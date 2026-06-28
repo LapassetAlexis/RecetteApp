@@ -247,6 +247,70 @@ class NotionClient:
                 logger.info(f"✅ Champs créés dans Notion: {list(update_props.keys())}")
             return True
 
+    # ── Mise à jour de l'image ───────────────────────────────────
+
+    async def update_image(
+        self,
+        page_id: str,
+        image_url: str,
+    ) -> dict[str, Any]:
+        """Définit l'image de couverture d'une page Notion."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={
+                    "cover": {
+                        "type": "external",
+                        "external": {"url": image_url}
+                    }
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── Ajout d'instructions dans le corps ──────────────────────
+
+    async def append_instructions(
+        self,
+        page_id: str,
+        instructions_text: str,
+    ) -> dict[str, Any]:
+        """Ajoute les instructions comme blocks dans le corps de la page."""
+        lines = [l.strip() for l in instructions_text.split("\n") if l.strip()]
+        if not lines:
+            return {}
+        children = []
+        for line in lines:
+            text = line.lstrip("0123456789. -–*").strip()
+            if text:
+                children.append({
+                    "object": "block",
+                    "type": "numbered_list_item",
+                    "numbered_list_item": {
+                        "rich_text": [{"type": "text", "text": {"content": text[:500]}}]
+                    }
+                })
+        if not children:
+            return {}
+        blocks = [
+            {"object": "block", "type": "heading_3", "heading_3": {
+                "rich_text": [{"type": "text", "text": {"content": "👨‍🍳 Instructions"}}]
+            }}
+        ] + children
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/blocks/{page_id}/children",
+                headers=self._headers,
+                json={"children": blocks},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+
     # ── Mise à jour de la note ──────────────────────────────────
 
     async def update_rating(
