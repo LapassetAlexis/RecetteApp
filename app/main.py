@@ -457,6 +457,48 @@ async def api_rate(page_id: str, request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/analyze-url")
+async def api_analyze_url(request: Request):
+    """Analyse une URL et retourne les infos extraites."""
+    import json
+    try:
+        data = await request.json()
+        url = data.get("url", "")
+        if not url:
+            return {"error": "URL manquante"}
+
+        # Extraire les infos générales
+        info = await llm.extract_recipe_from_url(url)
+        nom = info.get("nom", "")
+        repas = info.get("type_repas", "")
+        tags = info.get("tags", [])
+
+        # Extraire les ingrédients
+        ingredients = ""
+        if nom:
+            try:
+                d = await llm.extract_ingredients(nom, url, 4)
+                ings = d.get("ingredients", [])
+                if ings:
+                    ingredients = "\n".join(
+                        f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
+                        for i in ings
+                    )
+            except: pass
+
+        return {
+            "nom": nom,
+            "repas": repas,
+            "tags": tags,
+            "ingredients": ingredients,
+            "moment": "Les deux",
+        }
+
+    except Exception as e:
+        logger.exception("Erreur analyse URL")
+        return {"error": str(e)}
+
+
 @app.post("/api/enrich-all")
 async def api_enrich_all():
     """Parcourt toutes les recettes Notion et ajoute les ingrédients manquants."""

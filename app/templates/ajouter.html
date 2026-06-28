@@ -3,7 +3,6 @@
 {% block content %}
 <div class="hero">
     <h1>➕ Ajouter une recette</h1>
-    <p>Colle une URL de recette, ou saisis les infos manuellement.</p>
 </div>
 
 {% if success %}
@@ -13,23 +12,29 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<form method="POST" action="/ajouter-recette" class="card form-ajouter">
-    <div class="form-group">
-        <label for="url">🔗 URL de la recette (lien ou vidéo)</label>
-        <input type="url" id="url" name="url" placeholder="https://..." class="input-wide">
-        <small>Le LLM analysera le lien pour extraire le nom et les infos automatiquement.</small>
+<div class="card" id="step1">
+    <div class="form-g">
+        <label for="url-input">🔗 URL de la recette (ou vidéo)</label>
+        <div style="display:flex;gap:8px;">
+            <input type="url" id="url-input" placeholder="https://..." class="inp" style="flex:1;">
+            <button id="btn-analyze" class="btn btn-primary">🔍 Analyser</button>
+        </div>
+        <small>Colle le lien → clique Analyser → l'IA extrait les infos → tu valides.</small>
     </div>
+    <div id="analyze-status" style="margin-top:8px;font-size:0.85rem;color:var(--t2);"></div>
+</div>
 
-    <hr class="separator">
+<form method="POST" action="/ajouter-recette" class="card" id="step2" style="display:none;">
+    <input type="hidden" name="url" id="url-hidden">
 
-    <div class="form-group">
+    <div class="form-g">
         <label for="nom">📝 Nom de la recette</label>
-        <input type="text" id="nom" name="nom" placeholder="Tarte aux pommes..." class="input-wide">
+        <input type="text" id="nom" name="nom" class="inp" required>
     </div>
 
-    <div class="form-row">
-        <div class="form-group">
-            <label for="repas">🍽️ Type de repas</label>
+    <div class="form-r">
+        <div class="form-g">
+            <label for="repas">🍽️ Type</label>
             <select id="repas" name="repas">
                 <option value="">— Auto —</option>
                 {% for opt in repas_options %}
@@ -37,8 +42,8 @@
                 {% endfor %}
             </select>
         </div>
-        <div class="form-group">
-            <label for="moment">🕐 Pour quel moment ?</label>
+        <div class="form-g">
+            <label for="moment">🕐 Moment</label>
             <select id="moment" name="moment">
                 <option value="Les deux">Midi et soir</option>
                 <option value="Midi">Midi uniquement</option>
@@ -47,26 +52,71 @@
         </div>
     </div>
 
-    <div class="form-group">
+    <div class="form-g">
         <label>🏷️ Tags</label>
-        <div class="tags-grid">
+        <div id="tags-container" style="display:flex;flex-wrap:wrap;gap:4px;">
             {% for tag in tag_options %}
-            <label class="tag-checkbox">
-                <input type="checkbox" name="tags" value="{{ tag }}">
-                <span>{{ tag }}</span>
-            </label>
+            <label class="tgl"><input type="checkbox" name="tags" value="{{ tag }}" class="tag-cb"><span>{{ tag }}</span></label>
             {% endfor %}
         </div>
     </div>
 
-    <div class="form-group">
-        <label for="ingredients_manual">🥦 Ingrédients (optionnel)</label>
-        <textarea id="ingredients_manual" name="ingredients_manual" rows="4" class="input-wide" placeholder="Ex: 4 pommes, 200g farine, 2 œufs, 1 cuillère d'huile..."></textarea>
-        <small>Laisse vide pour extraction automatique depuis l'URL.</small>
+    <div class="form-g">
+        <label for="ingredients_manual">🥦 Ingrédients</label>
+        <textarea id="ingredients_manual" name="ingredients_manual" rows="5" class="inp" placeholder="4 pommes, 200g farine..."></textarea>
+        <small>Modifie si besoin avant d'ajouter.</small>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg">
-        💾 Ajouter la recette
-    </button>
+    <button type="submit" class="btn btn-primary btn-lg">💾 Ajouter la recette</button>
+    <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Analyser une autre URL</button>
 </form>
+
+<script>
+document.getElementById('btn-analyze')?.addEventListener('click', async function() {
+    const url = document.getElementById('url-input').value.trim();
+    if (!url) { alert('Colle une URL d\'abord !'); return; }
+
+    const status = document.getElementById('analyze-status');
+    const btn = this;
+    btn.disabled = true; btn.textContent = '⏳ Analyse...'; status.textContent = 'Extraction en cours...';
+
+    try {
+        const r = await fetch('/api/analyze-url', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url})
+        });
+        const d = await r.json();
+
+        if (d.error) { status.textContent = '❌ ' + d.error; btn.disabled = false; btn.textContent = '🔍 Analyser'; return; }
+
+        // Remplir le formulaire
+        document.getElementById('url-hidden').value = url;
+        document.getElementById('nom').value = d.nom || '';
+        if (d.repas) document.getElementById('repas').value = d.repas;
+        if (d.moment) document.getElementById('moment').value = d.moment;
+        if (d.ingredients) document.getElementById('ingredients_manual').value = d.ingredients;
+        if (d.tags) {
+            document.querySelectorAll('.tag-cb').forEach(cb => {
+                cb.checked = d.tags.includes(cb.value);
+            });
+        }
+
+        document.getElementById('step1').style.display = 'none';
+        document.getElementById('step2').style.display = 'block';
+        status.textContent = '✅ Analyse terminée — vérifie et ajoute !';
+    } catch(e) {
+        status.textContent = '❌ Erreur réseau';
+        btn.disabled = false; btn.textContent = '🔍 Analyser';
+    }
+});
+
+document.getElementById('btn-back')?.addEventListener('click', function() {
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step1').style.display = 'block';
+    document.getElementById('btn-analyze').disabled = false;
+    document.getElementById('btn-analyze').textContent = '🔍 Analyser';
+    document.getElementById('analyze-status').textContent = '';
+});
+</script>
 {% endblock %}
