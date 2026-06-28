@@ -43,18 +43,6 @@
         </div>
     </div>
 
-    <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
-
-    <div class="form-g">
-        <label>🏷️ Tags à inclure (optionnel)</label>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;">
-            {% for tag in tag_options %}
-            <label class="tgl"><input type="checkbox" name="tags" value="{{ tag }}"><span>{{ tag }}</span></label>
-            {% endfor %}
-        </div>
-        <small>Laisse vide pour tout inclure.</small>
-    </div>
-
     <!-- Configuration fusionnée : groupes midi + personnes par jour -->
     <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
