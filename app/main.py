@@ -192,6 +192,7 @@ async def detail_recette(request: Request, page_id: str):
                     else:
                         cook_content += f"@{i['nom']}\n"
             except: pass
+        cook_content += "\n"
 
         recipe_obj = parse_cook(cook_content)
         html_content = cook_to_html(recipe_obj)
@@ -491,6 +492,7 @@ async def api_analyze_url(request: Request):
             "repas": repas,
             "tags": tags,
             "ingredients": ingredients,
+            "instructions": info.get("instructions", ""),
             "moment": "Les deux",
         }
 
@@ -577,6 +579,7 @@ async def ajouter_recette(
     tags: list[str] = Form([]),
     moment: str = Form(""),
     ingredients_manual: str = Form(""),
+    instructions_manual: str = Form(""),
 ):
     """Ajoute une recette depuis une URL ou manuellement."""
     error = None
@@ -610,12 +613,25 @@ async def ajouter_recette(
             success = f"Recette « {nom} » ajoutée avec succès !"
             logger.info(f"Recette ajoutée: {nom} → {recette_url}")
 
-            # Sauvegarder les ingrédients saisis manuellement
-            if ingredients_manual and page_id:
+            # Sauvegarder les ingrédients et instructions saisis manuellement
+            if page_id and (ingredients_manual or instructions_manual):
                 try:
-                    await notion.update_ingredients(page_id, ingredients_manual)
+                    if ingredients_manual:
+                        await notion.update_ingredients(page_id, ingredients_manual)
+                    # Sauvegarder en cache local
+                    import json
+                    if ingredients_manual:
+                        ings_list = [
+                            {"nom": l.strip().lstrip("- ").split(":")[0].strip(), "quantite": "", "unite": ""}
+                            for l in ingredients_manual.split("\n") if l.strip()
+                        ]
+                        await db.save_enriched(
+                            notion_id=page_id,
+                            recipe_name=nom,
+                            ingredients=json.dumps(ings_list),
+                        )
                 except Exception as e:
-                    logger.warning(f"Impossible de sauvegarder les ingrédients: {e}")
+                    logger.warning(f"Impossible de sauvegarder les infos: {e}")
 
     except Exception as e:
         logger.exception("Erreur ajout recette")

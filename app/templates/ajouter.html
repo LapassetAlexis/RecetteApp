@@ -63,8 +63,13 @@
 
     <div class="form-g">
         <label for="ingredients_manual">🥦 Ingrédients</label>
-        <textarea id="ingredients_manual" name="ingredients_manual" rows="5" class="inp" placeholder="4 pommes, 200g farine..."></textarea>
-        <small>Modifie si besoin avant d'ajouter.</small>
+        <textarea id="ingredients_manual" name="ingredients_manual" rows="4" class="inp" placeholder="4 pommes, 200g farine..."></textarea>
+    </div>
+
+    <div class="form-g">
+        <label for="instructions_manual">👨‍🍳 Instructions de cuisson</label>
+        <textarea id="instructions_manual" name="instructions_manual" rows="5" class="inp" placeholder="1. Éplucher les pommes\n2. Mélanger la farine..."></textarea>
+        <small>Optionnel, mais sera affiché joliment sur la page détail.</small>
     </div>
 
     <button type="submit" class="btn btn-primary btn-lg">💾 Ajouter la recette</button>
@@ -96,6 +101,7 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
         if (d.repas) document.getElementById('repas').value = d.repas;
         if (d.moment) document.getElementById('moment').value = d.moment;
         if (d.ingredients) document.getElementById('ingredients_manual').value = d.ingredients;
+        if (d.instructions) document.getElementById('instructions_manual').value = d.instructions;
         if (d.tags) {
             document.querySelectorAll('.tag-cb').forEach(cb => {
                 cb.checked = d.tags.includes(cb.value);

@@ -458,9 +458,10 @@ Extrais les informations suivantes :
 - nom : le nom de la recette
 - type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Boisson, Petit dej)
 - tags : une liste de tags pertinents (parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné)
+- instructions : les étapes de cuisson, sous forme de liste en français, chaque étape sur une nouvelle ligne
 
 Répond UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."]}}"""
+{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "étape 1\\nétape 2\\nétape 3"}}"""
 
         raw = await self._chat("", user_prompt, temperature=0.1)
         raw = raw.strip()
