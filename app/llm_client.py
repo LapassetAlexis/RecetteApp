@@ -191,6 +191,7 @@ class LLMClient:
         recettes_exclues: list[str],
         custom_prompt: str = "",
         midi_groups: str = "1,1,2,2,2,3,4",
+        per_day: str = "2,2,2,2,2,4,4",
     ) -> list[dict[str, Any]]:
         recettes_str = json.dumps(
             [
@@ -224,7 +225,8 @@ class LLMClient:
 CONTEXTE :
 - Saison : {saison}
 - Température extérieure : {temperature}
-- Nombre de personnes : {nb_personnes}
+- Personnes par jour : Lun={per_day.split(',')[0]}, Mar={per_day.split(',')[1]}, Mer={per_day.split(',')[2]}, Jeu={per_day.split(',')[3]}, Ven={per_day.split(',')[4]}, Sam={per_day.split(',')[5]}, Dim={per_day.split(',')[6]}
+- Nombre de personnes max : {nb_personnes}
 - Ingrédients à forcer (restes) : {ingredients_force or "aucun"}
 - Recettes déjà utilisées récemment (à exclure) : {', '.join(recettes_exclues) or 'aucune'}
 

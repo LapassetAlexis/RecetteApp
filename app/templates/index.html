@@ -17,8 +17,18 @@
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
         </div>
         <div class="form-g">
-            <label for="nb_personnes">👨‍👩‍👧‍👧 Personnes</label>
-            <input type="number" id="nb_personnes" name="nb_personnes" value="{{ nb_personnes }}" min="1" max="20" required>
+            <label>👨‍👩‍👧‍👧 Personnes par jour</label>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
+                {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
+                {% set default_pers = [2,2,2,2,2,4,4] %}
+                {% for i in range(7) %}
+                <div style="text-align:center;">
+                    <div style="font-size:0.7rem;color:var(--t2);margin-bottom:2px;">{{ jours[i] }}</div>
+                    <input type="number" name="nb_{{ jours[i]|lower }}" value="{{ default_pers[i] }}" min="1" max="20" style="width:100%;text-align:center;padding:6px 2px;">
+                </div>
+                {% endfor %}
+            </div>
+            <small>Nombre de personnes à table chaque jour (les quantités s'adaptent).</small>
         </div>
     </div>
     <div class="form-r">
@@ -225,19 +235,22 @@ function buildMidiDesc(groups) {
 }
 
 function buildPrompt() {
+    const d = ['lun','mar','mer','jeu','ven','sam','dim'];
+    const days = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+    const pers = d.map(id => document.getElementById('nb_'+id)?.value || '2');
     const s = document.getElementById('saison')?.value || 'printemps';
     const t = document.getElementById('temperature')?.value || 'tempérée';
-    const n = document.getElementById('nb_personnes')?.value || 4;
     const r = document.getElementById('ingredients_force')?.value || 'aucun';
     const c = document.getElementById('custom_prompt')?.value || 'Aucune.';
     const groups = getGroups();
     const midiDesc = buildMidiDesc(groups);
+    const perDayStr = days.map((n,i) => `${n}=${pers[i]}`).join(', ');
     return `Génère un planning de 7 jours pour une famille.
 
 CONTEXTE :
 - Saison : ${s}
 - Température : ${t}
-- Personnes : ${n}
+- Personnes par jour : ${perDayStr}
 - Restes à écouler : ${r}
 
 CONSIGNES DE LA FAMILLE :

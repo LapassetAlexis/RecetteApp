@@ -197,9 +197,15 @@ async def historique(request: Request):
 async def generer(
     request: Request,
     week_start: str = Form(...),
+    nb_lun: int = Form(2),
+    nb_mar: int = Form(2),
+    nb_mer: int = Form(2),
+    nb_jeu: int = Form(2),
+    nb_ven: int = Form(2),
+    nb_sam: int = Form(4),
+    nb_dim: int = Form(4),
     saison: str = Form(...),
     temperature: str = Form(""),
-    nb_personnes: int = Form(4),
     ingredients_force: str = Form(""),
     tags: list[str] = Form([]),
     etat: str = Form(""),
@@ -207,6 +213,10 @@ async def generer(
     midi_groups: str = Form("1,1,2,2,2,3,4"),
 ):
     """Génère un planning via le LLM et sauvegarde."""
+    # Calculer le nb de personnes moyen pour les ingrédients
+    pers = [nb_lun, nb_mar, nb_mer, nb_jeu, nb_ven, nb_sam, nb_dim]
+    nb_personnes = max(pers)  # On prend le max pour les quantités
+    per_day = ",".join(str(p) for p in pers)
     try:
         # 1. Récupérer toutes les recettes Notion
         recettes = await notion.get_all_recipes()
@@ -259,6 +269,7 @@ async def generer(
             recettes_exclues=list(exclues),
             custom_prompt=custom_prompt,
             midi_groups=midi_groups,
+            per_day=per_day,
         )
 
         # 4. Associer chaque plat aux infos Notion
