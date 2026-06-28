@@ -581,6 +581,7 @@ async def ajouter_recette(
     moment: str = Form(""),
     ingredients_manual: str = Form(""),
     instructions_manual: str = Form(""),
+    image_url: str = Form(""),
 ):
     """Ajoute une recette depuis une URL ou manuellement."""
     error = None
@@ -614,13 +615,15 @@ async def ajouter_recette(
             success = f"Recette « {nom} » ajoutée avec succès !"
             logger.info(f"Recette ajoutée: {nom} → {recette_url}")
 
-            # Sauvegarder les ingrédients et instructions saisis manuellement
-            if page_id and (ingredients_manual or instructions_manual):
+            # Sauvegarder les ingrédients, instructions et image
+            if page_id and (ingredients_manual or instructions_manual or image_url):
                 try:
                     if ingredients_manual:
                         await notion.update_ingredients(page_id, ingredients_manual)
                     if instructions_manual:
                         await notion.append_instructions(page_id, instructions_manual)
+                    if image_url:
+                        await notion.update_image(page_id, image_url)
                     # Sauvegarder en cache local
                     import json
                     if ingredients_manual:
