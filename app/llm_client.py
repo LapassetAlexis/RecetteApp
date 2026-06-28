@@ -447,22 +447,55 @@ Répond UNIQUEMENT ce JSON :
             return []
 
     # ── Extraction depuis URL ────────────────────────────────────
-
     async def extract_recipe_from_url(
         self, url: str
     ) -> dict[str, Any]:
-        user_prompt = f"""Analyse l'URL suivante qui contient une recette de cuisine :
-{url}
+        """Récupère le contenu réel de l'URL et extrait les infos via LLM."""
+        page_text = ""
+        og_image = ""
 
-Extrais les informations suivantes :
-- nom : le nom de la recette
-- type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Boisson, Petit dej)
-- tags : une liste de tags pertinents (parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné)
-- instructions : les étapes de cuisson, sous forme de liste en français, chaque étape sur une nouvelle ligne
-- image_url : l'URL de l'image principale de la recette (si trouvée sur la page)
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                resp = await client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                resp.raise_for_status()
+                html = resp.text
+
+                # Extraire l'image og:image
+                import re as re2
+                og_match = re2.search(
+                    r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
+                    html, re2.IGNORECASE
+                )
+                if og_match:
+                    og_image = og_match.group(1)
+
+                # Extraire le texte visible (stripper les balises)
+                text = re2.sub(r'<script[^>]*>.*?</script>', '', html, flags=re2.DOTALL | re2.IGNORECASE)
+                text = re2.sub(r'<style[^>]*>.*?</style>', '', text, flags=re2.DOTALL | re2.IGNORECASE)
+                text = re2.sub(r'<[^>]+>', ' ', text)
+                text = re2.sub(r'\s+', ' ', text).strip()
+                # Garder les 4000 premiers caractères utiles
+                page_text = text[:4000]
+
+        except Exception as e:
+            logger.warning(f"Impossible de récupérer la page {url}: {e}")
+
+        user_prompt = f"""Voici le contenu textuel d'une page web de recette de cuisine.
+
+CONTENU DE LA PAGE :
+{page_text or "Contenu non accessible, utilise tes connaissances."}
+
+À partir de ce contenu, extrais EXACTEMENT les informations suivantes :
+- nom : le nom de la recette (copie-le tel quel depuis le texte)
+- type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Petit dej)
+- tags : une liste de tags parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné
+- instructions : RECOPIE TEXTUELLEMENT les étapes de cuisson, sans reformuler, sans ajouter d'introduction, séparées par des retours à la ligne
+- image_url : "{og_image}" (utilise cette URL si elle existe, sinon laisse vide)
 
 Répond UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "...", "image_url": "..."}}"""
+{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "...", "image_url": "{og_image}"}}"""
 
         raw = await self._chat("", user_prompt, temperature=0.1)
         raw = raw.strip()
