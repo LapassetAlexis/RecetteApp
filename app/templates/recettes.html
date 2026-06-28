@@ -46,6 +46,7 @@
         {% if recette.url %}
         <a href="{{ recette.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
         {% endif %}
+        <a href="/recette/{{ recette.id }}" class="recipe-link" style="margin-left:6px;">📖 Détail</a>
     </div>
     {% endfor %}
 </div>

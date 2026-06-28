@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ recette.nom }}{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>📖 {{ recette.nom }}</h1>
+    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+        {% if recette.repas %}<span class="chip chip-repas">{{ recette.repas }}</span>{% endif %}
+        {% if recette.etat %}<span class="chip chip-etat">{{ recette.etat }}</span>{% endif %}
+        {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
+    </div>
+</div>
+
+<div style="display:grid;gap:16px;grid-template-columns:1fr 1fr;">
+    <div class="card">
+        <h2 style="font-size:1rem;margin-bottom:12px;">🥦 Ingrédients</h2>
+        <div class="cook-render">{{ cook_html|safe }}</div>
+    </div>
+    <div class="card">
+        <h2 style="font-size:1rem;margin-bottom:12px;">📝 Instructions (Cooklang)</h2>
+        <pre style="font-size:0.8rem;background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;font-family:monospace;max-height:400px;overflow-y:auto;">{{ cook_raw }}</pre>
+    </div>
+</div>
+
+<div style="text-align:center;margin-top:16px;">
+    <a href="/recettes" class="btn btn-ghost">← Retour aux recettes</a>
+</div>
+{% endblock %}

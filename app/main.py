@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
+from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
@@ -163,6 +164,51 @@ async def liste_recettes(request: Request):
             "tag_options": TAG_OPTIONS,
         },
     )
+
+
+@app.get("/recette/{page_id}", response_class=HTMLResponse)
+async def detail_recette(request: Request, page_id: str):
+    """Page détail d'une recette avec rendu Cooklang."""
+    try:
+        recettes = await notion.get_all_recipes()
+        recette = next((r for r in recettes if r["id"] == page_id), None)
+        if not recette:
+            return HTMLResponse("Recette non trouvée", status_code=404)
+
+        # Chercher les ingrédients dans le cache
+        cached = await db.get_enriched(page_id)
+        cook_content = f"# {recette['nom']}\n>> Serves: 4\n\n"
+        if cached and cached.get("ingredients"):
+            import json
+            try:
+                ings = json.loads(cached["ingredients"])
+                for i in ings:
+                    q = i.get("quantite", "")
+                    u = i.get("unite", "")
+                    if q and u:
+                        cook_content += f"@{i['nom']}{{{q}%{u}}}\n"
+                    elif q:
+                        cook_content += f"@{i['nom']}{{{q}}}\n"
+                    else:
+                        cook_content += f"@{i['nom']}\n"
+            except: pass
+        cook_content += "\nInstructions à compléter..."
+
+        recipe_obj = parse_cook(cook_content)
+        html_content = cook_to_html(recipe_obj)
+
+        return templates.TemplateResponse(
+            "recette_detail.html",
+            {
+                "request": request,
+                "recette": recette,
+                "cook_html": html_content,
+                "cook_raw": cook_content,
+            },
+        )
+    except Exception as e:
+        logger.exception("Erreur détail recette")
+        return HTMLResponse(f"Erreur: {e}", status_code=500)
 
 
 @app.get("/ajouter", response_class=HTMLResponse)
