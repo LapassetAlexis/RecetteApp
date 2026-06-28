@@ -1,27 +1,56 @@
 {% extends "base.html" %}
 {% block title %}{{ recette.nom }}{% endblock %}
 {% block content %}
-<div class="hero">
-    <h1>📖 {{ recette.nom }}</h1>
-    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
-        {% if recette.repas %}<span class="chip chip-repas">{{ recette.repas }}</span>{% endif %}
-        {% if recette.etat %}<span class="chip chip-etat">{{ recette.etat }}</span>{% endif %}
-        {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
+<div style="max-width:800px;margin:0 auto;">
+    <div class="hero" style="padding-bottom:12px;">
+        <h1 style="font-size:1.5rem;">{{ recette.nom }}</h1>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px;">
+            {% if recette.repas %}<span class="chip chip-repas">{{ recette.repas }}</span>{% endif %}
+            {% if recette.etat %}<span class="chip chip-etat">{{ recette.etat }}</span>{% endif %}
+            {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
+            {% if recette.tags %}
+                {% for t in recette.tags %}
+                <span class="tag">{{ t }}</span>
+                {% endfor %}
+            {% endif %}
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;">
+            {% if recette.url %}
+            <a href="{{ recette.url }}" target="_blank" class="btn btn-ghost btn-sm">🔗 Voir l'original</a>
+            {% endif %}
+            <a href="{{ recette.notion_url }}" target="_blank" class="btn btn-ghost btn-sm">📄 Ouvrir dans Notion</a>
+        </div>
     </div>
-</div>
 
-<div style="display:grid;gap:16px;grid-template-columns:1fr 1fr;">
     <div class="card">
         <h2 style="font-size:1rem;margin-bottom:12px;">🥦 Ingrédients</h2>
+        {% if cook_html %}
         <div class="cook-render">{{ cook_html|safe }}</div>
+        {% else %}
+        <p class="empty">Aucun ingrédient pour cette recette.</p>
+        <p style="text-align:center;color:var(--t2);font-size:0.85rem;">
+            Ajoute des ingrédients via la génération de planning ou en modifiant le fichier Cooklang ci-dessous.
+        </p>
+        {% endif %}
     </div>
-    <div class="card">
-        <h2 style="font-size:1rem;margin-bottom:12px;">📝 Instructions (Cooklang)</h2>
-        <pre style="font-size:0.8rem;background:var(--bg);padding:12px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;font-family:monospace;max-height:400px;overflow-y:auto;">{{ cook_raw }}</pre>
-    </div>
-</div>
 
-<div style="text-align:center;margin-top:16px;">
-    <a href="/recettes" class="btn btn-ghost">← Retour aux recettes</a>
+    {% if cook_raw %}
+    <div class="card">
+        <details>
+            <summary style="cursor:pointer;font-weight:600;font-size:0.9rem;">📝 Format Cooklang <small style="font-weight:400;color:var(--t2);">(clique pour voir/modifier)</small></summary>
+            <div style="margin-top:10px;">
+                <p style="font-size:0.8rem;color:var(--t2);margin-bottom:6px;">
+                    Le format <a href="https://cooklang.org" target="_blank" style="color:var(--pr);">Cooklang</a> permet de structurer les recettes.
+                    Les ingrédients sont marqués avec <code>@nom{quantité%unité}</code>, les ustensiles avec <code>#nom</code>.
+                </p>
+                <pre style="font-size:0.8rem;background:var(--bg);padding:14px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;font-family:monospace;line-height:1.6;border:1px solid var(--bo);">{{ cook_raw }}</pre>
+            </div>
+        </details>
+    </div>
+    {% endif %}
+
+    <div style="text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center;">
+        <a href="/recettes" class="btn btn-ghost">← Retour aux recettes</a>
+    </div>
 </div>
 {% endblock %}
