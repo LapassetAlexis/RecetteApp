@@ -49,6 +49,10 @@ textarea { resize:vertical; }
 .day-group { position:relative; cursor:pointer; padding:8px 4px; border-radius:8px; font-size:0.75rem; font-weight:600; transition:all 0.15s; }
 .day-group:hover { transform:scale(1.05); }
 .group-picker { position:absolute; top:100%; left:50%; transform:translateX(-50%); z-index:10; background:#fff; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.15); padding:6px; display:flex; gap:4px; margin-top:4px; white-space:nowrap; }
+.nb-input { -moz-appearance:textfield; }
+.nb-input::-webkit-outer-spin-button,
+.nb-input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+.nb-input:focus { border-color:var(--pr) !important; outline:none; }
 
 /* ── Alerts ──────────────────────────────────── */
 .alert { padding:12px 16px; border-radius:8px; margin-bottom:16px; font-weight:500; font-size:0.9rem; }

@@ -17,18 +17,8 @@
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
         </div>
         <div class="form-g">
-            <label>👨‍👩‍👧‍👧 Personnes par jour</label>
-            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
-                {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
-                {% set default_pers = [2,2,2,2,2,4,4] %}
-                {% for i in range(7) %}
-                <div style="text-align:center;">
-                    <div style="font-size:0.7rem;color:var(--t2);margin-bottom:2px;">{{ jours[i] }}</div>
-                    <input type="number" name="nb_{{ jours[i]|lower }}" value="{{ default_pers[i] }}" min="1" max="20" style="width:100%;text-align:center;padding:6px 2px;">
-                </div>
-                {% endfor %}
-            </div>
-            <small>Nombre de personnes à table chaque jour (les quantités s'adaptent).</small>
+            <label>🌡️</label>
+            <div style="height:1px;"></div>
         </div>
     </div>
     <div class="form-r">
@@ -65,33 +55,35 @@
         <small>Laisse vide pour tout inclure.</small>
     </div>
 
-    <!-- Configuration visuelle des groupes de midis -->
+    <!-- Configuration fusionnée : groupes midi + personnes par jour -->
     <div class="card" style="margin-bottom:16px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
             <strong>🍳 Organisation des midis</strong>
             <button type="button" id="reset-groups" class="btn btn-ghost btn-sm" style="font-size:0.75rem;">↺ Défaut</button>
         </div>
         <div id="midi-groups" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;">
             {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
             {% set default_groups = [1,1,2,2,2,3,4] %}
+            {% set default_pers = [3,3,3,3,3,4,4] %}
             {% for i in range(7) %}
-            <div class="day-group" data-idx="{{ i }}" data-group="{{ default_groups[i] }}" style="cursor:pointer;padding:8px 4px;border-radius:8px;font-size:0.75rem;font-weight:600;transition:all 0.2s;">
-                <div style="font-size:0.7rem;color:var(--t2);margin-bottom:2px;">{{ jours[i] }}</div>
-                <div class="group-label" style="padding:4px 0;border-radius:6px;">G{{ default_groups[i] }}</div>
+            <div class="day-group" data-idx="{{ i }}" data-group="{{ default_groups[i] }}" style="cursor:pointer;padding:10px 4px 6px;border-radius:8px;font-size:0.75rem;font-weight:600;transition:all 0.2s;position:relative;">
+                <div style="font-size:0.7rem;color:var(--t2);margin-bottom:4px;">{{ jours[i] }}</div>
+                <div class="group-label" style="padding:6px 0;border-radius:6px;margin-bottom:6px;font-size:0.7rem;">G{{ default_groups[i] }}</div>
+                <input type="number" name="nb_{{ jours[i]|lower }}" value="{{ default_pers[i] }}" min="1" max="20" class="nb-input" style="width:100%;text-align:center;padding:4px 0;border:1px solid var(--bo);border-radius:4px;font-size:0.75rem;font-weight:600;">
             </div>
             {% endfor %}
         </div>
-        <div id="group-legend" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;font-size:0.75rem;color:var(--t2);"></div>
+        <div id="group-legend" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;font-size:0.75rem;color:var(--t2);"></div>
         <input type="hidden" name="midi_groups" id="midi-groups-input" value="1,1,2,2,2,3,4">
-        <small style="margin-top:6px;display:block;">Clique sur un jour pour changer son groupe. Même groupe = même plat cuisiné.</small>
+        <small style="margin-top:6px;display:block;">Clique sur le groupe (G1, G2...) pour changer. Modifie le nombre sous chaque jour. Même groupe = même plat cuisiné.</small>
     </div>
+
+    <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
 
     <div class="form-g">
         <label for="ingredients_force">🥫 Restes à écouler</label>
         <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
     </div>
-
-    <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
 
     <div class="form-g">
         <label for="custom_prompt">✏️ Mes consignes pour l'IA</label>
