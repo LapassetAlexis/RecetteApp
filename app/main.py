@@ -177,7 +177,7 @@ async def detail_recette(request: Request, page_id: str):
 
         # Chercher les ingrédients dans le cache
         cached = await db.get_enriched(page_id)
-        cook_content = f"# {recette['nom']}\n>> Serves: 4\n\n"
+        cook_content = f">> Serves: 4\n>> Source: {recette.get('url', '')}\n\n"
         if cached and cached.get("ingredients"):
             import json
             try:

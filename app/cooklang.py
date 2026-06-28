@@ -51,8 +51,8 @@ def parse(raw: str) -> CookRecipe:
     # Ingrédients @nom{quantité%unité}
     ing_pattern = re.compile(r"@(\w[\w\s\-'àâçéèêëîïôûù]*)")
     ing_full = re.compile(r"@(\w[\w\s\-'àâçéèêëîïôûù]*)\{([^}]*)\}")
-    # Ustensiles #nom
-    cook_pattern = re.compile(r"#(\w[\w\s\-']*)")
+    # Ustensiles #nom (pas les titres # avec espace)
+    cook_pattern = re.compile(r"#([^\s][\w\s\-']*)")
 
     for line in lines:
         line = line.strip()
@@ -115,7 +115,7 @@ def to_html(recipe: CookRecipe, highlight_ings: list[str] | None = None) -> str:
         ing_full = re.compile(r"@(\w[\w\s\-'àâçéèêëîïôûù]*)\{([^}]*)\}")
         text = ing_full.sub(_ingredient_repl(ings_hl), text)
         # Remplacer #cookware par du HTML
-        cook_pat = re.compile(r"#(\w[\w\s\-']*)")
+        cook_pat = re.compile(r"#([^\s][\w\s\-']*)")
         text = cook_pat.sub(r'<span class="cook-cw">\1</span>', text)
 
         html_parts.append(f'<p class="cook-step">{text}</p>')
