@@ -29,7 +29,7 @@ class CookStep:
 
 @dataclass
 class CookRecipe:
-    title: str
+    title: str = ""
     serves: int = 4
     time: str = ""
     source: str = ""
