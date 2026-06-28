@@ -6,29 +6,14 @@
 </div>
 
 {% if plannings %}
-<div class="card">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Semaine du</th>
-                <th>Saison</th>
-                <th>Personnes</th>
-                <th>Créé le</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in plannings %}
-            <tr>
-                <td><strong>{{ p.week_start }}</strong></td>
-                <td>{{ p.saison }}</td>
-                <td>{{ p.nb_personnes }}</td>
-                <td>{{ p.created_at[:10] }}</td>
-                <td><a href="/planning/{{ p.id }}" class="btn btn-small">Voir</a></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="hist-grid">
+    {% for p in plannings %}
+    <a href="/planning/{{ p.id }}" class="hist-item" style="text-decoration:none;color:inherit;display:block;">
+        <div class="date">📅 Semaine du {{ p.week_start }}</div>
+        <div class="meta">{{ p.saison }} · {{ p.nb_personnes }} pers.</div>
+        <div class="meta">Créé le {{ p.created_at[:10] }}</div>
+    </a>
+    {% endfor %}
 </div>
 {% else %}
 <div class="card text-center">
