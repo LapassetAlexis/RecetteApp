@@ -12,6 +12,18 @@ def test_to_grams_units_and_pieces():
     assert _to_grams("", "huile d'olive") is None   # pas de quantité
 
 
+def test_to_grams_uses_unite_field():
+    # ancien modèle : unité dans le champ unite (pas dans le libellé)
+    assert _to_grams("700", "d'épinards", "g") == 700
+    assert _to_grams("150", "lait demi écrémé", "ml") == 150
+    assert _to_grams("1/2", "fond de volaille", "cuillère") == 7.5
+
+
+def test_to_grams_clamps_absurd():
+    # nombre sans unité ni pièce connue -> défaut ×100 dépasse le plafond -> None
+    assert _to_grams("700", "d'épinards", "") is None
+
+
 def test_match_food():
     assert _match_food("g de pâtes courtes")[0] == 350      # kcal/100g pâtes
     assert _match_food("boule de mozzarella")[0] == 280

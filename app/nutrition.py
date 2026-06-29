@@ -83,8 +83,11 @@ def _match_food(label: str) -> tuple[float, float, float, float] | None:
     return best
 
 
-def _to_grams(quantite: str, label: str) -> float | None:
-    """Convertit (quantité, libellé) en grammes. None si indéterminable."""
+_MAX_GRAMS = 5000  # garde-fou : au-delà, c'est une erreur de parsing → on ignore
+
+
+def _to_grams(quantite: str, label: str, unite: str = "") -> float | None:
+    """Convertit (quantité, libellé, unité) en grammes. None si indéterminable."""
     n = _norm(label)
     qty = None
     s = str(quantite).strip().replace(",", ".")
@@ -94,17 +97,29 @@ def _to_grams(quantite: str, label: str) -> float | None:
             qty = float(fr.group(1)) / float(fr.group(2))
         elif re.fullmatch(r"\d+(?:\.\d+)?", s):
             qty = float(s)
-    # 1) unité explicite en tête du libellé (ex. "g de pâtes", "ml de lait")
-    for unit, grams in sorted(UNIT_GRAMS.items(), key=lambda kv: -len(kv[0])):
-        if re.match(rf"^{re.escape(unit)}\b", n):
-            return (qty if qty is not None else 1) * grams
+
+    grams = None
+    # 0) unité explicite dans le champ unite (ancien modèle structuré)
+    u = _norm(unite)
+    if u and u in UNIT_GRAMS:
+        grams = (qty if qty is not None else 1) * UNIT_GRAMS[u]
+    # 1) sinon unité en tête du libellé (ex. "g de pâtes", "cuillère à café ...")
+    if grams is None:
+        for unit, g in sorted(UNIT_GRAMS.items(), key=lambda kv: -len(kv[0])):
+            if re.match(rf"^{re.escape(unit)}\b", n):
+                grams = (qty if qty is not None else 1) * g
+                break
     # 2) compté en pièces (ex. "2 courgettes", "1 oignon")
-    if qty is not None:
+    if grams is None and qty is not None:
         for key, w in sorted(PIECE_WEIGHTS.items(), key=lambda kv: -len(kv[0])):
             if key in n:
-                return qty * w
-        return qty * 100  # défaut prudent : 1 "unité" ~ 100 g
-    return None
+                grams = qty * w
+                break
+        if grams is None:
+            grams = qty * 100  # défaut prudent : 1 "unité" ~ 100 g
+    if grams is None or grams > _MAX_GRAMS:
+        return None
+    return grams
 
 
 def estimate_nutrition(ingredients: list[dict], servings: int = 4) -> dict | None:
@@ -119,7 +134,7 @@ def estimate_nutrition(ingredients: list[dict], servings: int = 4) -> dict | Non
     matched = 0
     for ing in ingredients:
         label = ing.get("nom", "")
-        grams = _to_grams(ing.get("quantite", ""), label)
+        grams = _to_grams(ing.get("quantite", ""), label, ing.get("unite", ""))
         macros = _match_food(label)
         if grams is None or macros is None:
             continue
