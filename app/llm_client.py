@@ -91,27 +91,44 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 _ING_HINT = re.compile(r"^\s*[\d½¼¾]|(\b(?:g|kg|mg|ml|cl|dl|l|cuill|pinc|gousse|tranche|sachet|càs|càc|c\.)\b)", re.IGNORECASE)
 
 
-def _ingredients_from_text(blob: str) -> list[str]:
-    """Extrait des ingrédients d'un bloc texte (description JSON-LD ou corps) :
-    lignes situées entre un titre « Ingrédient(s) » et « Préparation/Instructions ».
-    Couvre les sites qui listent les ingrédients en texte (séparés par \\n/\\t)
-    plutôt qu'en recipeIngredient (ex. platetrecette.fr)."""
-    if not blob or "ngr" not in blob.lower():
-        return []
+_PREP_MARKERS = ("préparation", "preparation", "instruction", "étape", "etape", "réalisation", "realisation")
+
+
+def _split_blob(blob: str) -> tuple[list[str], list[str]]:
+    """Découpe un bloc texte en (ingrédients, instructions).
+
+    Ingrédients = lignes entre un titre « Ingrédient(s) » et « Préparation » ;
+    instructions = lignes après « Préparation/Instructions ». Couvre les sites
+    qui mettent tout en texte (séparé \\n/\\t) ou mal taguent leur JSON-LD
+    (ex. platetrecette : tout fourré dans recipeIngredient)."""
+    if not blob:
+        return [], []
     lines = [l.strip(" -•\t\xa0") for l in re.split(r"[\n\r]+", blob.replace("\t", "\n"))]
-    out: list[str] = []
-    capture = False
+    ings: list[str] = []
+    instrs: list[str] = []
+    mode = None
     for l in lines:
         low = l.lower()
-        if not capture:
-            if "ingr" in low and "dient" in low:
-                capture = True
+        if "ingr" in low and "dient" in low and len(l) < 60:
+            mode = "ing"
             continue
-        if l and any(k in low for k in ("préparation", "preparation", "instruction", "étape", "etape", "réalisation")) and len(l) < 40:
-            break
-        if l and len(l) <= 120:
-            out.append(l)
-    return out
+        if any(k in low for k in _PREP_MARKERS) and len(l) < 40:
+            mode = "instr"
+            continue
+        if not l:
+            continue
+        if mode == "ing" and len(l) <= 120:
+            ings.append(l)
+        elif mode == "instr":
+            instrs.append(l)
+    return ings, instrs
+
+
+def _ingredients_from_text(blob: str) -> list[str]:
+    """Ingrédients seuls d'un bloc texte (cf. _split_blob)."""
+    if not blob or "ngr" not in blob.lower():
+        return []
+    return _split_blob(blob)[0]
 
 
 def _scrape_ingredient_list(html_text: str) -> list[str]:
@@ -282,12 +299,31 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
             # Certains sites (ex. CuisineActuelle) glissent un en-tête
             # "Ingrédients" comme 1re entrée du tableau : on l'écarte.
             _NOISE = {"ingrédients", "ingredients", "ingrédient", "ingredient"}
+            raw_ings = node.get("recipeIngredient") or node.get("ingredients") or []
             ingredients = [
-                c for c in (_clean_text(i) for i in (node.get("recipeIngredient") or node.get("ingredients") or []))
+                c for c in (_clean_text(i) for i in raw_ings)
                 if c and c.lower() not in _NOISE
             ]
-            # Repli : certains sites mettent les ingrédients dans la description
-            # de la recette ou de la vidéo associée (ex. platetrecette.fr).
+            instructions = _flatten_instructions(node.get("recipeInstructions", ""))
+
+            # Cas "blob mal tagué" (ex. platetrecette) : tout est fourré dans
+            # recipeIngredient en texte multi-lignes (intro + ingrédients +
+            # préparation). On re-découpe le blob recipeIngredient seul (pas
+            # recipeInstructions qui en est souvent un doublon).
+            blob = "\n".join(str(i) for i in raw_ings)
+            looks_blob = any(("\n" in str(i) or "\r" in str(i) or len(str(i)) > 90) for i in raw_ings)
+            if (looks_blob or not ingredients) and "ingr" in blob.lower():
+                b_ings, b_instr = _split_blob(blob)
+                if len(b_ings) >= 2:
+                    seen, deduped = set(), []
+                    for x in b_ings:
+                        if x.lower() not in seen:
+                            seen.add(x.lower())
+                            deduped.append(x)
+                    ingredients = deduped
+                    if b_instr:
+                        instructions = b_instr
+            # Repli : ingrédients dans la description (recette ou vidéo associée).
             if not ingredients:
                 ingredients = _ingredients_from_text(node.get("description", ""))
             if not ingredients:
@@ -296,7 +332,6 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                         ingredients = _ingredients_from_text(v.get("description", ""))
                         if ingredients:
                             break
-            instructions = _flatten_instructions(node.get("recipeInstructions", ""))
             kw = node.get("keywords", "")
             keywords = [k.strip() for k in kw.split(",")] if isinstance(kw, str) else [
                 _clean_text(k) for k in (kw or [])

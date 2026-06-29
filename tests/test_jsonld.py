@@ -7,7 +7,17 @@ from app.llm_client import (
     _handler_amandinecooking,
     _ingredients_from_text,
     _scrape_ingredient_list,
+    _split_blob,
 )
+
+
+def test_split_blob_ingredients_and_instructions():
+    blob = ("Voici la recette\r\nIngrédients pour 4 personnes : - 5 pts / personne -\r\n"
+            "\t250 g de lentilles vertes\r\n\t200 g de lardons\r\n\tSel et poivre.\r\n"
+            "Préparation :\r\nÉpluchez l'oignon.\r\nCuire 45 minutes.")
+    ings, instrs = _split_blob(blob)
+    assert ings == ["250 g de lentilles vertes", "200 g de lardons", "Sel et poivre."]
+    assert instrs == ["Épluchez l'oignon.", "Cuire 45 minutes."]
 
 
 def test_scrape_ingredient_list_keeps_real_list():
