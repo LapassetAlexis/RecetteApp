@@ -30,7 +30,9 @@ N - Nom exact de la recette"""
 SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), liste les ingrédients nécessaires.
 
 RÈGLES :
-- Sois précis et réaliste sur les quantités.
+- Si un contenu de page ou une liste d'ingrédients est fourni, BASE-TOI dessus
+  fidèlement (n'invente pas, n'ajoute pas d'ingrédients absents).
+- Sépare quantité / unité / nom (ex: "300 g de lentilles" → quantite "300", unite "g", nom "lentilles").
 - Adapte les quantités au nombre de personnes indiqué.
 - Regroupe les ingrédients similaires (ex: "oignons" même si utilisé plusieurs fois).
 
@@ -81,6 +83,17 @@ def _flatten_instructions(val: Any) -> list[str]:
                     if t:
                         steps.append(t)
     return steps
+
+
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
+def _visible_text(html_text: str) -> str:
+    """Texte visible d'une page (balises script/style/html retirées)."""
+    t = re.sub(r"<script[^>]*>.*?</script>", "", html_text, flags=re.DOTALL | re.IGNORECASE)
+    t = re.sub(r"<style[^>]*>.*?</style>", "", t, flags=re.DOTALL | re.IGNORECASE)
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _balanced_json(text: str, start: int) -> str | None:
@@ -645,11 +658,32 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
         url: str = "",
         nb_personnes: int = 4,
     ) -> dict[str, Any]:
+        # Récupérer le contenu réel de la recette plutôt que de laisser le LLM
+        # inventer à partir du seul nom. On privilégie les ingrédients JSON-LD
+        # (exacts), sinon le texte de la page.
+        context = ""
+        if url:
+            try:
+                async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+                    resp = await client.get(url, headers={"User-Agent": _UA})
+                if resp.status_code < 400:
+                    ld = _extract_jsonld_recipe(resp.text)
+                    if ld and ld.get("ingredients"):
+                        context = ("Ingrédients EXACTS de la page (structure-les fidèlement, "
+                                   "sans rien inventer ni ajouter) :\n" + "\n".join(ld["ingredients"]))
+                    else:
+                        txt = _visible_text(resp.text)[:3000]
+                        if txt:
+                            context = "Contenu de la page :\n" + txt
+            except Exception as e:
+                logger.debug(f"Fetch ingrédients {url}: {e}")
+
         user_prompt = f"""Recette : {nom_recette}
-URL : {url or "non fournie"}
 Nombre de personnes : {nb_personnes}
 
-Liste les ingrédients nécessaires pour préparer cette recette à {nb_personnes} personnes."""
+{context or "Aucun contenu disponible : utilise tes connaissances sur cette recette."}
+
+Donne les ingrédients pour {nb_personnes} personnes, en quantités adaptées."""
 
         if self.provider in ("gemini", "groq"):
             try:
