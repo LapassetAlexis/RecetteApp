@@ -47,6 +47,10 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .btn-ghost:hover { background:var(--bg); }
 .btn-lg { padding:12px 24px; font-size:1rem; width:100%; }
 .btn:disabled { opacity:0.5; cursor:not-allowed; }
+/* État loader : texte masqué + spinner, clic neutralisé */
+.btn.loading { position:relative; color:transparent !important; pointer-events:none; }
+.btn.loading::after { content:""; position:absolute; top:50%; left:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid rgba(0,0,0,0.15); border-top-color:var(--prd); border-radius:50%; animation:s 0.7s linear infinite; }
+.btn-primary.loading::after, .btn-secondary.loading::after { border-color:rgba(255,255,255,0.45); border-top-color:#fff; }
 
 /* ── Day Group Picker ────────────────────────── */
 .day-group { position:relative; cursor:pointer; padding:10px 4px 6px; border-radius:8px; font-size:0.75rem; font-weight:600; transition:all 0.15s; }
