@@ -4,7 +4,7 @@ import re
 
 # Marqueurs typiques d'un suffixe « source » à retirer du titre d'une recette.
 _SOURCE_MARKERS = (
-    "cooking", "recettes", "recette ", "cuisine", "marmiton", "750g",
+    "cooking", "recette", "cuisine", "marmiton", "750g",
     "ricardo", "ptitchef", "journaldesfemmes", "blog", ".com", ".fr",
     "minceur", "weight watchers",
 )

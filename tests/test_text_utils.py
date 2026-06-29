@@ -8,6 +8,11 @@ def test_strip_site_suffix_dash():
     assert clean_recipe_title("Wok de boeuf aux légumes - Recettes légères") == "Wok de boeuf aux légumes"
 
 
+def test_strip_plat_et_recette():
+    assert clean_recipe_title("Tiramisu Léger aux Framboises - Plat et Recette") == "Tiramisu Léger aux Framboises"
+    assert clean_recipe_title("Wok de Poulet aux légumes et Nouilles - Plat et Recette") == "Wok de Poulet aux légumes et Nouilles"
+
+
 def test_strip_pipe_suffix():
     assert clean_recipe_title("Wrap de poulet à la grecque | Recette Minceur") == "Wrap de poulet à la grecque"
 

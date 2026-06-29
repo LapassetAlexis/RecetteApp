@@ -23,10 +23,15 @@
     {% endfor %}
 </div>
 
+{% set type_colors = {
+    'Plat': '#e67e22', 'Dessert': '#8e44ad', 'Entrée': '#27ae60', 'Apéro': '#c0392b',
+    'Goûter': '#e84393', 'Accompagnement': '#2980b9', 'Boisson': '#16a085',
+    'Légume': '#16a085', 'Petit dej': '#f39c12'
+} %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-type="{{ recette.repas or 'Non classé' }}">
-        <h3><a href="/recette/{{ recette.id }}" class="recipe-title">{{ recette.nom | clean_title }}</a></h3>
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-type="{{ recette.repas or 'Non classé' }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
+        <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
             {% if recette.repas %}
             <span class="chip chip-repas">{{ recette.repas }}</span>
@@ -52,10 +57,6 @@
             {% endfor %}
             <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
         </div>
-        <div class="recipe-actions">
-            <a href="/recette/{{ recette.id }}" class="recipe-link">📖 Détail</a>
-            {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="recipe-link">🔗 Source</a>{% endif %}
-        </div>
     </div>
     {% endfor %}
     <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
@@ -64,6 +65,15 @@
 
 {% block scripts %}
 <script>
+// ── Carte entière cliquable → fiche détail (sauf clic sur les étoiles) ──
+document.querySelectorAll('.recipe-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+        if (e.target.closest('.recipe-stars')) return;  // notation : ne pas naviguer
+        const href = card.dataset.href;
+        if (href) window.location.href = href;
+    });
+});
+
 // ── Recherche + filtre par type ─────────────────────
 let activeType = '';
 function applyFilters() {

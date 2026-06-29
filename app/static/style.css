@@ -141,8 +141,9 @@ a.meal-name:hover { text-decoration:underline; }
 @keyframes s { to { transform:rotate(360deg); } }
 
 /* ── Recettes ────────────────────────────────── */
-.recettes-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
-.recipe-card h3 { font-size:0.95rem; margin-bottom:6px; }
+.recettes-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:10px; }
+.recipe-card { padding:13px 15px; cursor:pointer; }
+.recipe-card h3 { font-size:0.95rem; margin-bottom:6px; line-height:1.25; }
 .recipe-meta { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:6px; }
 .recipe-tags { display:flex; gap:3px; flex-wrap:wrap; margin-bottom:4px; }
 .tag { font-size:0.7rem; padding:2px 6px; border-radius:10px; background:var(--bg); color:var(--t2); }
@@ -268,8 +269,7 @@ a.meal-name:hover { text-decoration:underline; }
 .recipe-card { transition:transform 0.12s, box-shadow 0.12s; }
 .recipe-card:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,0.10); }
 .recipe-title { color:var(--text); text-decoration:none; }
-.recipe-title:hover { color:var(--prd); }
-.recipe-actions { display:flex; gap:12px; margin-top:8px; }
+.recipe-card:hover .recipe-title { color:var(--prd); }
 
 /* ── Impression (liste de courses) ───────────── */
 @media print {
