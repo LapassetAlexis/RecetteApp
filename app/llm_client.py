@@ -10,6 +10,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
+from app.text_utils import clean_recipe_title
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
             if isinstance(cat, str) and cat:
                 keywords.append(cat)
             return {
-                "nom": _clean_text(node.get("name", "")),
+                "nom": clean_recipe_title(_clean_text(node.get("name", ""))),
                 "image_url": _first_image(node.get("image", "")),
                 "ingredients": ingredients,
                 "instructions": "\n".join(instructions),
@@ -263,7 +264,7 @@ def _handler_amandinecooking(html_text: str) -> dict[str, Any] | None:
         nom = _clean_text(m.group(1)).split(" - ")[0] if m else ""
 
     return {
-        "nom": nom,
+        "nom": clean_recipe_title(nom),
         "image_url": "",  # repli sur og:image côté extract_recipe_from_url
         "ingredients": ingredients,
         "instructions": "\n".join(instructions),
@@ -894,7 +895,7 @@ Réponds UNIQUEMENT ce JSON :
         if isinstance(ingredients, str):
             ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
         return {
-            "nom": data.get("nom", ""),
+            "nom": clean_recipe_title(data.get("nom", "")),
             "type_repas": type_repas,
             "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
             "ingredients": [str(i) for i in ingredients],

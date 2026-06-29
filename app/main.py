@@ -22,6 +22,7 @@ from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
+from app.text_utils import clean_recipe_title
 
 VERSION = "1.1.0"
 
@@ -95,6 +96,8 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Version dans tous les templates
 templates.env.globals["version"] = VERSION
+# Filtre de nettoyage des titres de recettes (retire les suffixes de site)
+templates.env.filters["clean_title"] = clean_recipe_title
 
 # ── Pages ──────────────────────────────────────────────────────────
 
@@ -145,6 +148,15 @@ async def voir_planning(request: Request, planning_id: int):
 
     data = json.loads(planning["data_json"])
 
+    # Personnes par jour (anciens plannings : repli sur nb_personnes pour tous)
+    per_day_raw = data.get("per_day", "")
+    try:
+        per_day = [int(x) for x in per_day_raw.split(",")] if per_day_raw else []
+    except (ValueError, AttributeError):
+        per_day = []
+    if len(per_day) != 7:
+        per_day = [planning.get("nb_personnes", 4)] * 7
+
     return templates.TemplateResponse(
         "planning.html",
         {
@@ -152,6 +164,7 @@ async def voir_planning(request: Request, planning_id: int):
             "planning": planning,
             "plats": data.get("plats", []),
             "liste_courses": data.get("liste_courses", []),
+            "per_day": per_day,
             "repas_options": REPAS_OPTIONS,
         },
     )
@@ -363,12 +376,16 @@ async def generer(
                     plat["notion_id"] = r["id"]
                     plat["url"] = r.get("url", "")
                     plat["notion_url"] = r.get("notion_url", "")
+                    plat["repas"] = r.get("repas", "")
+                    plat["tags"] = r.get("tags", [])
                     break
 
-        # 5. Sauvegarder le planning (sans liste de courses pour l'instant)
+        # 5. Sauvegarder le planning (sans liste de courses pour l'instant).
+        #    per_day permet d'afficher le nb de personnes par jour.
         data = {
             "plats": plats,
             "liste_courses": [],
+            "per_day": per_day,
         }
         planning_id = await db.save_planning(
             week_start=week_start,
@@ -737,6 +754,8 @@ async def api_update_meal(
                         plat["notion_id"] = r["id"]
                         plat["url"] = r.get("url", "")
                         plat["notion_url"] = r.get("notion_url", "")
+                        plat["repas"] = r.get("repas", "")
+                        plat["tags"] = r.get("tags", [])
                         break
                 trouve = True
                 break
