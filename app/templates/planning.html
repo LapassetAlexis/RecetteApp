@@ -21,50 +21,56 @@
 <div class="validated-badge">✅ Semaine validée — enregistrée dans l'historique</div>
 {% endif %}
 
-<!-- Planning 7 jours -->
+<!-- Planning 7 jours (cases fusionnées si même repas sur jours consécutifs) -->
+{% set jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
+{% set labels = {'midi':'☀️ Midi','soir':'🌙 Soir'} %}
 <div class="week-wrapper">
-    <div class="week-scroll">
-        {% set jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
+    <div class="week-grid">
         {% for jour in range(1, 8) %}
-        <div class="day-col">
-            <div class="day-head">
-                <span>{{ jours[jour-1][:3] }}</span>
-                {% if per_day %}<span class="day-pers" title="Personnes ce jour">👤 {{ per_day[jour-1] }}</span>{% endif %}
-            </div>
-            {% for plat in plats if plat.jour == jour %}
-            <div class="meal {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
-                <div class="meal-head">
-                    <label class="meal-cb"><input type="checkbox" class="ck" data-jour="{{ jour }}" data-moment="{{ plat.moment }}"> <span class="meal-tag">{{ '☀️ Midi' if plat.moment == 'midi' else '🌙 Soir' }}</span></label>
-                    <button class="meal-ch" data-jour="{{ jour }}" data-moment="{{ plat.moment }}" title="Changer la recette">↻</button>
-                </div>
-                {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
-                {% if link %}
-                <a class="meal-name" href="{{ link }}"{% if not plat.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ plat.nom_recette | clean_title }}</a>
-                {% else %}
-                <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
-                {% endif %}
-                <div class="meal-side" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
-                {% if plat.accompagnement %}
-                    {% set acc = plat.accompagnement %}
-                    {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
-                    <span class="side-txt">+
-                    {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
-                    {% else %}{{ acc.nom_recette | clean_title }}{% endif %}</span>
-                    <button class="side-ch" title="Changer l'accompagnement">↻</button>
-                    <button class="side-rm" title="Retirer l'accompagnement">✕</button>
-                {% else %}
-                    <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
-                {% endif %}
-                </div>
-                {% if plat.repas or plat.tags %}
-                <div class="meal-chips">
-                    {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
-                    {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
-                </div>
-                {% endif %}
-            </div>
-            {% endfor %}
+        <div class="day-head" style="grid-column:{{ jour }};grid-row:1;">
+            <span>{{ jours[jour-1][:3] }}</span>
+            {% if per_day %}<span class="day-pers" title="Personnes ce jour">👤 {{ per_day[jour-1] }}</span>{% endif %}
         </div>
+        {% endfor %}
+        {% for moment in ['midi','soir'] %}
+        {% set row = 2 if moment == 'midi' else 3 %}
+        {% for run in week_rows[moment] %}
+        {% set plat = run.plat %}
+        {% set last = run.start + run.span - 1 %}
+        {% set jcsv = run.jours | join(',') %}
+        <div class="meal {{ moment }}" data-jours="{{ jcsv }}" data-moment="{{ moment }}"
+             style="grid-column:{{ run.start }} / span {{ run.span }};grid-row:{{ row }};">
+            <div class="meal-head">
+                <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ jcsv }}" data-moment="{{ moment }}"> <span class="meal-tag">{{ labels[moment] }}{% if run.span > 1 %} · {{ jours[run.start-1][:3] }}–{{ jours[last-1][:3] }}{% endif %}</span></label>
+                <button class="meal-ch" data-jours="{{ jcsv }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
+            </div>
+            {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
+            {% if link %}
+            <a class="meal-name" href="{{ link }}"{% if not plat.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ plat.nom_recette | clean_title }}</a>
+            {% else %}
+            <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
+            {% endif %}
+            <div class="meal-side" data-jours="{{ jcsv }}" data-moment="{{ moment }}">
+            {% if plat.accompagnement %}
+                {% set acc = plat.accompagnement %}
+                {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
+                <span class="side-txt">+
+                {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
+                {% else %}{{ acc.nom_recette | clean_title }}{% endif %}</span>
+                <button class="side-ch" title="Changer l'accompagnement">↻</button>
+                <button class="side-rm" title="Retirer l'accompagnement">✕</button>
+            {% else %}
+                <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
+            {% endif %}
+            </div>
+            {% if plat.repas or plat.tags %}
+            <div class="meal-chips">
+                {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
+                {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
         {% endfor %}
     </div>
 </div>
@@ -171,10 +177,12 @@ function bindShopItems() {
 }
 bindShopItems();
 
-// ── Sélection des repas à changer ───────────────────
+// ── Sélection des repas à changer (une case = 1+ jours fusionnés) ──
+const parseJours = el => (el.dataset.jours||'').split(',').filter(Boolean).map(Number);
+const slotLabel = s => (s.jours.length>1 ? js[s.jours[0]-1]+'–'+js[s.jours[s.jours.length-1]-1] : js[s.jours[0]-1])+' '+s.m;
 document.querySelectorAll('.ck').forEach(c => c.addEventListener('change', u));
 function u() {
-    bul = []; document.querySelectorAll('.ck:checked').forEach(c => bul.push({j:+c.dataset.jour,m:c.dataset.moment}));
+    bul = []; document.querySelectorAll('.ck:checked').forEach(c => bul.push({jours:parseJours(c),m:c.dataset.moment}));
     const b = document.getElementById('bulk');
     if (bul.length) { b.style.display='flex'; document.getElementById('bulk-nb').textContent=bul.length+' sélectionné'+(bul.length>1?'s':''); }
     else b.style.display='none';
@@ -183,58 +191,44 @@ document.getElementById('bulk-clr').onclick = ()=>{ document.querySelectorAll('.
 document.getElementById('bulk-go').onclick = ()=>{
     if (!bul.length) return;
     sideMode=false; document.querySelector('#modal h3').textContent='↻ Changer';
-    document.getElementById('modal-ctx').textContent = bul.map(b=>js[b.j-1]+' '+b.m).join(', ');
+    document.getElementById('modal-ctx').textContent = bul.map(slotLabel).join(', ');
     document.getElementById('modal').style.display='flex';
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 };
 document.querySelectorAll('.meal-ch').forEach(b=>b.onclick=function(){
-    bul=[{j:+this.dataset.jour,m:this.dataset.moment}];
+    bul=[{jours:parseJours(this),m:this.dataset.moment}];
     sideMode=false; document.querySelector('#modal h3').textContent='↻ Changer';
-    document.getElementById('modal-ctx').textContent=js[bul[0].j-1]+' '+bul[0].m;
+    document.getElementById('modal-ctx').textContent=slotLabel(bul[0]);
     document.getElementById('modal').style.display='flex';
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 });
 
 // ── Accompagnements : changer / retirer / ajouter ──────
-let sideMode=false, sideSlot=null;  // sideSlot={j,m}
-function openSidePicker(j,m){
-    sideMode=true; sideSlot={j,m};
-    document.getElementById('modal-ctx').textContent=js[j-1]+' '+m+' — accompagnement';
+let sideMode=false, sideSlot=null;  // sideSlot={jours:[...],m}
+function openSidePicker(slot){
+    sideMode=true; sideSlot=slot;
+    document.getElementById('modal-ctx').textContent=slotLabel(slot)+' — accompagnement';
     document.querySelector('#modal h3').textContent='🥦 Accompagnement';
     document.getElementById('modal').style.display='flex';
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 }
-function bindSideBtns(){
-    document.querySelectorAll('.side-add,.side-ch').forEach(b=>b.onclick=function(){
-        const s=this.closest('.meal-side'); openSidePicker(+s.dataset.jour,s.dataset.moment);
-    });
-    document.querySelectorAll('.side-rm').forEach(b=>b.onclick=function(){
-        const s=this.closest('.meal-side'); setSide(+s.dataset.jour,s.dataset.moment,'');
-    });
-}
-async function setSide(j,m,nom){
-    const r=await fetch(`/api/update-side/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:j,moment:m,nouvelle_recette:nom})});
-    const d=await r.json();
-    if(!d.success){ toast(d.error||'Erreur accompagnement','error'); return; }
-    renderSide(j,m,d.accompagnement);
-    toast(nom?'Accompagnement mis à jour ✓':'Accompagnement retiré ✓','success');
-}
-function renderSide(j,m,acc){
-    const box=document.querySelector(`.meal-side[data-jour="${j}"][data-moment="${m}"]`);
-    if(!box) return;
-    if(acc && acc.nom_recette){
-        const link=acc.notion_id?('/recette/'+acc.notion_id):(acc.url||'');
-        const nameHtml=link?`<a href="${link}"${acc.notion_id?'':' target="_blank" rel="noopener"'}>${acc.nom_recette}</a>`:acc.nom_recette;
-        box.innerHTML=`<span class="side-txt">+ ${nameHtml}</span><button class="side-ch" title="Changer l'accompagnement">↻</button><button class="side-rm" title="Retirer l'accompagnement">✕</button>`;
-    } else {
-        box.innerHTML=`<button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>`;
+document.querySelectorAll('.side-add,.side-ch').forEach(b=>b.onclick=function(){
+    const s=this.closest('.meal-side'); openSidePicker({jours:parseJours(s),m:s.dataset.moment});
+});
+document.querySelectorAll('.side-rm').forEach(b=>b.onclick=function(){
+    const s=this.closest('.meal-side'); setSide({jours:parseJours(s),m:s.dataset.moment},'');
+});
+async function setSide(slot,nom){
+    for(const j of slot.jours){
+        const r=await fetch(`/api/update-side/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:j,moment:slot.m,nouvelle_recette:nom})});
+        const d=await r.json();
+        if(!d.success){ toast(d.error||'Erreur accompagnement','error'); return; }
     }
-    bindSideBtns();
+    window.location.reload();
 }
-bindSideBtns();
 
 async function la() {
     const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
@@ -243,23 +237,18 @@ async function la() {
     const el=document.getElementById('alt-list');
     if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
     el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${a.repas?`<span class="chip chip-r">${a.repas}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');
-    document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>{ if(sideMode){ setSide(sideSlot.j,sideSlot.m,b.dataset.n); c(); } else { rpl(b.dataset.n); } });
+    document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>{ if(sideMode){ setSide(sideSlot,b.dataset.n); } else { rpl(b.dataset.n); } });
     document.getElementById('flt').oninput=function(){const q=this.value.toLowerCase();document.querySelectorAll('.alt').forEach(e=>e.style.display=e.dataset.n.includes(q)?'flex':'none');};
 }
 async function rpl(n) {
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳ Mise à jour...</p>';
-    let ok=true, last=null;
-    for(const s of bul) {
-        const r=await fetch(`/api/update-meal/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:s.j,moment:s.m,nouvelle_recette:n})});
-        last=await r.json();
+    let ok=true;
+    for(const s of bul) for(const j of s.jours) {
+        const r=await fetch(`/api/update-meal/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:j,moment:s.m,nouvelle_recette:n})});
+        const last=await r.json();
         if(!last.success){ok=false; toast(last.error||'Erreur lors du remplacement','error'); break;}
     }
-    if(ok) {
-        for(const s of bul) document.querySelector(`.meal[data-jour="${s.j}"][data-moment="${s.m}"] .meal-name`).textContent=n;
-        if(last && last.liste_courses) usl(last.liste_courses);
-        toast('Repas mis à jour ✓','success');
-    }
-    c(); document.querySelectorAll('.ck:checked').forEach(c=>c.checked=false); u();
+    if(ok) window.location.reload();
 }
 function usl(items) {
     const g=document.getElementById('shop-g');

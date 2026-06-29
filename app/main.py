@@ -142,6 +142,30 @@ async def index(request: Request):
     )
 
 
+def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
+    """Regroupe les jours consécutifs partageant le même repas (plat + même
+    accompagnement) en « runs » pour fusionner les cases du planning.
+    Retourne {"midi": [run, ...], "soir": [...]} avec run = {start, span, jours, plat}."""
+    rows: dict[str, list[dict]] = {"midi": [], "soir": []}
+    for moment in ("midi", "soir"):
+        by_day = {p["jour"]: p for p in plats if p["moment"] == moment}
+        run: dict | None = None
+        for jour in range(1, 8):
+            plat = by_day.get(jour)
+            if not plat:
+                run = None
+                continue
+            acc = plat.get("accompagnement") or {}
+            key = (plat.get("nom_recette", ""), acc.get("nom_recette", ""))
+            if run and run["key"] == key and run["start"] + run["span"] == jour:
+                run["span"] += 1
+                run["jours"].append(jour)
+            else:
+                run = {"key": key, "start": jour, "span": 1, "jours": [jour], "plat": plat}
+                rows[moment].append(run)
+    return rows
+
+
 @app.get("/planning/{planning_id}", response_class=HTMLResponse)
 async def voir_planning(request: Request, planning_id: int):
     """Affiche un planning existant."""
@@ -166,6 +190,7 @@ async def voir_planning(request: Request, planning_id: int):
             "request": request,
             "planning": planning,
             "plats": data.get("plats", []),
+            "week_rows": _group_week(data.get("plats", [])),
             "liste_courses": data.get("liste_courses", []),
             "per_day": per_day,
             "valide": bool(planning.get("valide", 0)),
