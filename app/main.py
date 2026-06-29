@@ -12,7 +12,7 @@ from pathlib import Path
 
 import aiosqlite
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -835,6 +835,16 @@ async def api_update_meal(
     except Exception as e:
         logger.exception("Erreur update meal")
         return {"error": str(e)}
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """Sert le service worker depuis la racine (scope = tout le site)."""
+    return FileResponse(
+        str(BASE_DIR / "static" / "sw.js"),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/health")

@@ -1,0 +1,19 @@
+{
+  "name": "Menu Planner Tristabeau",
+  "short_name": "Menu Planner",
+  "description": "Planificateur de repas et liste de courses",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f0eb",
+  "theme_color": "#e67e22",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

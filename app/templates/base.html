@@ -9,7 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Menu Planner">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="manifest" href="/static/manifest.json">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -52,6 +53,13 @@
             setTimeout(() => t.remove(), 250);
         }, type === 'error' ? 4500 : 2800);
     };
+    // Enregistrement du service worker (mode hors-ligne).
+    // N'agit qu'en contexte sécurisé (HTTPS ou localhost) ; ignoré sinon.
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW non enregistré:', e));
+        });
+    }
     </script>
     {% block scripts %}{% endblock %}
 </body>
