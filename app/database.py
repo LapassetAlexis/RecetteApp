@@ -1,6 +1,7 @@
 """Couche SQLite — historique des plannings & recettes enrichies."""
 
 import aiosqlite
+import json
 from datetime import date, datetime
 from typing import Any
 
@@ -57,6 +58,11 @@ class Database:
                     ON planning_recipes(recipe_name);
                 CREATE INDEX IF NOT EXISTS idx_planning_history_week
                     ON planning_history(week_start);
+
+                CREATE TABLE IF NOT EXISTS app_prefs (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    data_json TEXT NOT NULL
+                );
             """)
             # Migrations idempotentes : on ajoute les colonnes manquantes en
             # vérifiant d'abord leur présence (PRAGMA). Pas de try/except
@@ -197,6 +203,29 @@ class Database:
             if not rows:
                 return None
             return _row_to_dict(rows[0])
+
+    # ── Préférences de génération (mémorisées entre sessions) ─────
+
+    async def save_prefs(self, data_json: str) -> None:
+        """Mémorise les derniers paramètres de génération (1 seule ligne)."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO app_prefs (id, data_json) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json",
+                (data_json,),
+            )
+            await db.commit()
+
+    async def get_prefs(self) -> dict[str, Any]:
+        """Retourne les derniers paramètres mémorisés ({} si aucun)."""
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall("SELECT data_json FROM app_prefs WHERE id = 1")
+            if not rows:
+                return {}
+            try:
+                return json.loads(rows[0][0])
+            except (json.JSONDecodeError, TypeError):
+                return {}
 
     async def get_planning_with_recipes(
         self, planning_id: int

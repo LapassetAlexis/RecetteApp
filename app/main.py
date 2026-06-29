@@ -129,16 +129,36 @@ async def index(request: Request):
     dernier = await db.get_last_planning()
     planning_id = dernier["id"] if dernier else None
 
+    # Préférences mémorisées (pré-remplissage du formulaire)
+    prefs = await db.get_prefs()
+
+    def _to_ints(csv: str, n: int) -> list[int] | None:
+        try:
+            vals = [int(x) for x in csv.split(",")]
+            return vals if len(vals) == n else None
+        except (ValueError, AttributeError):
+            return None
+
+    midi_groups_value = prefs.get("midi_groups") or "1,1,2,2,2,3,4"
+    day_groups = _to_ints(midi_groups_value, 7)
+    day_pers = _to_ints(prefs.get("per_day", ""), 7)
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "week_start": week_start,
-            "saison_default": saison_default,
+            "saison_default": prefs.get("saison") or saison_default,
             "nb_personnes": 4,
             "planning_id": planning_id,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            # pré-remplissage depuis les préférences mémorisées
+            "day_groups": day_groups,
+            "day_pers": day_pers,
+            "midi_groups_value": midi_groups_value,
+            "ingredients_force": prefs.get("ingredients_force", ""),
+            "custom_prompt": prefs.get("custom_prompt", ""),
         },
     )
 
@@ -580,6 +600,17 @@ async def generer(
                 "moment": p["moment"],
             } for p in plats],
         )
+
+        # Mémoriser les préférences pour pré-remplir le prochain formulaire
+        try:
+            await db.save_prefs(json.dumps({
+                "saison": saison, "temperature": temperature,
+                "ingredients_force": ingredients_force, "custom_prompt": custom_prompt,
+                "midi_groups": midi_groups, "per_day": per_day,
+                "tags": tags, "etat": etat,
+            }, ensure_ascii=False))
+        except Exception as e:
+            logger.warning(f"Impossible de mémoriser les préférences: {e}")
 
         return RedirectResponse(url=f"/planning/{planning_id}", status_code=303)
 
