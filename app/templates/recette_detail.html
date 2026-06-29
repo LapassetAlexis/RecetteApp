@@ -13,6 +13,7 @@
         <div class="detail-links">
             {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
             {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
+            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">✨ Enrichir</a>
         </div>
     </div>
 
