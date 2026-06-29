@@ -35,3 +35,61 @@ def clean_recipe_title(name: str) -> str:
     # Suffixe " WW" (Weight Watchers)
     s = re.sub(r"\s+WW$", "", s)
     return s.strip()
+
+
+def _parse_qty(value) -> float | None:
+    """Convertit une quantité en nombre. Gère décimales (1,5) et fractions (1/2).
+
+    Renvoie None si non numérique (« une pincée », « QS »...) → non sommable.
+    """
+    s = str(value).strip().replace(",", ".")
+    if not s:
+        return None
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", s)  # fraction
+    if m:
+        try:
+            denom = float(m.group(2))
+            return float(m.group(1)) / denom if denom else None
+        except (ValueError, ZeroDivisionError):
+            return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", s):
+        return float(s)
+    return None
+
+
+def _fmt_qty(n: float) -> str:
+    """Formate une quantité numérique (entier sans .0, sinon 2 décimales max)."""
+    if n == int(n):
+        return str(int(n))
+    return f"{round(n, 2):g}"
+
+
+def merge_ingredients(items: list[dict]) -> list[dict]:
+    """Fusionne une liste d'ingrédients par (nom, unité).
+
+    - additionne les quantités numériques (décimales/fractions) de même unité ;
+    - une même denrée en unités différentes reste sur 2 lignes (non additionnable) ;
+    - quantités non numériques : on garde la première renseignée.
+    Trie par nom.
+    """
+    out: dict[tuple[str, str], dict] = {}
+    order: list[tuple[str, str]] = []
+    for ing in items:
+        nom = (ing.get("nom") or "").strip()
+        if not nom:
+            continue
+        unite = (ing.get("unite") or "").strip()
+        qty = str(ing.get("quantite", "") or "").strip()
+        key = (nom.lower(), unite.lower())
+        if key not in out:
+            out[key] = {"nom": nom, "quantite": qty, "unite": unite}
+            order.append(key)
+            continue
+        existing = out[key]
+        a, b = _parse_qty(existing["quantite"]), _parse_qty(qty)
+        if a is not None and b is not None:
+            existing["quantite"] = _fmt_qty(a + b)
+        elif not existing["quantite"] and qty:
+            existing["quantite"] = qty
+        # sinon : non sommable → on conserve la première valeur
+    return sorted((out[k] for k in order), key=lambda x: x["nom"].lower())

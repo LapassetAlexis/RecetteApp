@@ -21,7 +21,7 @@ from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
-from app.text_utils import clean_recipe_title
+from app.text_utils import clean_recipe_title, merge_ingredients
 
 VERSION = "1.1.0"
 
@@ -443,22 +443,17 @@ async def generate_shopping(planning_id: int, request: Request):
             liste_courses = await llm.batch_extract_ingredients(plats, planning["nb_personnes"])
         except Exception as e:
             logger.warning(f"Batch échoué ({e}), extraction individuelle...")
-            courses_map = {}
+            collected = []
             for plat in plats:
                 try:
                     d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
-                    for ing in d.get("ingredients", []):
-                        k = ing["nom"].lower().strip()
-                        if k in courses_map and courses_map[k]["unite"] == ing.get("unite", ""):
-                            try:
-                                q1 = float(str(courses_map[k]["quantite"]).replace(",", "."))
-                                q2 = float(str(ing["quantite"]).replace(",", "."))
-                                courses_map[k]["quantite"] = str(q1 + q2)
-                            except Exception: pass
-                        else:
-                            courses_map[k] = {"nom": ing["nom"], "quantite": ing.get("quantite", ""), "unite": ing.get("unite", "")}
-                except Exception: pass
-            liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
+                    collected.extend(d.get("ingredients", []))
+                except Exception:
+                    pass
+            liste_courses = collected
+        # Normalisation/fusion déterministe (dédup + addition par nom+unité),
+        # y compris pour nettoyer d'éventuels doublons de la sortie du batch LLM.
+        liste_courses = merge_ingredients(liste_courses)
 
         # Ajouter les ingrédients forcés
         force = planning.get("ingredients_force", "")
@@ -758,37 +753,15 @@ async def api_update_meal(
         # Regénérer la liste de courses. On privilégie le cache local pour
         # chaque plat ; on n'appelle le LLM que pour les recettes sans cache
         # (typiquement uniquement le plat qui vient d'être remplacé).
-        courses_map: dict[str, dict] = {}
         nb_personnes = planning.get("nb_personnes", 4)
-
-        def _merge(ings: list[dict]) -> None:
-            for ing in ings:
-                if not ing.get("nom"):
-                    continue
-                # clé = (nom, unité) : un même ingrédient en unités différentes
-                # n'est pas écrasé/perdu, il coexiste (on ne peut pas additionner).
-                key = (ing["nom"].lower().strip(), ing.get("unite", ""))
-                if key in courses_map:
-                    existing = courses_map[key]
-                    try:
-                        q1 = float(str(existing["quantite"]).replace(",", "."))
-                        q2 = float(str(ing["quantite"]).replace(",", "."))
-                        existing["quantite"] = str(q1 + q2)
-                    except (ValueError, TypeError):
-                        pass
-                else:
-                    courses_map[key] = {
-                        "nom": ing["nom"],
-                        "quantite": ing.get("quantite", ""),
-                        "unite": ing.get("unite", ""),
-                    }
+        collected: list[dict] = []
 
         for plat in plats:
             nid = plat.get("notion_id", "")
             cached = await db.get_enriched(nid) if nid else None
             if cached and cached.get("ingredients"):
                 try:
-                    _merge(json.loads(cached["ingredients"]))
+                    collected.extend(json.loads(cached["ingredients"]))
                     continue
                 except (json.JSONDecodeError, TypeError) as e:
                     logger.debug(f"Cache ingrédients illisible pour {nid}: {e}")
@@ -798,13 +771,14 @@ async def api_update_meal(
                     plat["nom_recette"], plat.get("url", ""), nb_personnes,
                 )
                 ings = ingredients_data.get("ingredients", [])
-                _merge(ings)
+                collected.extend(ings)
                 if nid and ings:
                     await db.save_enriched(nid, plat["nom_recette"], ingredients=json.dumps(ings))
             except Exception as e:
                 logger.warning(f"Extraction ingrédients échouée pour {plat['nom_recette']}: {e}")
 
-        liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
+        # Fusion déterministe (dédup + addition par nom+unité)
+        liste_courses = merge_ingredients(collected)
         planning_data["liste_courses"] = liste_courses
 
         # Mettre à jour le planning existant (ne pas en créer un nouveau)
