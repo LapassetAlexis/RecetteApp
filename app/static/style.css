@@ -88,6 +88,9 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 /* nom : couleur de texte normale (pas de bleu de lien), clampé à 3 lignes */
 .meal-name { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; font-weight:600; font-size:0.78rem; line-height:1.3; margin:3px 0; word-break:break-word; color:var(--text); text-decoration:none; overflow:hidden; }
 a.meal-name:hover { text-decoration:underline; }
+.meal-side { font-size:0.7rem; line-height:1.25; color:var(--t2); margin:1px 0 3px; word-break:break-word; }
+.meal-side a { color:var(--t2); text-decoration:none; }
+.meal-side a:hover { text-decoration:underline; }
 .meal-chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; padding-top:4px; }
 .meal-chips .chip, .meal-chips .tag { font-size:0.6rem; padding:1px 6px; }
 

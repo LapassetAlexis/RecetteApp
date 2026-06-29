@@ -565,13 +565,26 @@ async def generate_shopping(planning_id: int, request: Request):
         if not plats:
             return {"error": "Aucun plat dans ce planning"}
 
+        # Inclure les accompagnements (légumes appariés) dans les courses.
+        extract_plats = []
+        for p in plats:
+            extract_plats.append(p)
+            acc = p.get("accompagnement")
+            if acc and acc.get("nom_recette"):
+                extract_plats.append({
+                    "nom_recette": acc["nom_recette"],
+                    "moment": p.get("moment", ""),
+                    "url": acc.get("url", ""),
+                    "notion_id": acc.get("notion_id", ""),
+                })
+
         liste_courses = []
         try:
-            liste_courses = await llm.batch_extract_ingredients(plats, planning["nb_personnes"])
+            liste_courses = await llm.batch_extract_ingredients(extract_plats, planning["nb_personnes"])
         except Exception as e:
             logger.warning(f"Batch échoué ({e}), extraction individuelle...")
             collected = []
-            for plat in plats:
+            for plat in extract_plats:
                 try:
                     d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
                     collected.extend(d.get("ingredients", []))

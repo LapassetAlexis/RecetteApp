@@ -8,6 +8,33 @@ from app.llm_client import LLMClient
 client = LLMClient()
 
 
+def test_needs_side_and_is_side():
+    assert client._needs_side({"repas": "Plat", "tags": ["Viande"]})
+    assert client._needs_side({"repas": "Plat", "tags": ["Poisson"]})
+    # plat complet (légume / quiche / soupe) -> pas d'accompagnement
+    assert not client._needs_side({"repas": "Plat", "tags": ["Viande", "Légumes"]})
+    assert not client._needs_side({"repas": "Plat", "tags": ["Quiche/tarte"]})
+    assert not client._needs_side({"repas": "Dessert", "tags": ["Viande"]})
+    assert client._is_side({"repas": "Légume", "tags": []})
+    assert client._is_side({"repas": "Accompagnement", "tags": []})
+    assert not client._is_side({"repas": "Plat", "tags": ["Viande"]})
+
+
+def test_attach_sides_pairs_only_protein_dishes():
+    meta = {
+        "poulet rôti": {"nom": "Poulet rôti", "repas": "Plat", "tags": ["Viande"]},
+        "lasagnes": {"nom": "Lasagnes", "repas": "Plat", "tags": ["Viande", "Légumes"]},
+    }
+    sides = [{"nom": "Haricots verts", "repas": "Légume", "tags": []}]
+    plats = [
+        client._make_plat(1, "midi", "Poulet rôti"),
+        client._make_plat(1, "soir", "Lasagnes"),
+    ]
+    client._attach_sides(plats, meta, sides)
+    assert plats[0]["accompagnement"]["nom_recette"] == "Haricots verts"
+    assert plats[1]["accompagnement"] is None
+
+
 def test_liste_numerotee():
     raw = "\n".join(
         f"{i+1} - Jour {i//2+1} - {'midi' if i%2==0 else 'soir'} - Recette {i+1}"

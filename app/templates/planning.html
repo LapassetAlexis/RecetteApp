@@ -43,6 +43,14 @@
                 {% else %}
                 <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
                 {% endif %}
+                {% if plat.accompagnement %}
+                {% set acc = plat.accompagnement %}
+                {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
+                <div class="meal-side">+
+                    {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
+                    {% else %}{{ acc.nom_recette | clean_title }}{% endif %}
+                </div>
+                {% endif %}
                 {% if plat.repas or plat.tags %}
                 <div class="meal-chips">
                     {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}

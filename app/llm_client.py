@@ -596,6 +596,22 @@ class LLMClient:
 
     # ── Génération planning ──────────────────────────────────────
 
+    # Un plat tagué ainsi est considéré « complet » (pas besoin d'accompagnement).
+    _COMPLETE_TAGS = {"Légumes", "Soupe", "Salade", "Quiche/tarte"}
+
+    @staticmethod
+    def _is_side(r: dict[str, Any]) -> bool:
+        """Recette utilisable comme accompagnement (légume / garniture)."""
+        return r.get("repas") in ("Légume", "Accompagnement")
+
+    @classmethod
+    def _needs_side(cls, r: dict[str, Any]) -> bool:
+        """Plat « protéine nature » (viande/poisson) sans légume → mérite un côté."""
+        if r.get("repas") not in ("Plat", ""):
+            return False
+        tags = set(r.get("tags") or [])
+        return bool(tags & {"Viande", "Poisson"}) and not (tags & cls._COMPLETE_TAGS)
+
     async def generate_planning(
         self,
         recettes: list[dict[str, Any]],
@@ -611,9 +627,17 @@ class LLMClient:
         # Liste compacte (1 ligne/recette) plutôt que du JSON indenté :
         # beaucoup moins de tokens, lisible par le modèle.
         # Format : Nom | type | moment | tags
+        # Le LLM choisit des PLATS principaux ; les accompagnements (légumes /
+        # garnitures) sont appariés ensuite par le code aux plats qui en ont
+        # besoin (viande/poisson nature). On ne propose donc au LLM que les plats.
+        sides = [r for r in recettes if self._is_side(r)]
+        meta = {r["nom"].lower().strip(): r for r in recettes}
+
         lignes = []
         for r in recettes:
-            if r["repas"] not in ("Plat", "Entrée", "Légume", "Accompagnement", ""):
+            if self._is_side(r):
+                continue
+            if r["repas"] not in ("Plat", "Entrée", ""):
                 continue
             parts = [r["nom"]]
             if r["repas"]:
@@ -667,11 +691,13 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
                 valid.append(canon)
         if len(valid) < n_needed:
             for r in recettes:
+                if self._is_side(r):
+                    continue
                 if r["nom"] not in valid and r["nom"] not in recettes_exclues:
                     valid.append(r["nom"])
                     if len(valid) >= n_needed:
                         break
-        return self._assign_slots(valid[:n_needed], groups, unique_groups)
+        return self._assign_slots(valid[:n_needed], groups, unique_groups, meta, sides)
 
     def _parse_recipe_names(self, raw: str) -> list[str]:
         """Extrait une liste de noms de recettes d'une réponse LLM (liste numérotée)."""
@@ -697,9 +723,11 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
 
     def _assign_slots(
         self, names: list[str], groups: list[int], unique_groups: list[int],
+        meta: dict[str, Any] | None = None, sides: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Construit les 14 créneaux : midis groupés = même plat, soirs tous
-        différents (et différents des midis tant qu'il y a assez de recettes)."""
+        différents (et différents des midis tant qu'il y a assez de recettes).
+        Les plats « protéine nature » reçoivent un accompagnement (légume)."""
         if not names:
             return []
         n_groups = len(unique_groups)
@@ -713,7 +741,30 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
             idx = day - 1
             nom = soirs[idx] if idx < len(soirs) else names[(n_groups + idx) % len(names)]
             plats.append(self._make_plat(day, "soir", nom))
+
+        self._attach_sides(plats, meta or {}, sides or [])
         return plats
+
+    def _attach_sides(
+        self, plats: list[dict[str, Any]],
+        meta: dict[str, Any], sides: list[dict[str, Any]],
+    ) -> None:
+        """Apparie un légume/accompagnement aux plats viande/poisson nature.
+        Tourne dans la liste des accompagnements pour varier sur la semaine."""
+        if not sides:
+            return
+        k = 0
+        for plat in plats:
+            m = meta.get(plat["nom_recette"].lower().strip())
+            if m and self._needs_side(m):
+                s = sides[k % len(sides)]
+                k += 1
+                plat["accompagnement"] = {
+                    "nom_recette": s["nom"],
+                    "notion_id": s.get("id", ""),
+                    "url": s.get("url", ""),
+                    "notion_url": s.get("notion_url", ""),
+                }
 
     def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
         """Parse la réponse du LLM (liste numérotée, markdown ou JSON)."""
@@ -809,6 +860,7 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
             "notion_id": "",
             "url": "",
             "notion_url": "",
+            "accompagnement": None,
         }
 
     # ── Extraction ingrédients ───────────────────────────────────
