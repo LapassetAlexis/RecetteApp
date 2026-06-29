@@ -38,7 +38,7 @@
         {% set plat = run.plat %}
         {% set last = run.start + run.span - 1 %}
         {% set jcsv = run.jours | join(',') %}
-        <div class="meal {{ moment }}" data-jours="{{ jcsv }}" data-moment="{{ moment }}"
+        <div class="meal {{ moment }}{{ ' merged' if run.span > 1 else '' }}" data-jours="{{ jcsv }}" data-moment="{{ moment }}"
              style="grid-column:{{ run.start }} / span {{ run.span }};grid-row:{{ row }};">
             <div class="meal-head">
                 <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ jcsv }}" data-moment="{{ moment }}"> <span class="meal-tag">{{ labels[moment] }}{% if run.span > 1 %} · {{ jours[run.start-1][:3] }}–{{ jours[last-1][:3] }}{% endif %}</span></label>

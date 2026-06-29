@@ -76,6 +76,12 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .meal { padding:7px 8px; border-left:3px solid var(--bo); border-radius:var(--r); box-shadow:var(--sh); min-height:146px; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); }
 .meal.midi { border-left-color:var(--pr); background:#fdf4ec; }
 .meal.soir { border-left-color:var(--ac); background:#f4eff9; }
+/* Cellule fusionnée (plusieurs jours) : contenu centré pour combler la largeur */
+.meal.merged { align-items:center; text-align:center; }
+.meal.merged .meal-head { width:100%; }
+.meal.merged .meal-name { margin-top:auto; max-width:340px; }
+.meal.merged .meal-side { justify-content:center; }
+.meal.merged .meal-chips { margin-top:0; margin-bottom:auto; padding-top:6px; justify-content:center; }
 .meal-tag { font-size:0.66rem; font-weight:700; letter-spacing:0.3px; color:var(--t2); text-transform:uppercase; }
 .meal-head { display:flex; align-items:center; justify-content:space-between; }
 .meal-cb { display:flex; align-items:center; gap:4px; cursor:pointer; font-size:0.75rem; min-height:32px; }
