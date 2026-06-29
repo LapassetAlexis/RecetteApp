@@ -108,6 +108,22 @@
     </div>
 </div>
 
+{% if week_nutrition %}
+<div class="card nutri">
+    <div class="nutri-head">
+        <h2>📊 Nutrition <small class="muted-sm">/ jour · personne</small></h2>
+        <span class="nutri-tag conf-{{ week_nutrition.confiance|lower }}">Confiance : {{ week_nutrition.confiance }}</span>
+    </div>
+    <div class="nutri-grid">
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.calories }}</span><span class="nl">kcal</span></div>
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.proteines }}<small>g</small></span><span class="nl">protéines</span></div>
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.glucides }}<small>g</small></span><span class="nl">glucides</span></div>
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.lipides }}<small>g</small></span><span class="nl">lipides</span></div>
+    </div>
+    <small class="muted-sm">Moyenne estimée ({{ week_nutrition.meals_estimes }}/{{ week_nutrition.meals_total }} repas couverts) — enrichis les recettes pour affiner.</small>
+</div>
+{% endif %}
+
 <!-- Liste de courses -->
 <div class="card">
     <div class="shop-h">

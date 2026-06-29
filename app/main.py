@@ -178,6 +178,85 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["tags"] = r.get("tags", [])
 
 
+async def _week_nutrition(plats: list[dict]) -> dict | None:
+    """Estime la nutrition moyenne par jour/personne sur le planning, à partir
+    des ingrédients en cache. Retourne None si rien d'estimable."""
+    ids: set[str] = set()
+    for p in plats:
+        if p.get("notion_id"):
+            ids.add(p["notion_id"])
+        acc = p.get("accompagnement") or {}
+        if acc.get("notion_id"):
+            ids.add(acc["notion_id"])
+    if not ids:
+        return None
+
+    per_recipe: dict[str, dict] = {}
+    for nid in ids:
+        cached = await db.get_enriched(nid)
+        if not cached or not cached.get("ingredients"):
+            continue
+        try:
+            ings = [
+                {"nom": i.get("nom", ""), "quantite": str(i.get("quantite", "") or ""),
+                 "unite": i.get("unite", "")}
+                for i in json.loads(cached["ingredients"]) if i.get("nom")
+            ]
+        except (json.JSONDecodeError, TypeError):
+            continue
+        nut = None
+        if cached.get("nutrition"):
+            try:
+                src = json.loads(cached["nutrition"]) or {}
+                if src and all(src.get(k) is not None for k in ("calories", "proteines", "glucides", "lipides")):
+                    nut = src
+            except (json.JSONDecodeError, TypeError):
+                nut = None
+        if not nut:
+            nut = estimate_nutrition(ings, BASE_SERVINGS)
+        if nut:
+            per_recipe[nid] = nut
+
+    if not per_recipe:
+        return None
+
+    tot = {"calories": 0.0, "proteines": 0.0, "glucides": 0.0, "lipides": 0.0}
+    seen: set[tuple] = set()
+    meals_total = meals_est = 0
+    days: set[int] = set()
+    for p in plats:
+        days.add(p["jour"])
+        key = (p["jour"], p["moment"])
+        if key in seen:
+            continue
+        seen.add(key)
+        meals_total += 1
+        recs = [p.get("notion_id")]
+        acc = p.get("accompagnement") or {}
+        if acc.get("notion_id"):
+            recs.append(acc["notion_id"])
+        meal = [per_recipe[n] for n in recs if n in per_recipe]
+        if not meal:
+            continue
+        meals_est += 1
+        for n in meal:
+            for k in tot:
+                tot[k] += n.get(k, 0) or 0
+
+    if not meals_est:
+        return None
+    ndays = len(days) or 1
+    cov = meals_est / meals_total if meals_total else 0
+    return {
+        "calories": round(tot["calories"] / ndays),
+        "proteines": round(tot["proteines"] / ndays),
+        "glucides": round(tot["glucides"] / ndays),
+        "lipides": round(tot["lipides"] / ndays),
+        "meals_estimes": meals_est, "meals_total": meals_total,
+        "confiance": "Bonne" if cov >= 0.7 else ("Moyenne" if cov >= 0.4 else "Mauvaise"),
+    }
+
+
 def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
     """Regroupe les jours consécutifs partageant le même repas (plat + même
     accompagnement) en « runs » pour fusionner les cases du planning.
@@ -221,13 +300,15 @@ async def voir_planning(request: Request, planning_id: int):
         per_day = [planning.get("nb_personnes", 4)] * 7
 
     liste_courses = data.get("liste_courses", [])
+    plats = data.get("plats", [])
     return templates.TemplateResponse(
         "planning.html",
         {
             "request": request,
             "planning": planning,
-            "plats": data.get("plats", []),
-            "week_rows": _group_week(data.get("plats", [])),
+            "plats": plats,
+            "week_rows": _group_week(plats),
+            "week_nutrition": await _week_nutrition(plats),
             "liste_courses": liste_courses,
             "courses_par_rayon": group_by_rayon(liste_courses),
             "rayon_order": RAYON_ORDER,
