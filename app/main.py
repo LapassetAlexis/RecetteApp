@@ -142,6 +142,21 @@ async def index(request: Request):
     )
 
 
+def _index_by_name(recettes: list[dict]) -> dict[str, dict]:
+    """Index {nom normalisé: recette} pour un lookup O(1) (évite les scans
+    linéaires répétés sur toute la base à chaque appariement de plat)."""
+    return {r["nom"].lower().strip(): r for r in recettes}
+
+
+def _apply_recipe_info(plat: dict, r: dict) -> None:
+    """Reporte les infos Notion d'une recette sur un plat du planning."""
+    plat["notion_id"] = r["id"]
+    plat["url"] = r.get("url", "")
+    plat["notion_url"] = r.get("notion_url", "")
+    plat["repas"] = r.get("repas", "")
+    plat["tags"] = r.get("tags", [])
+
+
 def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
     """Regroupe les jours consécutifs partageant le même repas (plat + même
     accompagnement) en « runs » pour fusionner les cases du planning.
@@ -530,17 +545,13 @@ async def generer(
             per_day=per_day,
         )
 
-        # 4. Associer chaque plat aux infos Notion
+        # 4. Associer chaque plat aux infos Notion (lookup O(1))
+        by_name = _index_by_name(recettes)
         for plat in plats:
             plat["notion_id"] = ""
-            for r in recettes:
-                if r["nom"].lower().strip() == plat["nom_recette"].lower().strip():
-                    plat["notion_id"] = r["id"]
-                    plat["url"] = r.get("url", "")
-                    plat["notion_url"] = r.get("notion_url", "")
-                    plat["repas"] = r.get("repas", "")
-                    plat["tags"] = r.get("tags", [])
-                    break
+            r = by_name.get(plat["nom_recette"].lower().strip())
+            if r:
+                _apply_recipe_info(plat, r)
 
         # 5. Sauvegarder en BROUILLON (valide=0). Le planning n'apparaît dans
         #    l'historique qu'après validation explicite par l'utilisateur.
@@ -613,8 +624,8 @@ async def generate_shopping(planning_id: int, request: Request):
                 try:
                     d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
                     collected.extend(d.get("ingredients", []))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Extraction ingrédients échouée pour {plat.get('nom_recette','?')}: {e}")
             liste_courses = collected
         # Normalisation/fusion déterministe (dédup + addition par nom+unité),
         # y compris pour nettoyer d'éventuels doublons de la sortie du batch LLM.
@@ -752,7 +763,8 @@ async def api_enrich_all():
                             f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
                             for i in ing_list
                         )
-                except Exception: pass
+                except (json.JSONDecodeError, TypeError, KeyError) as e:
+                    logger.warning(f"Cache ingrédients illisible pour {nom}: {e}")
 
             # Sinon, extraire via LLM
             if not ingredients_txt and r.get("url"):
@@ -766,7 +778,8 @@ async def api_enrich_all():
                         )
                         # Mettre en cache
                         await db.save_enriched(nid, nom, ingredients=json.dumps(ings))
-                except Exception: pass
+                except Exception as e:
+                    logger.warning(f"Extraction LLM échouée pour {nom}: {e}")
 
             if ingredients_txt:
                 try:
@@ -910,10 +923,10 @@ async def api_update_meal(
     data = await request.json()
     jour = data.get("jour")
     moment = data.get("moment")  # "midi" ou "soir"
-    nouvelle_recette = data.get("nouvelle_recette", "")
+    nouvelle_recette = (data.get("nouvelle_recette") or "").strip()
 
-    if not all([jour, moment, nouvelle_recette]):
-        return {"error": "Paramètres manquants (jour, moment, nouvelle_recette)"}
+    if jour not in range(1, 8) or moment not in ("midi", "soir") or not nouvelle_recette:
+        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir, recette)"}
 
     try:
         # Récupérer le planning actuel
@@ -925,28 +938,14 @@ async def api_update_meal(
         plats = planning_data["plats"]
 
         # Chercher et remplacer le plat
-        trouve = False
-        for plat in plats:
-            if plat["jour"] == jour and plat["moment"] == moment:
-                plat["nom_recette"] = nouvelle_recette
-                plat["notion_id"] = ""
-                plat["url"] = ""
-                plat["notion_url"] = ""
-                # Chercher les infos dans Notion
-                recettes = await notion.get_all_recipes()
-                for r in recettes:
-                    if r["nom"].lower().strip() == nouvelle_recette.lower().strip():
-                        plat["notion_id"] = r["id"]
-                        plat["url"] = r.get("url", "")
-                        plat["notion_url"] = r.get("notion_url", "")
-                        plat["repas"] = r.get("repas", "")
-                        plat["tags"] = r.get("tags", [])
-                        break
-                trouve = True
-                break
-
-        if not trouve:
+        target = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
+        if not target:
             return {"error": "Repas non trouvé dans le planning"}
+        target["nom_recette"] = nouvelle_recette
+        target["notion_id"] = target["url"] = target["notion_url"] = ""
+        r = _index_by_name(await notion.get_all_recipes()).get(nouvelle_recette.lower().strip())
+        if r:
+            _apply_recipe_info(target, r)
 
         # Regénérer la liste de courses. On privilégie le cache local pour
         # chaque plat ; on n'appelle le LLM que pour les recettes sans cache
@@ -1001,8 +1000,8 @@ async def api_update_side(planning_id: int, request: Request):
     moment = data.get("moment")
     nouvelle_recette = (data.get("nouvelle_recette") or "").strip()
 
-    if not jour or not moment:
-        return {"error": "Paramètres manquants (jour, moment)"}
+    if jour not in range(1, 8) or moment not in ("midi", "soir"):
+        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir)"}
 
     try:
         planning = await db.get_planning_with_recipes(planning_id)
@@ -1020,11 +1019,9 @@ async def api_update_side(planning_id: int, request: Request):
             cible["accompagnement"] = None
         else:
             acc = {"nom_recette": nouvelle_recette, "notion_id": "", "url": "", "notion_url": ""}
-            recettes = await notion.get_all_recipes()
-            for r in recettes:
-                if r["nom"].lower().strip() == nouvelle_recette.lower().strip():
-                    acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
-                    break
+            r = _index_by_name(await notion.get_all_recipes()).get(nouvelle_recette.lower().strip())
+            if r:
+                acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
             cible["accompagnement"] = acc
 
         await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
