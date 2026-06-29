@@ -58,21 +58,22 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_planning_history_week
                     ON planning_history(week_start);
             """)
-            # Migration pour les bases créées avant l'ajout de la colonne valide.
-            # L'ALTER ne réussit qu'au 1er passage (colonne absente) ; on en
-            # profite pour marquer les plannings existants comme validés (ils
-            # l'étaient implicitement sous l'ancien comportement).
-            try:
+            # Migrations idempotentes : on ajoute les colonnes manquantes en
+            # vérifiant d'abord leur présence (PRAGMA). Pas de try/except
+            # silencieux : une vraie erreur (droits, base verrouillée) doit
+            # remonter plutôt que laisser un 500 plus tard.
+            async def _has_column(table: str, col: str) -> bool:
+                rows = await db.execute_fetchall(f"PRAGMA table_info({table})")
+                return any(r[1] == col for r in rows)
+
+            if not await _has_column("planning_history", "valide"):
                 await db.execute(
                     "ALTER TABLE planning_history ADD COLUMN valide INTEGER NOT NULL DEFAULT 0"
                 )
+                # Les plannings existants étaient validés sous l'ancien comportement
                 await db.execute("UPDATE planning_history SET valide = 1")
-            except Exception:
-                pass  # colonne déjà présente
-            try:
+            if not await _has_column("enriched_recipes", "nutrition"):
                 await db.execute("ALTER TABLE enriched_recipes ADD COLUMN nutrition TEXT")
-            except Exception:
-                pass  # colonne déjà présente
             await db.commit()
 
     # ── Historique des plannings ──────────────────────────────────
