@@ -81,16 +81,61 @@ def _flatten_instructions(val: Any) -> list[str]:
     return steps
 
 
-def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
-    """Parse les blocs <script type=ld+json> et renvoie la 1re recette schema.org.
+def _balanced_json(text: str, start: int) -> str | None:
+    """Extrait l'objet JSON équilibré à partir d'un '{' à l'index `start`.
 
-    Source la plus fiable : pas de LLM, données telles que publiées par le site.
+    Gère les chaînes et les échappements (un '}' dans une chaîne ne compte pas).
     """
-    blocks = re.findall(
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+    return None
+
+
+def _jsonld_candidates(html_text: str) -> list[str]:
+    """Rassemble les objets JSON schema.org de la page.
+
+    1) blocs <script type="application/ld+json"> classiques.
+    2) repli robuste : tout objet commençant par {"@context"...} repéré dans le
+       HTML brut et extrait par équilibrage d'accolades. Couvre les sites (ex.
+       Marmiton) où l'attribut type est encodé en entités HTML ou le JSON inline.
+    """
+    out: list[str] = []
+    out += re.findall(
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         html_text, re.DOTALL | re.IGNORECASE,
     )
-    for block in blocks:
+    for m in re.finditer(r'\{\s*"@context"', html_text):
+        obj = _balanced_json(html_text, m.start())
+        if obj:
+            out.append(obj)
+    return out
+
+
+def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
+    """Renvoie la 1re recette schema.org de la page (script ld+json OU inline).
+
+    Source la plus fiable : pas de LLM, données telles que publiées par le site.
+    """
+    for block in _jsonld_candidates(html_text):
         raw = block.strip()
         try:
             data = json.loads(raw)

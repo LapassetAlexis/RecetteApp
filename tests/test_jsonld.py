@@ -72,6 +72,24 @@ def test_no_recipe_returns_none():
     assert _extract_jsonld_recipe(html) is None
 
 
+def test_inline_object_without_ldjson_script():
+    # Cas Marmiton : objet schema.org présent mais l'attribut type du <script>
+    # est encodé en entités HTML, donc le regex sur la balise ne matche pas.
+    # Le repli par {"@context"} + équilibrage d'accolades doit le retrouver.
+    html = (
+        'bla bla <script type="application&#x2F;ld&#x2B;json">'
+        '{"@context":"http://schema.org","@type":"Recipe","name":"Lasagnes",'
+        '"recipeIngredient":["500 g de boeuf","lait"],'
+        '"recipeInstructions":[{"@type":"HowToStep","text":"Cuire la viande {voir note}."}]}'
+        '</script> fin'
+    )
+    r = _extract_jsonld_recipe(html)
+    assert r is not None and r["nom"] == "Lasagnes"
+    assert r["ingredients"] == ["500 g de boeuf", "lait"]
+    # le '}' dans la chaîne ne doit pas casser l'équilibrage
+    assert "Cuire la viande {voir note}." in r["instructions"]
+
+
 def test_entities_decoded():
     html = """
     <script type="application/ld+json">
