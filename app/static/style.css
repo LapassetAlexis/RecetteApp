@@ -281,6 +281,18 @@ a.meal-name:hover { text-decoration:underline; }
 .enrich-btn:disabled { opacity:0.6; cursor:default; }
 .recipe-card { display:flex; flex-direction:column; }
 
+/* ── Nutrition ───────────────────────────────── */
+.nutri-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+.nutri-tag { font-size:0.7rem; font-weight:700; padding:3px 9px; border-radius:12px; }
+.nutri-tag.exact { background:#e8f8e8; color:var(--sc); }
+.nutri-tag.est { background:var(--bg); color:var(--t2); }
+.nutri-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.nutri-item { background:var(--bg); border-radius:10px; padding:12px 6px; text-align:center; }
+.nutri-item .nv { display:block; font-size:1.25rem; font-weight:800; color:var(--prd); line-height:1; }
+.nutri-item .nv small { font-size:0.7rem; font-weight:700; margin-left:1px; }
+.nutri-item .nl { display:block; font-size:0.68rem; color:var(--t2); text-transform:uppercase; letter-spacing:0.3px; margin-top:5px; }
+@media (max-width:480px) { .nutri-grid { grid-template-columns:repeat(2,1fr); } }
+
 /* ── Éditeur d'étapes (enrichir) ─────────────── */
 .step-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }
 .step-num { flex:0 0 22px; padding-top:9px; font-weight:700; color:var(--prd); font-size:0.85rem; }

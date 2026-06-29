@@ -67,18 +67,55 @@
     </div>
 
     <div class="form-g">
-        <label for="instructions_manual">👨‍🍳 Instructions de cuisson</label>
-        <textarea id="instructions_manual" name="instructions_manual" rows="5" class="inp" placeholder="1. Éplucher les pommes\n2. Mélanger la farine..."></textarea>
-        <small>Optionnel, mais sera affiché joliment sur la page détail.</small>
+        <label>👨‍🍳 Instructions de cuisson <small class="muted-sm">(une étape par bloc)</small></label>
+        <div id="steps"></div>
+        <button type="button" id="add-step" class="btn btn-ghost btn-sm" style="margin-top:6px;">+ Ajouter une étape</button>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg">💾 Ajouter la recette</button>
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-add">💾 Ajouter la recette</button>
     <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Analyser une autre URL</button>
 </form>
+
+<div id="add-loading" class="loading-overlay">
+    <div class="loading-box">
+        <div class="spinner-big"></div>
+        <h2>💾 Ajout en cours...</h2>
+        <p>Écriture dans Notion.</p>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+// ── Éditeur d'étapes ────────────────────────────────
+function renumberSteps() {
+    document.querySelectorAll('#steps .step-num').forEach((e, i) => { e.textContent = (i + 1) + '.'; });
+}
+function bindDel(b) {
+    b.addEventListener('click', () => { b.closest('.step-row').remove(); renumberSteps(); });
+}
+function addStepRow(text) {
+    const row = document.createElement('div');
+    row.className = 'step-row';
+    row.innerHTML = '<span class="step-num"></span><textarea name="steps" rows="2" class="inp"></textarea>'
+        + '<button type="button" class="step-del" title="Supprimer l\'étape">✕</button>';
+    row.querySelector('textarea').value = text || '';
+    document.getElementById('steps').appendChild(row);
+    bindDel(row.querySelector('.step-del'));
+    renumberSteps();
+    return row;
+}
+function splitInstructions(t) {
+    t = (t || '').trim();
+    if (!t) return [];
+    const lines = t.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    if (lines.length > 1) return lines;
+    return t.split(/(?<=[.!?])\s+(?=[A-ZÀ-Ý0-9])/).map(s => s.trim()).filter(Boolean);
+}
+document.getElementById('add-step')?.addEventListener('click', () => {
+    addStepRow('').querySelector('textarea').focus();
+});
+
 document.getElementById('btn-analyze')?.addEventListener('click', async function() {
     const url = document.getElementById('url-input').value.trim();
     if (!url) { toast('Colle une URL d\'abord !', 'error'); return; }
@@ -103,7 +140,11 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
         if (d.repas) document.getElementById('repas').value = d.repas;
         if (d.moment) document.getElementById('moment').value = d.moment;
         if (d.ingredients) document.getElementById('ingredients_manual').value = d.ingredients;
-        if (d.instructions) document.getElementById('instructions_manual').value = d.instructions;
+        const steps = splitInstructions(d.instructions || '');
+        const sc = document.getElementById('steps');
+        sc.innerHTML = '';
+        steps.forEach(addStepRow);
+        if (!steps.length) addStepRow('');
         if (d.image_url) {
             let img = document.getElementById('recipe-preview-img');
             if (!img) {
@@ -137,6 +178,13 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '🔍 Analyser';
     }
+});
+
+// Retour visuel pendant l'ajout (le POST écrit dans Notion)
+document.getElementById('step2')?.addEventListener('submit', () => {
+    const b = document.getElementById('btn-add');
+    if (b) { b.disabled = true; b.textContent = '⏳ Ajout...'; }
+    document.getElementById('add-loading')?.classList.add('show');
 });
 
 document.getElementById('btn-back')?.addEventListener('click', function() {

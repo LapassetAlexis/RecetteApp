@@ -21,6 +21,7 @@ from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
+from app.nutrition import estimate_nutrition
 from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
 
 VERSION = "1.1.0"
@@ -250,6 +251,19 @@ async def detail_recette(request: Request, page_id: str):
             logger.warning(f"Instructions illisibles pour {page_id}: {e}")
             instructions = []
 
+        # Nutrition par part : valeurs exactes de la source (JSON-LD) si on les a
+        # stockées, sinon estimation calculée depuis les ingrédients.
+        nutrition = None
+        if cached and cached.get("nutrition"):
+            try:
+                nutrition = json.loads(cached["nutrition"]) or None
+                if nutrition:
+                    nutrition.setdefault("source", "source")
+            except (json.JSONDecodeError, TypeError):
+                nutrition = None
+        if not nutrition and ingredients:
+            nutrition = estimate_nutrition(ingredients, BASE_SERVINGS)
+
         return templates.TemplateResponse(
             "recette_detail.html",
             {
@@ -258,6 +272,7 @@ async def detail_recette(request: Request, page_id: str):
                 "ingredients": ingredients,
                 "base_servings": BASE_SERVINGS,
                 "instructions": instructions,
+                "nutrition": nutrition,
             },
         )
     except Exception:
@@ -276,6 +291,7 @@ async def enrichir_page(request: Request, page_id: str):
     ingredients: list[dict] = []
     instructions_text = ""
     image_url = ""
+    nutrition_src: dict = {}
 
     # « Enrichir » = re-fetch la SOURCE en priorité (données d'origine), pas le
     # cache qui peut contenir d'anciennes extractions inexactes.
@@ -285,6 +301,7 @@ async def enrichir_page(request: Request, page_id: str):
             ingredients = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", [])) if i and i["nom"]]
             instructions_text = info.get("instructions", "")
             image_url = info.get("image_url", "")
+            nutrition_src = info.get("nutrition") or {}
         except Exception as e:
             logger.warning(f"Re-extraction enrichir {page_id}: {e}")
 
@@ -310,6 +327,7 @@ async def enrichir_page(request: Request, page_id: str):
             "ingredients": ingredients,
             "steps": split_instructions(instructions_text),
             "image_url": image_url,
+            "nutrition_json": json.dumps(nutrition_src),
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
         },
@@ -325,6 +343,7 @@ async def enrichir_submit(
     ingredients_text: str = Form(""),
     steps: list[str] = Form([]),
     image_url: str = Form(""),
+    nutrition_json: str = Form(""),
 ):
     """Étape 2 : applique les changements validés à la recette Notion + cache."""
     recette = await notion.get_recipe(page_id)
@@ -335,9 +354,16 @@ async def enrichir_submit(
         i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
     ]
     instructions_text = "\n".join(s.strip() for s in steps if s.strip())
+    # Nutrition exacte de la source si fournie (sinon vide → estimée à l'affichage)
+    nutrition = ""
+    try:
+        if nutrition_json and json.loads(nutrition_json):
+            nutrition = nutrition_json
+    except (json.JSONDecodeError, TypeError):
+        nutrition = ""
     try:
         if structured:
-            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured))
+            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured), nutrition=nutrition)
             await notion.update_ingredients(page_id, _ingredients_to_text(structured))
         if instructions_text:
             await notion.rewrite_recipe_body(page_id, instructions_text)
@@ -732,10 +758,11 @@ async def ajouter_recette(
     tags: list[str] = Form([]),
     moment: str = Form(""),
     ingredients_manual: str = Form(""),
-    instructions_manual: str = Form(""),
+    steps: list[str] = Form([]),
     image_url: str = Form(""),
 ):
     """Ajoute une recette depuis une URL ou manuellement."""
+    instructions_manual = "\n".join(s.strip() for s in steps if s.strip())
     error = None
     success = None
 
@@ -776,11 +803,11 @@ async def ajouter_recette(
                         await notion.append_instructions(page_id, instructions_manual)
                     if image_url:
                         await notion.update_image(page_id, image_url)
-                    # Sauvegarder en cache local
+                    # Cache local : ingrédients STRUCTURÉS (pour scaling + nutrition)
                     if ingredients_manual:
                         ings_list = [
-                            {"nom": l.strip().lstrip("- ").split(":")[0].strip(), "quantite": "", "unite": ""}
-                            for l in ingredients_manual.split("\n") if l.strip()
+                            i for i in (parse_ingredient_line(l) for l in ingredients_manual.split("\n"))
+                            if i and i["nom"]
                         ]
                         await db.save_enriched(
                             notion_id=page_id,
