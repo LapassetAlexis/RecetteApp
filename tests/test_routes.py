@@ -121,10 +121,32 @@ def test_update_meal_updates_without_duplicate(client, monkeypatch):
     assert resp.json().get("success")
     # le repas est remplacé et AUCUN planning dupliqué n'est créé
     import asyncio
+    asyncio.run(main.db.mark_planning_valid(pid))
     plannings = asyncio.run(main.db.list_plannings(limit=10))
     assert len(plannings) == 1
     p = asyncio.run(main.db.get_planning_with_recipes(pid))
     assert {r["recipe_name"] for r in p["recipes"]} == {"Curry", "Soupe"}
+
+
+def test_planning_draft_then_validate(client, monkeypatch):
+    async def _all():
+        return [_recipe("Poulet"), _recipe("Soupe")]
+    async def _gen(**kw):
+        return [
+            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
+            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
+        ]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    # brouillon : pas dans l'historique, bandeau de validation présent
+    assert "Semaine du" not in client.get("/historique").text
+    assert "Valider la semaine" in client.get(f"/planning/{pid}").text
+    # validation
+    assert client.post(f"/planning/{pid}/valider").json().get("success")
+    assert "Semaine du" in client.get("/historique").text
+    assert "Semaine validée" in client.get(f"/planning/{pid}").text
 
 
 def test_detail_recette(client, monkeypatch):

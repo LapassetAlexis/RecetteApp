@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
-import aiosqlite
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -165,9 +164,20 @@ async def voir_planning(request: Request, planning_id: int):
             "plats": data.get("plats", []),
             "liste_courses": data.get("liste_courses", []),
             "per_day": per_day,
+            "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
         },
     )
+
+
+@app.post("/planning/{planning_id}/valider")
+async def valider_planning(planning_id: int):
+    """Valide un brouillon de planning : il rejoint l'historique."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return {"error": "Planning introuvable"}
+    await db.mark_planning_valid(planning_id)
+    return {"success": True}
 
 
 @app.get("/recettes", response_class=HTMLResponse)
@@ -380,8 +390,10 @@ async def generer(
                     plat["tags"] = r.get("tags", [])
                     break
 
-        # 5. Sauvegarder le planning (sans liste de courses pour l'instant).
-        #    per_day permet d'afficher le nb de personnes par jour.
+        # 5. Sauvegarder en BROUILLON (valide=0). Le planning n'apparaît dans
+        #    l'historique qu'après validation explicite par l'utilisateur.
+        #    On purge d'abord l'éventuel brouillon précédent non validé.
+        await db.delete_draft_plannings()
         data = {
             "plats": plats,
             "liste_courses": [],
@@ -455,32 +467,12 @@ async def generate_shopping(planning_id: int, request: Request):
                 if f.lower() not in {i["nom"].lower() for i in liste_courses}:
                     liste_courses.append({"nom": f, "quantite": "", "unite": ""})
 
-        # Mettre à jour le planning
-        async with aiosqlite.connect(settings.database_path) as db_conn:
-            planning_data["liste_courses"] = liste_courses
-            await db_conn.execute(
-                "UPDATE planning_history SET data_json = ? WHERE id = ?",
-                (json.dumps(planning_data, ensure_ascii=False), planning_id),
-            )
-            await db_conn.commit()
-
-        # Sauvegarder les ingrédients dans Notion pour chaque recette
-        for plat in plats:
-            nid = plat.get("notion_id", "")
-            nom = plat.get("nom_recette", "")
-            if nid:
-                # Chercher les ingrédients de cette recette dans la liste
-                recette_ings = [i for i in liste_courses if i.get("nom")]
-                if recette_ings:
-                    nb = planning.get("nb_personnes", 4)
-                    txt = f"Pour {nb} personnes :\n" + "\n".join(
-                        f"- {i['nom']}" + (f" : {i['quantite']} {i['unite']}" if i.get('quantite') else "")
-                        for i in recette_ings
-                    )
-                    try:
-                        await notion.update_ingredients(nid, txt)
-                    except Exception as e:
-                        logger.warning(f"Impossible de sauvegarder les ingrédients pour {nom}: {e}")
+        # Sauvegarder la liste de courses dans le planning.
+        # NB : on n'écrit PAS cette liste dans Notion par recette — c'est une
+        # liste agrégée/dédupliquée de la semaine, pas les ingrédients d'une
+        # recette donnée (ceux-ci sont gérés à l'ajout / via enrich-all).
+        planning_data["liste_courses"] = liste_courses
+        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
 
         return {"success": True, "liste_courses": liste_courses}
 
@@ -773,18 +765,19 @@ async def api_update_meal(
             for ing in ings:
                 if not ing.get("nom"):
                     continue
-                nom_ing = ing["nom"].lower().strip()
-                if nom_ing in courses_map:
-                    existing = courses_map[nom_ing]
-                    if existing["unite"] == ing.get("unite", ""):
-                        try:
-                            q1 = float(str(existing["quantite"]).replace(",", "."))
-                            q2 = float(str(ing["quantite"]).replace(",", "."))
-                            existing["quantite"] = str(q1 + q2)
-                        except (ValueError, TypeError):
-                            pass
+                # clé = (nom, unité) : un même ingrédient en unités différentes
+                # n'est pas écrasé/perdu, il coexiste (on ne peut pas additionner).
+                key = (ing["nom"].lower().strip(), ing.get("unite", ""))
+                if key in courses_map:
+                    existing = courses_map[key]
+                    try:
+                        q1 = float(str(existing["quantite"]).replace(",", "."))
+                        q2 = float(str(ing["quantite"]).replace(",", "."))
+                        existing["quantite"] = str(q1 + q2)
+                    except (ValueError, TypeError):
+                        pass
                 else:
-                    courses_map[nom_ing] = {
+                    courses_map[key] = {
                         "nom": ing["nom"],
                         "quantite": ing.get("quantite", ""),
                         "unite": ing.get("unite", ""),

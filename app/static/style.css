@@ -87,6 +87,11 @@ a.meal-name:hover { text-decoration:underline; }
 .meal-chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; padding-top:4px; }
 .meal-chips .chip, .meal-chips .tag { font-size:0.6rem; padding:1px 6px; }
 
+/* ── Barre de validation (brouillon) ─────────── */
+.validate-bar { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; border-left:4px solid var(--pr); }
+.validate-bar span { font-size:0.9rem; color:var(--t2); }
+.validated-badge { text-align:center; color:var(--sc); font-weight:700; font-size:0.9rem; margin-bottom:16px; }
+
 /* ── Bulk bar ────────────────────────────────── */
 .bulk { position:sticky; bottom:0; background:var(--surface); border-top:2px solid var(--pr); padding:10px 16px; display:flex; align-items:center; gap:10px; box-shadow:0 -4px 12px rgba(0,0,0,0.1); z-index:50; margin-bottom:16px; border-radius:12px 12px 0 0; font-weight:600; font-size:0.9rem; }
 

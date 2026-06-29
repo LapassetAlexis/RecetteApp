@@ -34,6 +34,7 @@ def test_update_planning_does_not_duplicate(tmp_path):
     # Régression du bug : update_meal créait un nouveau planning au lieu d'éditer.
     db = _db(tmp_path)
     pid = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    asyncio.run(db.mark_planning_valid(pid))
     new_plats = [
         {"notion_id": "n3", "recipe_name": "Curry", "repas_type": "Plat", "jour": 1, "moment": "midi"},
         {"notion_id": "n2", "recipe_name": "Soupe", "repas_type": "Plat", "jour": 1, "moment": "soir"},
@@ -48,9 +49,31 @@ def test_update_planning_does_not_duplicate(tmp_path):
 
 def test_recent_recipe_names(tmp_path):
     db = _db(tmp_path)
-    asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    pid = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    asyncio.run(db.mark_planning_valid(pid))
     recent = asyncio.run(db.get_recent_recipe_names(weeks=4))
     assert "Poulet" in recent and "Soupe" in recent
+
+
+def test_drafts_excluded_until_valid(tmp_path):
+    # Un brouillon (non validé) n'apparaît pas dans l'historique ni dans
+    # l'exclusion des recettes récentes ; après validation, si.
+    db = _db(tmp_path)
+    pid = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    assert asyncio.run(db.list_plannings()) == []
+    assert asyncio.run(db.get_recent_recipe_names(weeks=4)) == set()
+    asyncio.run(db.mark_planning_valid(pid))
+    assert len(asyncio.run(db.list_plannings())) == 1
+    assert "Poulet" in asyncio.run(db.get_recent_recipe_names(weeks=4))
+
+
+def test_delete_draft_plannings(tmp_path):
+    db = _db(tmp_path)
+    p1 = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    asyncio.run(db.mark_planning_valid(p1))
+    asyncio.run(db.save_planning("2026-01-12", "Hiver", 4, "", "{}", _plats()))  # brouillon
+    asyncio.run(db.delete_draft_plannings())
+    assert len(asyncio.run(db.list_plannings())) == 1  # seul le validé reste
 
 
 def test_enriched_cache_roundtrip(tmp_path):

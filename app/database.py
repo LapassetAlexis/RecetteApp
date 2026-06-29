@@ -28,7 +28,8 @@ class Database:
                     saison TEXT,
                     nb_personnes INTEGER DEFAULT 4,
                     ingredients_force TEXT,
-                    data_json TEXT NOT NULL
+                    data_json TEXT NOT NULL,
+                    valide INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS planning_recipes (
@@ -56,6 +57,17 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_planning_history_week
                     ON planning_history(week_start);
             """)
+            # Migration pour les bases créées avant l'ajout de la colonne valide.
+            # L'ALTER ne réussit qu'au 1er passage (colonne absente) ; on en
+            # profite pour marquer les plannings existants comme validés (ils
+            # l'étaient implicitement sous l'ancien comportement).
+            try:
+                await db.execute(
+                    "ALTER TABLE planning_history ADD COLUMN valide INTEGER NOT NULL DEFAULT 0"
+                )
+                await db.execute("UPDATE planning_history SET valide = 1")
+            except Exception:
+                pass  # colonne déjà présente
             await db.commit()
 
     # ── Historique des plannings ──────────────────────────────────
@@ -128,6 +140,15 @@ class Database:
                 )
             await db.commit()
 
+    async def update_planning_data(self, planning_id: int, data_json: str) -> None:
+        """Met à jour uniquement le data_json d'un planning (ex. liste de courses)."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "UPDATE planning_history SET data_json = ? WHERE id = ?",
+                (data_json, planning_id),
+            )
+            await db.commit()
+
     async def get_recent_recipe_names(self, weeks: int = 4) -> set[str]:
         """Retourne les noms de recettes utilisées dans les N dernières semaines."""
         async with aiosqlite.connect(self.path) as db:
@@ -137,17 +158,35 @@ class Database:
             rows = await db.execute_fetchall(
                 """SELECT DISTINCT recipe_name FROM planning_recipes pr
                    JOIN planning_history ph ON pr.planning_id = ph.id
-                   WHERE ph.created_at >= datetime('now', ? || ' days')""",
+                   WHERE ph.valide = 1 AND ph.created_at >= datetime('now', ? || ' days')""",
                 (f"-{weeks * 7 + 7}",),
             )
             return {r["recipe_name"] for r in rows}
 
+    async def mark_planning_valid(self, planning_id: int) -> None:
+        """Valide un planning (brouillon -> enregistré dans l'historique)."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "UPDATE planning_history SET valide = 1 WHERE id = ?", (planning_id,)
+            )
+            await db.commit()
+
+    async def delete_draft_plannings(self) -> None:
+        """Supprime les brouillons non validés (et leurs recettes liées)."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """DELETE FROM planning_recipes
+                   WHERE planning_id IN (SELECT id FROM planning_history WHERE valide = 0)"""
+            )
+            await db.execute("DELETE FROM planning_history WHERE valide = 0")
+            await db.commit()
+
     async def get_last_planning(self) -> dict[str, Any] | None:
-        """Retourne le dernier planning généré."""
+        """Retourne le dernier planning VALIDÉ."""
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             rows = await db.execute_fetchall(
-                "SELECT * FROM planning_history ORDER BY id DESC LIMIT 1"
+                "SELECT * FROM planning_history WHERE valide = 1 ORDER BY id DESC LIMIT 1"
             )
             if not rows:
                 return None
@@ -181,7 +220,7 @@ class Database:
             db.row_factory = aiosqlite.Row
             rows = await db.execute_fetchall(
                 "SELECT id, week_start, created_at, saison, nb_personnes "
-                "FROM planning_history ORDER BY id DESC LIMIT ?",
+                "FROM planning_history WHERE valide = 1 ORDER BY id DESC LIMIT ?",
                 (limit,),
             )
             return [_row_to_dict(r) for r in rows]

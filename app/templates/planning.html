@@ -12,6 +12,15 @@
     </p>
 </div>
 
+{% if not valide %}
+<div class="card validate-bar">
+    <span>📝 <strong>Brouillon</strong> — pas encore enregistré dans l'historique. Ajuste si besoin, puis valide.</span>
+    <button class="btn btn-primary" id="btn-valider" onclick="validerSemaine()">✅ Valider la semaine</button>
+</div>
+{% else %}
+<div class="validated-badge">✅ Semaine validée — enregistrée dans l'historique</div>
+{% endif %}
+
 <!-- Planning 7 jours -->
 <div class="week-wrapper">
     <div class="week-scroll">
@@ -113,6 +122,17 @@
 <script>
 const pid = {{ planning.id }};
 let bul = [];
+
+async function validerSemaine() {
+    const b = document.getElementById('btn-valider');
+    if (b) { b.disabled = true; b.textContent = '⏳ Validation...'; }
+    try {
+        const r = await fetch(`/planning/${pid}/valider`, {method: 'POST'});
+        const d = await r.json();
+        if (d.success) { toast('Semaine validée ✓', 'success'); setTimeout(() => location.reload(), 700); }
+        else { toast(d.error || 'Erreur', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
+    } catch (e) { toast('Erreur réseau', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
+}
 const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
 // ── Persistance des cases cochées (par planning) ────
