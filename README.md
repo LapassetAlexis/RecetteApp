@@ -119,7 +119,13 @@ LLM_PROVIDER=groq
 | `GROQ_API_KEY` | — | Clé API Groq |
 | `GEMINI_API_KEY` | — | Clé API Gemini |
 | `OLLAMA_MODEL` | `qwen2.5:3b` | Modèle Ollama |
-| `SECRET_KEY` | `change-me` | Clé secrète sessions |
+| `SECRET_KEY` | _aléatoire_ | Clé secrète sessions (générée au démarrage si vide) |
+| `AUTH_USER` | — | Identifiant HTTP Basic (optionnel) |
+| `AUTH_PASSWORD` | — | Mot de passe HTTP Basic (optionnel) |
+
+> 🔒 **Auth optionnelle** : renseigner `AUTH_USER` **et** `AUTH_PASSWORD` protège
+> toute l'app par HTTP Basic (`/health` et `/static` restent publics). Laisser
+> vide = accès libre (défaut homelab).
 
 ---
 
@@ -212,6 +218,10 @@ pip install -r requirements.txt
 
 # Lancer en dev
 uvicorn app.main:app --reload --port 8020
+
+# Tests
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ---

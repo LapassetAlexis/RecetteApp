@@ -57,42 +57,48 @@ class NotionClient:
         return recipes
 
     def _parse_page(self, page: dict[str, Any]) -> dict[str, Any]:
-        """Transforme une page Notion en dict structuré."""
-        p = page["properties"]
+        """Transforme une page Notion en dict structuré.
+
+        Tolérant aux colonnes manquantes/renommées : une propriété absente
+        donne une valeur vide au lieu de faire planter toute la récupération.
+        """
+        p = page.get("properties", {})
+
         # Nom (title)
         nom = ""
-        if p["Nom"]["type"] == "title" and p["Nom"]["title"]:
-            nom = p["Nom"]["title"][0]["plain_text"]
+        title = p.get("Nom", {}).get("title") or []
+        if title:
+            nom = title[0].get("plain_text", "")
 
         # URL
-        url = ""
-        if p["URL"]["type"] == "url" and p["URL"]["url"]:
-            url = p["URL"]["url"]
+        url = p.get("URL", {}).get("url") or ""
 
         # Repas (select)
         repas = ""
-        if p["Repas"]["select"]:
-            repas = p["Repas"]["select"]["name"]
+        sel = p.get("Repas", {}).get("select")
+        if sel:
+            repas = sel.get("name", "")
 
         # Tag (multi_select)
-        tags = []
-        if p["Tag"]["multi_select"]:
-            tags = [t["name"] for t in p["Tag"]["multi_select"]]
+        tags = [t.get("name", "") for t in (p.get("Tag", {}).get("multi_select") or [])]
 
         # Note (select)
         note = ""
-        if p["Note"]["select"]:
-            note = p["Note"]["select"]["name"]
+        sel = p.get("Note", {}).get("select")
+        if sel:
+            note = sel.get("name", "")
 
         # État (status)
         etat = ""
-        if p["État"]["status"]:
-            etat = p["État"]["status"]["name"]
+        st = p.get("État", {}).get("status")
+        if st:
+            etat = st.get("name", "")
 
         # Moment (select) - peut ne pas exister
         moment = ""
-        if "Moment" in p and p["Moment"]["select"]:
-            moment = p["Moment"]["select"]["name"]
+        sel = p.get("Moment", {}).get("select")
+        if sel:
+            moment = sel.get("name", "")
 
         return {
             "id": page["id"],
@@ -318,10 +324,10 @@ class NotionClient:
         page_id: str,
         note: str,
     ) -> dict[str, Any]:
-        """Met à jour la note d'une recette (⭐ à ⭐⭐⭐⭐⭐)."""
+        """Met à jour la note d'une recette (⭐ à ⭐⭐⭐⭐⭐, ou "" pour effacer)."""
         properties = {
             "Note": {
-                "select": {"name": note}
+                "select": {"name": note} if note else None
             }
         }
         async with httpx.AsyncClient() as client:

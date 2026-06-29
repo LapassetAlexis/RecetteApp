@@ -29,56 +29,57 @@
         </div>
         <div class="form-g">
             <label for="temperature">🌡️ Température</label>
+            {% set temp_val = temperature_default or "Frais (10-18°C)" %}
             <select id="temperature" name="temperature">
-                <option value="Froid (< 10°C)">Froid (&lt; 10°C)</option>
-                <option value="Frais (10-18°C)" selected>Frais (10-18°C)</option>
-                <option value="Doux (18-25°C)">Doux (18-25°C)</option>
-                <option value="Chaud (> 25°C)">Chaud (&gt; 25°C)</option>
-                <option value="Canicule (> 35°C)">Canicule (&gt; 35°C)</option>
+                <option value="Froid (< 10°C)" {% if temp_val == "Froid (< 10°C)" %}selected{% endif %}>Froid (&lt; 10°C)</option>
+                <option value="Frais (10-18°C)" {% if temp_val == "Frais (10-18°C)" %}selected{% endif %}>Frais (10-18°C)</option>
+                <option value="Doux (18-25°C)" {% if temp_val == "Doux (18-25°C)" %}selected{% endif %}>Doux (18-25°C)</option>
+                <option value="Chaud (> 25°C)" {% if temp_val == "Chaud (> 25°C)" %}selected{% endif %}>Chaud (&gt; 25°C)</option>
+                <option value="Canicule (> 35°C)" {% if temp_val == "Canicule (> 35°C)" %}selected{% endif %}>Canicule (&gt; 35°C)</option>
             </select>
         </div>
     </div>
 
     <!-- Configuration fusionnée : groupes midi + personnes par jour -->
-    <div class="card" style="margin-bottom:16px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <div class="card">
+        <div class="row-between">
             <strong>🍳 Organisation des midis</strong>
-            <button type="button" id="reset-groups" class="btn btn-ghost btn-sm" style="font-size:0.75rem;">↺ Défaut</button>
+            <button type="button" id="reset-groups" class="btn btn-ghost btn-sm btn-tiny">↺ Défaut</button>
         </div>
-        <div id="midi-groups" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;">
+        <div id="midi-groups" class="midi-grid">
             {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
-            {% set default_groups = [1,1,2,2,2,3,4] %}
-            {% set default_pers = [3,3,3,3,3,4,4] %}
+            {% set groups = day_groups or [1,1,2,2,2,3,4] %}
+            {% set pers = day_pers or [3,3,3,3,3,4,4] %}
             {% for i in range(7) %}
-            <div class="day-group" data-idx="{{ i }}" data-group="{{ default_groups[i] }}" style="cursor:pointer;padding:10px 4px 6px;border-radius:8px;font-size:0.75rem;font-weight:600;transition:all 0.2s;position:relative;">
-                <div style="font-size:0.7rem;color:var(--t2);margin-bottom:4px;">{{ jours[i] }}</div>
-                <div class="group-label" style="padding:6px 0;border-radius:6px;margin-bottom:6px;font-size:0.7rem;">G{{ default_groups[i] }}</div>
-                <input type="number" name="nb_{{ jours[i]|lower }}" value="{{ default_pers[i] }}" min="1" max="20" class="nb-input" style="width:100%;text-align:center;padding:4px 0;border:1px solid var(--bo);border-radius:4px;font-size:0.75rem;font-weight:600;">
+            <div class="day-group" data-idx="{{ i }}" data-group="{{ groups[i] }}">
+                <div class="day-name">{{ jours[i] }}</div>
+                <div class="group-label">G{{ groups[i] }}</div>
+                <input type="number" id="nb_{{ jours[i]|lower }}" name="nb_{{ jours[i]|lower }}" value="{{ pers[i] }}" min="1" max="20" class="nb-input">
             </div>
             {% endfor %}
         </div>
-        <div id="group-legend" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;font-size:0.75rem;color:var(--t2);"></div>
-        <input type="hidden" name="midi_groups" id="midi-groups-input" value="1,1,2,2,2,3,4">
-        <small style="margin-top:6px;display:block;">Clique sur le groupe (G1, G2...) pour changer. Modifie le nombre sous chaque jour. Même groupe = même plat cuisiné.</small>
+        <div id="group-legend" class="group-legend"></div>
+        <input type="hidden" name="midi_groups" id="midi-groups-input" value="{{ midi_groups_value or '1,1,2,2,2,3,4' }}">
+        <small class="hint">Clique sur le groupe (G1, G2...) pour changer. Modifie le nombre sous chaque jour. Même groupe = même plat cuisiné.</small>
     </div>
 
-    <hr style="border:none;border-top:1px solid var(--bo);margin:16px 0;">
+    <hr class="sep">
 
     <div class="form-g">
         <label for="ingredients_force">🥫 Restes à écouler</label>
-        <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
+        <input type="text" id="ingredients_force" name="ingredients_force" value="{{ ingredients_force or '' }}" placeholder="courgettes, œufs, poulet" class="inp">
     </div>
 
     <div class="form-g">
         <label for="custom_prompt">✏️ Mes consignes pour l'IA</label>
         <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, un soir par semaine restes du midi...">{{ custom_prompt or "" }}</textarea>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+        <div class="preview-row">
             <button type="button" id="preview-btn" class="btn btn-ghost btn-sm">📝 Aperçu du prompt final</button>
-            <span id="preview-status" style="font-size:0.8rem;color:var(--t2);"></span>
+            <span id="preview-status" class="muted-sm"></span>
         </div>
-        <div id="preview-box" style="display:none;margin-top:8px;">
-            <textarea id="preview-area" rows="12" class="inp" readonly style="font-family:monospace;font-size:0.78rem;background:var(--bg);"></textarea>
-            <small style="margin-top:4px;display:block;">Lecture seule. Modifie les champs ci-dessus puis clique "Appliquer" pour mettre à jour.</small>
+        <div id="preview-box" class="preview-box">
+            <textarea id="preview-area" rows="12" class="inp preview-area" readonly></textarea>
+            <small class="hint">Lecture seule. Modifie les champs ci-dessus puis clique "Appliquer" pour mettre à jour.</small>
         </div>
     </div>
 
@@ -86,7 +87,7 @@
 </form>
 
 <!-- Loading -->
-<div id="load" class="loading-overlay" style="display:none">
+<div id="load" class="loading-overlay">
     <div class="loading-box">
         <div class="spinner-big"></div>
         <h2>🍳 Génération en cours...</h2>
@@ -96,7 +97,7 @@
 </div>
 
 {% if planning_id %}
-<div class="card" style="text-align:center">
+<div class="card text-center">
     <p>📋 Dernier planning :</p>
     <a href="/planning/{{ planning_id }}" class="btn btn-secondary">Voir →</a>
 </div>

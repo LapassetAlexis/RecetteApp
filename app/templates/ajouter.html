@@ -75,11 +75,13 @@
     <button type="submit" class="btn btn-primary btn-lg">💾 Ajouter la recette</button>
     <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Analyser une autre URL</button>
 </form>
+{% endblock %}
 
+{% block scripts %}
 <script>
 document.getElementById('btn-analyze')?.addEventListener('click', async function() {
     const url = document.getElementById('url-input').value.trim();
-    if (!url) { alert('Colle une URL d\'abord !'); return; }
+    if (!url) { toast('Colle une URL d\'abord !', 'error'); return; }
 
     const status = document.getElementById('analyze-status');
     const btn = this;
@@ -127,7 +129,10 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
 
         document.getElementById('step1').style.display = 'none';
         document.getElementById('step2').style.display = 'block';
-        status.textContent = '✅ Analyse terminée — vérifie et ajoute !';
+        const exact = d.source === 'jsonld';
+        status.textContent = exact
+            ? '✅ Données extraites de la fiche recette (exactes) — vérifie et ajoute !'
+            : '✅ Analyse terminée (approximative, par IA) — vérifie bien et ajuste !';
     } catch(e) {
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '🔍 Analyser';

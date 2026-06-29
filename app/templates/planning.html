@@ -67,12 +67,18 @@
 <div class="card">
     <div class="shop-h">
         <h2>🛒 Liste de courses</h2>
-        <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
+            {% if liste_courses %}
+            <button class="btn btn-ghost btn-sm" onclick="window.print()" title="Imprimer la liste">🖨️</button>
+            <button class="btn btn-ghost btn-sm" id="btn-regen" onclick="genShop(true)" title="Régénérer la liste">↻</button>
+            {% endif %}
+        </div>
     </div>
     {% if liste_courses %}
     <div class="shop-g" id="shop-g">
         {% for item in liste_courses %}
-        <label class="shop-i">
+        <label class="shop-i" data-item="{{ item.nom|lower }}">
             <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
             {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
         </label>
@@ -91,12 +97,38 @@
 <div class="act">
     <a href="/" class="btn btn-primary">🔄 Nouveau planning</a>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
 const pid = {{ planning.id }};
 let bul = [];
 const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
+// ── Persistance des cases cochées (par planning) ────
+const SHOP_KEY = 'shop_checked_' + pid;
+function loadChecked() {
+    try { return new Set(JSON.parse(localStorage.getItem(SHOP_KEY) || '[]')); }
+    catch(e) { return new Set(); }
+}
+function saveChecked() {
+    const done = [];
+    document.querySelectorAll('.shop-i').forEach(l => {
+        if (l.querySelector('.shop-c').checked) done.push(l.dataset.item);
+    });
+    localStorage.setItem(SHOP_KEY, JSON.stringify(done));
+}
+function bindShopItems() {
+    const done = loadChecked();
+    document.querySelectorAll('.shop-i').forEach(l => {
+        const cb = l.querySelector('.shop-c');
+        if (done.has(l.dataset.item)) cb.checked = true;
+        cb.addEventListener('change', saveChecked);
+    });
+}
+bindShopItems();
+
+// ── Sélection des repas à changer ───────────────────
 document.querySelectorAll('.ck').forEach(c => c.addEventListener('change', u));
 function u() {
     bul = []; document.querySelectorAll('.ck:checked').forEach(c => bul.push({j:+c.dataset.jour,m:c.dataset.moment}));
@@ -131,36 +163,47 @@ async function la() {
 }
 async function rpl(n) {
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳ Mise à jour...</p>';
-    let ok=true;
+    let ok=true, last=null;
     for(const s of bul) {
         const r=await fetch(`/api/update-meal/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:s.j,moment:s.m,nouvelle_recette:n})});
-        const d=await r.json();
-        if(!d.success){ok=false;alert('Erreur');break;}
+        last=await r.json();
+        if(!last.success){ok=false; toast(last.error||'Erreur lors du remplacement','error'); break;}
     }
     if(ok) {
         for(const s of bul) document.querySelector(`.meal[data-jour="${s.j}"][data-moment="${s.m}"] .meal-name`).textContent=n;
-        const r=await fetch(`/api/update-meal/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:bul[0].j,moment:bul[0].m,nouvelle_recette:n})});
-        const d=await r.json();
-        if(d.liste_courses) usl(d.liste_courses);
+        if(last && last.liste_courses) usl(last.liste_courses);
+        toast('Repas mis à jour ✓','success');
     }
     c(); document.querySelectorAll('.ck:checked').forEach(c=>c.checked=false); u();
 }
 function usl(items) {
     const g=document.getElementById('shop-g');
     document.getElementById('shop-n').textContent=items?.length||0;
+    if(!g) return;
     if(!items||!items.length){g.innerHTML='<p class="empty">Aucun.</p>';return;}
-    g.innerHTML=items.map(i=>`<label class="shop-i"><input type="checkbox" class="shop-c"> <span>${i.nom.charAt(0).toUpperCase()+i.nom.slice(1)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('');
+    g.innerHTML=items.map(i=>`<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${i.nom.charAt(0).toUpperCase()+i.nom.slice(1)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('');
+    bindShopItems();
 }
-async function genShop() {
-    const btn=document.getElementById('btn-shop');
+async function genShop(regen) {
+    const btn=document.getElementById('btn-shop') || document.getElementById('btn-regen');
     const st=document.getElementById('shop-status');
-    btn.disabled=true; btn.textContent='⏳ Génération...'; st.textContent='Extraction des ingrédients en cours...';
+    if(btn){ btn.disabled=true; if(!regen) btn.textContent='⏳ Génération...'; }
+    if(st) st.textContent='Extraction des ingrédients en cours...';
+    if(regen) toast('Régénération de la liste…','info');
     try {
         const r=await fetch(`/generate-shopping/${pid}`,{method:'POST'});
         const d=await r.json();
-        if(d.success) { window.location.reload(); }
-        else { st.textContent='Erreur: '+(d.error||'?'); btn.disabled=false; btn.textContent='🛒 Réessayer'; }
-    } catch(e) { st.textContent='Erreur réseau'; btn.disabled=false; btn.textContent='🛒 Réessayer'; }
+        if(d.success) { localStorage.removeItem(SHOP_KEY); window.location.reload(); }
+        else {
+            toast('Erreur : '+(d.error||'?'),'error');
+            if(st) st.textContent='Erreur: '+(d.error||'?');
+            if(btn){ btn.disabled=false; btn.textContent='🛒 Réessayer'; }
+        }
+    } catch(e) {
+        toast('Erreur réseau','error');
+        if(st) st.textContent='Erreur réseau';
+        if(btn){ btn.disabled=false; btn.textContent='🛒 Réessayer'; }
+    }
 }
 function c(){document.getElementById('modal').style.display='none';}
 document.querySelector('.modal-bg')?.addEventListener('click',c);

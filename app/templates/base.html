@@ -4,17 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Menu Planner{% endblock %} — Tristabeau</title>
+    <meta name="theme-color" content="#e67e22">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Menu Planner">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="manifest" href="/static/manifest.json">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    {% set path = request.url.path %}
     <nav class="nav">
         <div class="nav-inner">
             <a href="/" class="nav-brand">🍽️ Menu Planner</a>
             <div class="nav-links">
-                <a href="/">Générer</a>
-                <a href="/recettes">Recettes</a>
-                <a href="/ajouter">Ajouter</a>
-                <a href="/historique">Historique</a>
+                <a href="/" class="{{ 'active' if path == '/' else '' }}">Générer</a>
+                <a href="/recettes" class="{{ 'active' if path.startswith('/recette') else '' }}">Recettes</a>
+                <a href="/ajouter" class="{{ 'active' if path == '/ajouter' else '' }}">Ajouter</a>
+                <a href="/historique" class="{{ 'active' if path.startswith('/historique') or path.startswith('/planning') else '' }}">Historique</a>
             </div>
         </div>
     </nav>
@@ -26,5 +34,33 @@
     <footer class="footer">
         <p>Menu Planner v{{ version }} — hébergé sur le homelab Tristabeau ⚡</p>
     </footer>
+
+    <!-- Conteneur de notifications (toasts) -->
+    <div id="toast-zone" class="toast-zone" aria-live="polite"></div>
+    <script>
+    // Toast global : remplace les alert() natifs.
+    window.toast = function(msg, type) {
+        const zone = document.getElementById('toast-zone');
+        if (!zone) { return; }
+        const t = document.createElement('div');
+        t.className = 'toast toast-' + (type || 'info');
+        t.textContent = msg;
+        zone.appendChild(t);
+        // Forcer le reflow pour l'animation d'entrée
+        requestAnimationFrame(() => t.classList.add('show'));
+        setTimeout(() => {
+            t.classList.remove('show');
+            setTimeout(() => t.remove(), 250);
+        }, type === 'error' ? 4500 : 2800);
+    };
+    // Enregistrement du service worker (mode hors-ligne).
+    // N'agit qu'en contexte sécurisé (HTTPS ou localhost) ; ignoré sinon.
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW non enregistré:', e));
+        });
+    }
+    </script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

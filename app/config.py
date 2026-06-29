@@ -1,6 +1,7 @@
 """Configuration de l'application via variables d'environnement."""
 
 import os
+import secrets
 from dataclasses import dataclass, field
 
 
@@ -33,10 +34,23 @@ class Settings:
     groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
     groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"))
 
+    # Auth HTTP Basic optionnelle. Si AUTH_USER et AUTH_PASSWORD sont tous
+    # deux renseignés, toutes les routes (sauf /health et /static) exigent ces
+    # identifiants. Sinon, aucune authentification (comportement par défaut).
+    auth_user: str = field(default_factory=lambda: os.getenv("AUTH_USER", ""))
+    auth_password: str = field(default_factory=lambda: os.getenv("AUTH_PASSWORD", ""))
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.auth_user and self.auth_password)
+
     # App
     app_title: str = field(default_factory=lambda: os.getenv("APP_TITLE", "Menu Planner"))
+    # Si SECRET_KEY absent : on génère une clé aléatoire au démarrage plutôt
+    # qu'une valeur statique devinable (les sessions seront invalidées à chaque
+    # redémarrage, ce qui est acceptable ici — aucune session persistante).
     secret_key: str = field(
-        default_factory=lambda: os.getenv("SECRET_KEY", "change-me-in-production")
+        default_factory=lambda: os.getenv("SECRET_KEY") or secrets.token_hex(32)
     )
 
     # SQLite
@@ -46,3 +60,34 @@ class Settings:
 
 
 settings = Settings()
+
+
+# Valeurs autorisées des champs Notion (source unique, partagée par l'app et le
+# client LLM pour la classification). Doivent correspondre EXACTEMENT aux options
+# de la base Notion.
+REPAS_OPTIONS = [
+    "Plat",
+    "Dessert",
+    "Entrée",
+    "Goûter",
+    "Accompagnement",
+    "Apéro",
+    "Boisson",
+    "Petit dej",
+    "Légume",
+]
+TAG_OPTIONS = [
+    "Viande",
+    "Poisson",
+    "Légumes",
+    "Soupe",
+    "Salade",
+    "Diet",
+    "Fun",
+    "Quiche/tarte",
+    "Tartines",
+    "Invités",
+    "Sur le pouce",
+    "Végétarien proténiné",
+    "1 personne",
+]

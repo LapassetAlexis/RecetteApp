@@ -1,40 +1,30 @@
 """Client LLM — supporte Ollama (local) et Gemini (cloud)."""
 
+import asyncio
+import html
 import httpx
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import urlparse
 
-from app.config import settings
+from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_PLANNING = """Tu es un chef cuisinier. Tu planifies des repas équilibrés.
+SYSTEM_PROMPT_PLANNING = """Tu es un chef. Tu planifies des repas variés et équilibrés.
 
 RÈGLES :
-- Choisis EXACTEMENT 14 recettes de la liste ci-dessous (7 jours × midi + soir).
-- JAMAIS deux fois la même recette dans la semaine (ni midi ni soir).
-- Équilibre viande/poisson/végé sur la semaine.
-- Ne prends PAS de recettes dans la liste "exclues".
+- Remplis EXACTEMENT 14 créneaux (Jour 1 à 7, midi + soir).
+- Ne répète jamais une recette, SAUF si la "RÉPARTITION DES MIDIS" demande le même plat sur des jours groupés (recopie alors le même nom).
+- VARIÉTÉ MAXIMALE : pioche dans TOUTE la liste fournie, pas seulement les premières. Alterne les protéines (viande / poisson / végé / œufs) et les styles (mijoté, four, poêle, cru, soupe...). Évite deux plats du même type ou de la même base deux jours de suite.
+- Utilise des recettes différentes de celles des semaines précédentes (liste "exclues").
 - Tiens compte de la saison et de la température.
+- N'invente AUCUN plat : choisis uniquement des noms présents dans la liste.
 
-Répond UNIQUEMENT avec une liste numérotée comme ceci, SANS texte avant ni après :
-
-1 - Jour 1 - midi - Nom exact de la recette
-2 - Jour 1 - soir - Nom exact de la recette
-3 - Jour 2 - midi - Nom exact de la recette
-4 - Jour 2 - soir - Nom exact de la recette
-5 - Jour 3 - midi - Nom exact de la recette
-6 - Jour 3 - soir - Nom exact de la recette
-7 - Jour 4 - midi - Nom exact de la recette
-8 - Jour 4 - soir - Nom exact de la recette
-9 - Jour 5 - midi - Nom exact de la recette
-10 - Jour 5 - soir - Nom exact de la recette
-11 - Jour 6 - midi - Nom exact de la recette
-12 - Jour 6 - soir - Nom exact de la recette
-13 - Jour 7 - midi - Nom exact de la recette
-14 - Jour 7 - soir - Nom exact de la recette"""
+Réponds UNIQUEMENT par 14 lignes au format exact, rien d'autre :
+N - Jour X - midi|soir - Nom exact de la recette"""
 
 SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), liste les ingrédients nécessaires.
 
@@ -47,6 +37,251 @@ Répond UNIQUEMENT avec ce JSON :
 {"ingredients": [{"nom": "...", "quantite": "...", "unite": "..."}]}
 
 Pas de texte avant ou après le JSON."""
+
+
+def _clean_text(s: str) -> str:
+    """Décode les entités HTML et retire d'éventuelles balises résiduelles."""
+    s = re.sub(r"<[^>]+>", " ", s or "")
+    s = html.unescape(s)
+    return re.sub(r"[ \t]+", " ", s).strip()
+
+
+def _first_image(val: Any) -> str:
+    """image JSON-LD peut être une str, un objet {url}, ou une liste de ceux-ci."""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        return val.get("url", "") or val.get("contentUrl", "")
+    if isinstance(val, list) and val:
+        return _first_image(val[0])
+    return ""
+
+
+def _flatten_instructions(val: Any) -> list[str]:
+    """recipeInstructions : str | [str] | [HowToStep{text}] | [HowToSection{itemListElement}]."""
+    steps: list[str] = []
+    if isinstance(val, str):
+        # parfois un seul bloc avec sauts de ligne
+        for part in re.split(r"\n+|(?<=[.!?])\s{2,}", val):
+            t = _clean_text(part)
+            if t:
+                steps.append(t)
+    elif isinstance(val, list):
+        for item in val:
+            if isinstance(item, str):
+                t = _clean_text(item)
+                if t:
+                    steps.append(t)
+            elif isinstance(item, dict):
+                if item.get("@type") == "HowToSection" and "itemListElement" in item:
+                    steps.extend(_flatten_instructions(item["itemListElement"]))
+                else:
+                    t = _clean_text(item.get("text") or item.get("name") or "")
+                    if t:
+                        steps.append(t)
+    return steps
+
+
+def _balanced_json(text: str, start: int) -> str | None:
+    """Extrait l'objet JSON équilibré à partir d'un '{' à l'index `start`.
+
+    Gère les chaînes et les échappements (un '}' dans une chaîne ne compte pas).
+    """
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+    return None
+
+
+def _find_enclosing_start(text: str, idx: int) -> int:
+    """Remonte depuis `idx` jusqu'au '{' qui ouvre l'objet le contenant.
+
+    Compte les accolades à l'envers pour sauter les objets imbriqués déjà
+    fermés (ex. un VideoObject listé avant la clé "@context" du parent).
+    """
+    depth = 0
+    i = idx
+    while i >= 0:
+        ch = text[i]
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            if depth == 0:
+                return i
+            depth -= 1
+        i -= 1
+    return -1
+
+
+def _jsonld_candidates(html_text: str) -> list[str]:
+    """Rassemble les objets JSON schema.org de la page.
+
+    1) blocs <script type="application/ld+json"> classiques.
+    2) repli robuste : tout objet commençant par {"@context"...} repéré dans le
+       HTML brut et extrait par équilibrage d'accolades. Couvre les sites (ex.
+       Marmiton) où l'attribut type est encodé en entités HTML ou le JSON inline.
+    """
+    out: list[str] = []
+    out += re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html_text, re.DOTALL | re.IGNORECASE,
+    )
+    # Repli : ancrer sur "@context" puis remonter au '{' ouvrant de son objet.
+    # Couvre les pages où @context n'est pas la première clé (ex. Ricardo) ou
+    # où l'attribut type du <script> est encodé en entités HTML (ex. Marmiton).
+    seen_starts: set[int] = set()
+    for m in re.finditer(r'"@context"', html_text):
+        start = _find_enclosing_start(html_text, m.start())
+        if start < 0 or start in seen_starts:
+            continue
+        seen_starts.add(start)
+        obj = _balanced_json(html_text, start)
+        if obj:
+            out.append(obj)
+    return out
+
+
+def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
+    """Renvoie la 1re recette schema.org de la page (script ld+json OU inline).
+
+    Source la plus fiable : pas de LLM, données telles que publiées par le site.
+    """
+    for block in _jsonld_candidates(html_text):
+        raw = block.strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        # Aplatir les structures possibles : objet, liste, ou {"@graph": [...]}.
+        # NB : on inclut TOUJOURS la racine ET les noeuds @graph — certains sites
+        # (ex. Ricardo) mettent le Recipe à la racine MAIS ajoutent aussi un
+        # @graph (WebSite). Remplacer la racine par @graph perdait le Recipe.
+        candidates: list[Any] = []
+        if isinstance(data, list):
+            candidates = data
+        elif isinstance(data, dict):
+            candidates = [data]
+            graph = data.get("@graph")
+            if isinstance(graph, list):
+                candidates += graph
+        for node in candidates:
+            if not isinstance(node, dict):
+                continue
+            t = node.get("@type", "")
+            types = t if isinstance(t, list) else [t]
+            if not any("Recipe" in str(x) for x in types):
+                continue
+            # Certains sites (ex. CuisineActuelle) glissent un en-tête
+            # "Ingrédients" comme 1re entrée du tableau : on l'écarte.
+            _NOISE = {"ingrédients", "ingredients", "ingrédient", "ingredient"}
+            ingredients = [
+                c for c in (_clean_text(i) for i in (node.get("recipeIngredient") or node.get("ingredients") or []))
+                if c and c.lower() not in _NOISE
+            ]
+            instructions = _flatten_instructions(node.get("recipeInstructions", ""))
+            kw = node.get("keywords", "")
+            keywords = [k.strip() for k in kw.split(",")] if isinstance(kw, str) else [
+                _clean_text(k) for k in (kw or [])
+            ]
+            cat = node.get("recipeCategory", "")
+            if isinstance(cat, str) and cat:
+                keywords.append(cat)
+            return {
+                "nom": _clean_text(node.get("name", "")),
+                "image_url": _first_image(node.get("image", "")),
+                "ingredients": ingredients,
+                "instructions": "\n".join(instructions),
+                "keywords": [k for k in keywords if k],
+            }
+    return None
+
+
+# ── Handlers spécifiques par site ────────────────────────────────────
+# Pour les sites SANS JSON-LD exploitable. Un handler reçoit le HTML brut et
+# renvoie le MÊME dict que _extract_jsonld_recipe
+#   {nom, image_url, ingredients: list[str], instructions: str, keywords: list[str]}
+# ou None s'il échoue. Ordre d'extraction : JSON-LD générique → handler de
+# domaine → repli LLM. Ajouter un site = écrire une fonction + l'enregistrer ci-dessous.
+#
+# Exemple :
+#   def _handler_monsite(html_text: str) -> dict[str, Any] | None:
+#       nom = _clean_text(re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.S).group(1))
+#       ings = [_clean_text(x) for x in re.findall(r'<li class="ingredient">(.*?)</li>', html_text, re.S)]
+#       if not ings:
+#           return None
+#       return {"nom": nom, "image_url": "", "ingredients": ings, "instructions": "", "keywords": []}
+#   SITE_HANDLERS = {"monsite.com": _handler_monsite}
+
+def _handler_amandinecooking(html_text: str) -> dict[str, Any] | None:
+    """amandinecooking.com : blog WordPress sans schema.org.
+
+    Structure : <h2>Titre</h2> ... <h2>Ingrédients ...</h2><ul><li>...</li></ul>
+    ... <h2>Préparation</h2><ol><li>...</li></ol>. Image via og:image (repli).
+    """
+    def items_after(label: str) -> list[str]:
+        idx = html_text.find(label)
+        if idx < 0:
+            return []
+        lm = re.search(r"<(ul|ol)[^>]*>(.*?)</\1>", html_text[idx:], re.S | re.I)
+        if not lm:
+            return []
+        lis = re.findall(r"<li[^>]*>(.*?)</li>", lm.group(2), re.S | re.I)
+        return [t for t in (_clean_text(x) for x in lis) if t]
+
+    ingredients = items_after("Ingr&eacute;dients")
+    instructions = items_after("Pr&eacute;paration")
+    if not ingredients:
+        return None
+
+    # Titre : premier <h2> qui n'est ni Ingrédients ni Préparation.
+    nom = ""
+    for h in re.findall(r"<h2[^>]*>(.*?)</h2>", html_text, re.S | re.I):
+        t = _clean_text(h)
+        if t and "ngr" not in t.lower() and "paration" not in t.lower():
+            nom = t
+            break
+    if not nom:
+        m = re.search(r"<title>(.*?)</title>", html_text, re.S | re.I)
+        nom = _clean_text(m.group(1)).split(" - ")[0] if m else ""
+
+    return {
+        "nom": nom,
+        "image_url": "",  # repli sur og:image côté extract_recipe_from_url
+        "ingredients": ingredients,
+        "instructions": "\n".join(instructions),
+        "keywords": [],
+    }
+
+
+SITE_HANDLERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
+    "amandinecooking.com": _handler_amandinecooking,
+}
+
+
+def _site_handler(url: str) -> Callable[[str], dict[str, Any] | None] | None:
+    """Renvoie le handler enregistré pour le domaine de l'URL (ou None)."""
+    domain = urlparse(url).netloc.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return SITE_HANDLERS.get(domain)
 
 
 class LLMClient:
@@ -73,26 +308,36 @@ class LLMClient:
             self._url = f"{settings.ollama_url}/api/chat"
             self._model = settings.ollama_model
 
+    @staticmethod
+    def _log_usage(provider: str, label: str, in_tok: int, out_tok: int) -> None:
+        """Trace la consommation de tokens pour pouvoir l'optimiser/surveiller."""
+        if in_tok or out_tok:
+            logger.info(
+                f"🔢 {provider}/{label}: {in_tok} in + {out_tok} out = {in_tok + out_tok} tokens"
+            )
+
     async def _chat(
-        self, system: str, user: str, temperature: float = 0.3
+        self, system: str, user: str, temperature: float = 0.3,
+        max_tokens: int = 2048, label: str = "chat", json_mode: bool = False,
     ) -> str:
         if self.provider == "gemini":
             try:
-                return await self._chat_gemini(system, user, temperature)
+                return await self._chat_gemini(system, user, temperature, max_tokens, label, json_mode)
             except Exception as e:
                 logger.warning(f"⚠️ Gemini a échoué ({e}). Fallback vers Ollama...")
-                return await self._chat_ollama(system, user, temperature)
+                return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
         elif self.provider == "groq":
             try:
-                return await self._chat_groq(system, user, temperature)
+                return await self._chat_groq(system, user, temperature, max_tokens, label, json_mode)
             except Exception as e:
                 logger.warning(f"⚠️ Groq a échoué ({e}). Fallback vers Ollama...")
-                return await self._chat_ollama(system, user, temperature)
+                return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
         else:
-            return await self._chat_ollama(system, user, temperature)
+            return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
 
     async def _chat_ollama(
-        self, system: str, user: str, temperature: float = 0.3
+        self, system: str, user: str, temperature: float = 0.3,
+        max_tokens: int = 2048, json_mode: bool = False,
     ) -> str:
         url = f"{settings.ollama_url}/api/chat"
         payload = {
@@ -102,16 +347,20 @@ class LLMClient:
                 {"role": "user", "content": user},
             ],
             "stream": False,
-            "options": {"temperature": temperature},
+            "options": {"temperature": temperature, "num_predict": max_tokens},
         }
+        if json_mode:
+            payload["format"] = "json"
         async with httpx.AsyncClient(timeout=600) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
+            self._log_usage("ollama", "chat", data.get("prompt_eval_count", 0), data.get("eval_count", 0))
             return data["message"]["content"]
 
     async def _chat_groq(
-        self, system: str, user: str, temperature: float = 0.3
+        self, system: str, user: str, temperature: float = 0.3,
+        max_tokens: int = 2048, label: str = "chat", json_mode: bool = False,
     ) -> str:
         """Groq (API compatible OpenAI). Avec gestion rate limit."""
         payload = {
@@ -121,8 +370,10 @@ class LLMClient:
                 {"role": "user", "content": user},
             ],
             "temperature": temperature,
-            "max_tokens": 2048,
+            "max_tokens": max_tokens,
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -131,27 +382,31 @@ class LLMClient:
             resp = await client.post(self._url, json=payload, headers=headers)
             if resp.status_code == 429:
                 logger.warning("⚠️ Groq rate limit (429). Attente 5s puis retry...")
-                import asyncio
                 await asyncio.sleep(5)
                 resp = await client.post(self._url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
+            usage = data.get("usage", {})
+            self._log_usage("groq", label, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
             return data["choices"][0]["message"]["content"]
 
     async def _chat_gemini(
-        self, system: str, user: str, temperature: float = 0.3
+        self, system: str, user: str, temperature: float = 0.3,
+        max_tokens: int = 2048, label: str = "chat", json_mode: bool = False,
     ) -> str:
+        gen_config = {"temperature": temperature, "maxOutputTokens": max_tokens}
+        if json_mode:
+            gen_config["responseMimeType"] = "application/json"
         payload = {
             "contents": [{"parts": [{"text": f"{system}\n\n{user}"}]}],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": 2048,
-            },
+            "generationConfig": gen_config,
         }
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(self._url, json=payload)
             resp.raise_for_status()
             data = resp.json()
+            usage = data.get("usageMetadata", {})
+            self._log_usage("gemini", label, usage.get("promptTokenCount", 0), usage.get("candidatesTokenCount", 0))
             candidates = data.get("candidates", [])
             if not candidates:
                 raise ValueError("Gemini: aucune réponse")
@@ -159,25 +414,10 @@ class LLMClient:
             return "".join(p.get("text", "") for p in parts)
 
     async def _chat_ingredients_gemini(
-        self, system: str, user: str, temperature: float = 0.1
+        self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 1024
     ) -> str:
         """Gemini avec contrainte JSON forcée."""
-        payload = {
-            "contents": [{"parts": [{"text": f"{system}\n\n{user}"}]}],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": 1024,
-            },
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(self._url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                raise ValueError("Gemini: aucune réponse")
-            parts = candidates[0].get("content", {}).get("parts", [])
-            return "".join(p.get("text", "") for p in parts)
+        return await self._chat_gemini(system, user, temperature, max_tokens, "ingredients", json_mode=True)
 
     # ── Génération planning ──────────────────────────────────────
 
@@ -193,15 +433,22 @@ class LLMClient:
         midi_groups: str = "1,1,2,2,2,3,4",
         per_day: str = "2,2,2,2,2,4,4",
     ) -> list[dict[str, Any]]:
-        recettes_str = json.dumps(
-            [
-                {"nom": r["nom"], "type": r["repas"], "tags": r["tags"], "moment": r.get("moment", "")}
-                for r in recettes
-                if r["repas"] in ("Plat", "Entrée", "Légume", "Accompagnement", "")
-            ],
-            ensure_ascii=False,
-            indent=2,
-        )
+        # Liste compacte (1 ligne/recette) plutôt que du JSON indenté :
+        # beaucoup moins de tokens, lisible par le modèle.
+        # Format : Nom | type | moment | tags
+        lignes = []
+        for r in recettes:
+            if r["repas"] not in ("Plat", "Entrée", "Légume", "Accompagnement", ""):
+                continue
+            parts = [r["nom"]]
+            if r["repas"]:
+                parts.append(r["repas"])
+            if r.get("moment"):
+                parts.append(r["moment"])
+            if r["tags"]:
+                parts.append(",".join(r["tags"]))
+            lignes.append(" | ".join(parts))
+        recettes_str = "\n".join(lignes)
 
         # Construire la description des groupes de midis
         jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
@@ -220,29 +467,27 @@ class LLMClient:
                 midi_lines.append(f"- {' + '.join(names)} midi : même plat (cuisiné pour {count})")
         midi_desc = "\n".join(midi_lines)
 
-        user_prompt = f"""Génère un planning de 7 jours pour une famille.
+        exclues_str = ', '.join(recettes_exclues) or 'aucune'
+        user_prompt = f"""CONTEXTE : saison {saison}, température {temperature}, max {nb_personnes} pers.
+Restes à écouler : {ingredients_force or "aucun"}.
+Recettes à EXCLURE (déjà vues) : {exclues_str}.
+Consignes famille : {custom_prompt or "aucune"}.
 
-CONTEXTE :
-- Saison : {saison}
-- Température extérieure : {temperature}
-- Personnes par jour : Lun={per_day.split(',')[0]}, Mar={per_day.split(',')[1]}, Mer={per_day.split(',')[2]}, Jeu={per_day.split(',')[3]}, Ven={per_day.split(',')[4]}, Sam={per_day.split(',')[5]}, Dim={per_day.split(',')[6]}
-- Nombre de personnes max : {nb_personnes}
-- Ingrédients à forcer (restes) : {ingredients_force or "aucun"}
-- Recettes déjà utilisées récemment (à exclure) : {', '.join(recettes_exclues) or 'aucune'}
-
-BASE DE RECETTES DISPONIBLE :
+RECETTES DISPONIBLES (Nom | type | moment | tags) :
 {recettes_str}
-
-CONSIGNES SPÉCIFIQUES DE LA FAMILLE :
-{custom_prompt or "Aucune consigne particulière."}
 
 RÉPARTITION DES MIDIS :
 {midi_desc}
-- Les soirs : TOUS différents, repas sur le pouce (légers, rapides, un soir restes)
+- Soirs : tous différents, légers/rapides (un soir = restes).
 
-Choisis exactement 14 créneaux (7 jours × midi + soir), avec les répétitions ci-dessus."""
+Choisis des recettes VARIÉES réparties sur toute la liste ci-dessus. Donne les 14 lignes."""
 
-        raw = await self._chat(SYSTEM_PROMPT_PLANNING, user_prompt, temperature=0.3)
+        # Température un peu plus haute (0.5) pour diversifier les choix d'une
+        # génération à l'autre, sans casser le format (parser tolérant).
+        raw = await self._chat(
+            SYSTEM_PROMPT_PLANNING, user_prompt,
+            temperature=0.5, max_tokens=600, label="planning",
+        )
         return self._parse_planning(raw)
 
     def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
@@ -359,20 +604,22 @@ Liste les ingrédients nécessaires pour préparer cette recette à {nb_personne
             try:
                 if self.provider == "gemini":
                     raw = await self._chat_ingredients_gemini(
-                        SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                        SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1, max_tokens=512
                     )
                 else:
                     raw = await self._chat(
-                        SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                        SYSTEM_PROMPT_INGREDIENTS, user_prompt,
+                        temperature=0.1, max_tokens=512, label="ingredients", json_mode=True,
                     )
             except Exception as e:
                 logger.warning(f"⚠️ {self.provider} ingrédients échoué ({e}). Fallback Ollama...")
                 raw = await self._chat_ollama(
-                    SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                    SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1, max_tokens=512, json_mode=True
                 )
         else:
             raw = await self._chat(
-                SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1
+                SYSTEM_PROMPT_INGREDIENTS, user_prompt,
+                temperature=0.1, max_tokens=512, label="ingredients", json_mode=True,
             )
 
         raw = raw.strip()
@@ -418,11 +665,11 @@ Répond UNIQUEMENT ce JSON :
         try:
             if self.provider == "gemini":
                 raw = await self._chat_ingredients_gemini(
-                    "", user_prompt, temperature=0.1
+                    "", user_prompt, temperature=0.1, max_tokens=1024
                 )
             else:
                 raw = await self._chat(
-                    "", user_prompt, temperature=0.1
+                    "", user_prompt, temperature=0.1, max_tokens=1024, label="batch-ing", json_mode=True,
                 )
         except Exception as e:
             logger.warning(f"⚠️ Batch ingrédients échoué ({e}), fallback extraction individuelle...")
@@ -446,12 +693,66 @@ Répond UNIQUEMENT ce JSON :
             logger.warning("Batch ingrédients : JSON invalide, fallback extraction individuelle")
             return []
 
+    # ── Classification type + tags ───────────────────────────────
+    async def _classify_type_tags(
+        self, nom: str, ingredients: list[str], keywords: list[str],
+    ) -> tuple[str, list[str]]:
+        """Choisit type_repas + tags parmi les valeurs Notion autorisées.
+
+        Petit appel LLM (cheap) : ne touche PAS au contenu (nom/ingrédients/
+        instructions restent ceux de la page), juste le classement.
+        """
+        ing_sample = ", ".join(ingredients[:12])
+        prompt = f"""Recette : "{nom}"
+Ingrédients : {ing_sample or "inconnus"}
+Mots-clés du site : {", ".join(keywords) or "aucun"}
+
+Classe cette recette :
+- type_repas : EXACTEMENT une valeur parmi {REPAS_OPTIONS}
+- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+
+Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
+        try:
+            raw = await self._chat(
+                "", prompt, temperature=0.0, max_tokens=150,
+                label="classify", json_mode=True,
+            )
+            data = self._parse_json(raw)
+            type_repas = data.get("type_repas", "")
+            if type_repas not in REPAS_OPTIONS:
+                type_repas = ""
+            tags = [t for t in data.get("tags", []) if t in TAG_OPTIONS]
+            return type_repas, tags
+        except Exception as e:
+            logger.warning(f"Classification échouée ({e}), repli sur mots-clés")
+            # Repli sans LLM : tags par correspondance avec les mots-clés
+            kw_lower = {k.lower() for k in keywords}
+            tags = [t for t in TAG_OPTIONS if t.lower() in kw_lower]
+            return "", tags[:4]
+
+    @staticmethod
+    def _parse_json(raw: str) -> dict[str, Any]:
+        """Parse une réponse JSON LLM (tolère fences ```)."""
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        if raw.endswith("```"):
+            raw = raw.rsplit("```", 1)[0]
+        raw = raw.strip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+        return {}
+
     # ── Extraction depuis URL ────────────────────────────────────
-    async def extract_recipe_from_url(
-        self, url: str
-    ) -> dict[str, Any]:
-        """Récupère le contenu réel de l'URL et extrait les infos via LLM."""
-        page_text = ""
+    async def extract_recipe_from_url(self, url: str) -> dict[str, Any]:
+        """Extrait une recette d'une URL : titre, type, tags, ingrédients,
+        instructions, image. Tente d'abord le JSON-LD schema.org (exact, sans
+        LLM), puis repli sur une extraction LLM si la page n'en contient pas."""
+        html_text = ""
         og_image = ""
 
         try:
@@ -460,55 +761,94 @@ Répond UNIQUEMENT ce JSON :
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 })
                 resp.raise_for_status()
-                html = resp.text
-
-                # Extraire l'image og:image
-                import re as re2
-                og_match = re2.search(
+                html_text = resp.text
+                og_match = re.search(
                     r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
-                    html, re2.IGNORECASE
+                    html_text, re.IGNORECASE,
                 )
                 if og_match:
                     og_image = og_match.group(1)
-
-                # Extraire le texte visible (stripper les balises)
-                text = re2.sub(r'<script[^>]*>.*?</script>', '', html, flags=re2.DOTALL | re2.IGNORECASE)
-                text = re2.sub(r'<style[^>]*>.*?</style>', '', text, flags=re2.DOTALL | re2.IGNORECASE)
-                text = re2.sub(r'<[^>]+>', ' ', text)
-                text = re2.sub(r'\s+', ' ', text).strip()
-                # Garder les 4000 premiers caractères utiles
-                page_text = text[:4000]
-
         except Exception as e:
             logger.warning(f"Impossible de récupérer la page {url}: {e}")
 
-        user_prompt = f"""Voici le contenu textuel d'une page web de recette de cuisine.
+        # 1) JSON-LD schema.org : données telles quelles, aucune déformation.
+        ld = _extract_jsonld_recipe(html_text) if html_text else None
+        if ld and ld.get("ingredients"):
+            logger.info("Recette extraite via JSON-LD (exact, sans LLM)")
+            type_repas, tags = await self._classify_type_tags(
+                ld["nom"], ld["ingredients"], ld.get("keywords", []),
+            )
+            return {
+                "nom": ld["nom"],
+                "type_repas": type_repas,
+                "tags": tags,
+                "ingredients": ld["ingredients"],          # list[str], lignes brutes
+                "instructions": ld["instructions"],
+                "image_url": ld.get("image_url") or og_image,
+                "source": "jsonld",
+            }
 
-CONTENU DE LA PAGE :
-{page_text or "Contenu non accessible, utilise tes connaissances."}
+        # 1bis) Handler spécifique au domaine (sites sans JSON-LD exploitable).
+        handler = _site_handler(url)
+        if handler and html_text:
+            try:
+                h = handler(html_text)
+            except Exception as e:
+                logger.warning(f"Handler de domaine échoué: {e}")
+                h = None
+            if h and h.get("ingredients"):
+                logger.info("Recette extraite via handler de domaine")
+                type_repas, tags = await self._classify_type_tags(
+                    h.get("nom", ""), h["ingredients"], h.get("keywords", []),
+                )
+                return {
+                    "nom": h.get("nom", ""),
+                    "type_repas": type_repas,
+                    "tags": tags,
+                    "ingredients": h["ingredients"],
+                    "instructions": h.get("instructions", ""),
+                    "image_url": h.get("image_url") or og_image,
+                    "source": "handler",
+                }
 
-À partir de ce contenu, extrais EXACTEMENT les informations suivantes :
-- nom : le nom de la recette (copie-le tel quel depuis le texte)
-- type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Petit dej)
-- tags : une liste de tags parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné
-- instructions : RECOPIE TEXTUELLEMENT les étapes de cuisson, sans reformuler, sans ajouter d'introduction, séparées par des retours à la ligne
-- image_url : "{og_image}" (utilise cette URL si elle existe, sinon laisse vide)
+        # 2) Repli LLM : texte visible de la page (plus large car pas de JSON-LD).
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        page_text = re.sub(r'\s+', ' ', text).strip()[:5000]
 
-Répond UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "...", "image_url": "{og_image}"}}"""
+        user_prompt = f"""Contenu d'une page de recette :
 
-        raw = await self._chat("", user_prompt, temperature=0.1)
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw.rsplit("```", 1)[0]
-        raw = raw.strip()
+{page_text or "Contenu inaccessible, utilise tes connaissances sur cette recette."}
 
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            return {"nom": "", "type_repas": "", "tags": []}
+Extrais sans rien inventer ni reformuler :
+- nom : titre exact de la recette
+- type_repas : une valeur parmi {REPAS_OPTIONS}
+- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+- ingredients : liste des ingrédients avec quantités, recopiés tels quels (un par entrée)
+- instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
+
+Réponds UNIQUEMENT ce JSON :
+{{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+
+        raw = await self._chat(
+            "", user_prompt, temperature=0.1, max_tokens=2000,
+            label="url-extract", json_mode=True,
+        )
+        data = self._parse_json(raw)
+        # Normaliser / valider
+        type_repas = data.get("type_repas", "")
+        if type_repas not in REPAS_OPTIONS:
+            type_repas = ""
+        ingredients = data.get("ingredients", [])
+        if isinstance(ingredients, str):
+            ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
+        return {
+            "nom": data.get("nom", ""),
+            "type_repas": type_repas,
+            "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
+            "ingredients": [str(i) for i in ingredients],
+            "instructions": data.get("instructions", ""),
+            "image_url": og_image,
+            "source": "llm",
+        }
