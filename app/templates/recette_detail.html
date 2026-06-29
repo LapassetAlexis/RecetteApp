@@ -51,9 +51,7 @@
     <div class="card nutri">
         <div class="nutri-head">
             <h2>📊 Nutrition <small class="muted-sm">/ part</small></h2>
-            <span class="nutri-tag {{ 'exact' if nutrition.source == 'source' else 'est' }}">
-                {{ 'valeurs de la source' if nutrition.source == 'source' else 'estimation ~' }}
-            </span>
+            <span class="nutri-tag conf-{{ nutrition.confiance|lower }}">Confiance : {{ nutrition.confiance }}</span>
         </div>
         <div class="nutri-grid">
             <div class="nutri-item"><span class="nv">{{ nutrition.calories }}</span><span class="nl">kcal</span></div>
@@ -61,8 +59,10 @@
             <div class="nutri-item"><span class="nv">{{ nutrition.glucides }}<small>g</small></span><span class="nl">glucides</span></div>
             <div class="nutri-item"><span class="nv">{{ nutrition.lipides }}<small>g</small></span><span class="nl">lipides</span></div>
         </div>
-        {% if nutrition.source != 'source' %}
-        <small class="muted-sm">Estimation indicative ({{ nutrition.matched }}/{{ nutrition.total }} ingrédients reconnus) — pas une valeur diététique exacte.</small>
+        {% if nutrition.source == 'source' %}
+        <small class="muted-sm">Valeurs publiées par le site.</small>
+        {% else %}
+        <small class="muted-sm">Estimation ({{ nutrition.matched }}/{{ nutrition.total }} ingrédients reconnus) — indicative, pas une valeur diététique exacte.</small>
         {% endif %}
     </div>
     {% endif %}

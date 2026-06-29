@@ -295,8 +295,10 @@ a.meal-name:hover { text-decoration:underline; }
 /* ── Nutrition ───────────────────────────────── */
 .nutri-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
 .nutri-tag { font-size:0.7rem; font-weight:700; padding:3px 9px; border-radius:12px; }
-.nutri-tag.exact { background:#e8f8e8; color:var(--sc); }
-.nutri-tag.est { background:var(--bg); color:var(--t2); }
+.nutri-tag.conf-excellente { background:#e8f8e8; color:var(--sc); }
+.nutri-tag.conf-bonne { background:#eafbe7; color:#3a9d23; }
+.nutri-tag.conf-moyenne { background:#fef3e2; color:var(--prd); }
+.nutri-tag.conf-mauvaise { background:#fde8e8; color:#c0392b; }
 .nutri-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
 .nutri-item { background:var(--bg); border-radius:10px; padding:12px 6px; text-align:center; }
 .nutri-item .nv { display:block; font-size:1.25rem; font-weight:800; color:var(--prd); line-height:1; }

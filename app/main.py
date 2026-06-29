@@ -256,11 +256,15 @@ async def detail_recette(request: Request, page_id: str):
         nutrition = None
         if cached and cached.get("nutrition"):
             try:
-                nutrition = json.loads(cached["nutrition"]) or None
-                if nutrition:
-                    nutrition.setdefault("source", "source")
+                src = json.loads(cached["nutrition"]) or {}
             except (json.JSONDecodeError, TypeError):
-                nutrition = None
+                src = {}
+            # n'utiliser la nutrition de la source que si COMPLÈTE (calories +
+            # 3 macros) ; sinon (souvent juste calories, parfois fausses) on estime
+            if src and all(src.get(k) is not None for k in ("calories", "proteines", "glucides", "lipides")):
+                src.setdefault("source", "source")
+                src.setdefault("confiance", "Excellente")  # valeurs officielles du site
+                nutrition = src
         if not nutrition and ingredients:
             nutrition = estimate_nutrition(ingredients, BASE_SERVINGS)
 

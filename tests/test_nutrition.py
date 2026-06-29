@@ -12,6 +12,27 @@ def test_to_grams_units_and_pieces():
     assert _to_grams("", "huile d'olive") is None   # pas de quantité
 
 
+def test_to_grams_compound_spoons():
+    assert _to_grams("2", "cuillères à café d'huile d'olive", "") == 10   # 2 × 5 g
+    assert _to_grams("1", "cuillère à soupe de persil", "") == 15         # 1 × 15 g
+
+
+def test_estimate_confiance_levels():
+    # tous reconnus -> Bonne
+    good = estimate_nutrition([
+        {"nom": "g de pâtes", "quantite": "200", "unite": ""},
+        {"nom": "g de boeuf", "quantite": "100", "unite": ""},
+    ], 2)
+    assert good["confiance"] == "Bonne"
+    # 1 reconnu sur 3 -> Mauvaise
+    bad = estimate_nutrition([
+        {"nom": "g de pâtes", "quantite": "200", "unite": ""},
+        {"nom": "machin inconnu", "quantite": "1", "unite": ""},
+        {"nom": "truc bidule", "quantite": "1", "unite": ""},
+    ], 2)
+    assert bad["confiance"] == "Mauvaise"
+
+
 def test_to_grams_uses_unite_field():
     # ancien modèle : unité dans le champ unite (pas dans le libellé)
     assert _to_grams("700", "d'épinards", "g") == 700
