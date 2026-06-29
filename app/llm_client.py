@@ -227,7 +227,50 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
 #       return {"nom": nom, "image_url": "", "ingredients": ings, "instructions": "", "keywords": []}
 #   SITE_HANDLERS = {"monsite.com": _handler_monsite}
 
-SITE_HANDLERS: dict[str, Callable[[str], dict[str, Any] | None]] = {}
+def _handler_amandinecooking(html_text: str) -> dict[str, Any] | None:
+    """amandinecooking.com : blog WordPress sans schema.org.
+
+    Structure : <h2>Titre</h2> ... <h2>Ingrédients ...</h2><ul><li>...</li></ul>
+    ... <h2>Préparation</h2><ol><li>...</li></ol>. Image via og:image (repli).
+    """
+    def items_after(label: str) -> list[str]:
+        idx = html_text.find(label)
+        if idx < 0:
+            return []
+        lm = re.search(r"<(ul|ol)[^>]*>(.*?)</\1>", html_text[idx:], re.S | re.I)
+        if not lm:
+            return []
+        lis = re.findall(r"<li[^>]*>(.*?)</li>", lm.group(2), re.S | re.I)
+        return [t for t in (_clean_text(x) for x in lis) if t]
+
+    ingredients = items_after("Ingr&eacute;dients")
+    instructions = items_after("Pr&eacute;paration")
+    if not ingredients:
+        return None
+
+    # Titre : premier <h2> qui n'est ni Ingrédients ni Préparation.
+    nom = ""
+    for h in re.findall(r"<h2[^>]*>(.*?)</h2>", html_text, re.S | re.I):
+        t = _clean_text(h)
+        if t and "ngr" not in t.lower() and "paration" not in t.lower():
+            nom = t
+            break
+    if not nom:
+        m = re.search(r"<title>(.*?)</title>", html_text, re.S | re.I)
+        nom = _clean_text(m.group(1)).split(" - ")[0] if m else ""
+
+    return {
+        "nom": nom,
+        "image_url": "",  # repli sur og:image côté extract_recipe_from_url
+        "ingredients": ingredients,
+        "instructions": "\n".join(instructions),
+        "keywords": [],
+    }
+
+
+SITE_HANDLERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
+    "amandinecooking.com": _handler_amandinecooking,
+}
 
 
 def _site_handler(url: str) -> Callable[[str], dict[str, Any] | None] | None:

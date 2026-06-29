@@ -1,6 +1,11 @@
 """Tests de l'extraction JSON-LD schema.org (sans réseau ni LLM)."""
 
-from app.llm_client import _extract_jsonld_recipe, _first_image, _flatten_instructions
+from app.llm_client import (
+    _extract_jsonld_recipe,
+    _first_image,
+    _flatten_instructions,
+    _handler_amandinecooking,
+)
 
 
 def test_first_image_variants():
@@ -115,6 +120,34 @@ def test_recipe_root_with_graph_sibling():
     r = _extract_jsonld_recipe(html)
     assert r is not None and r["nom"] == "Nougat"
     assert r["ingredients"] == ["sucre", "miel"]
+
+
+def test_handler_amandinecooking():
+    html = """
+    <title>Salade de lentilles - Amandine Cooking</title>
+    <h2><span>Salade de lentilles aux crudités</span></h2>
+    <p>intro</p>
+    <h2><span>Ingr&eacute;dients pour 4 personnes</span></h2>
+    <ul>
+      <li><div><span>300g de lentilles s&egrave;ches</span></div></li>
+      <li><div><span>1 oignon rouge</span></div></li>
+    </ul>
+    <h2><span>Pr&eacute;paration</span></h2>
+    <ol>
+      <li><div><span>Cuire les lentilles.</span></div></li>
+      <li><div><span>M&eacute;langer le tout.</span></div></li>
+    </ol>
+    """
+    h = _handler_amandinecooking(html)
+    assert h is not None
+    assert h["nom"] == "Salade de lentilles aux crudités"
+    assert h["ingredients"] == ["300g de lentilles sèches", "1 oignon rouge"]
+    assert "Cuire les lentilles." in h["instructions"]
+    assert "Mélanger le tout." in h["instructions"]
+
+
+def test_handler_amandinecooking_no_ingredients_returns_none():
+    assert _handler_amandinecooking("<h2>rien</h2>") is None
 
 
 def test_site_handler_registry():
