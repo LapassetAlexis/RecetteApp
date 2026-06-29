@@ -1098,12 +1098,16 @@ Réponds UNIQUEMENT ce JSON :
         # Les ingrédients scrapés du HTML sont plus fiables que ceux du LLM.
         if scraped:
             ingredients = scraped
+        # Le LLM renvoie parfois instructions en liste : on garde le contrat string.
+        instructions = data.get("instructions", "")
+        if isinstance(instructions, list):
+            instructions = "\n".join(str(s).strip() for s in instructions if str(s).strip())
         return {
             "nom": clean_recipe_title(data.get("nom", "")),
             "type_repas": type_repas,
             "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
             "ingredients": [str(i) for i in ingredients],
-            "instructions": data.get("instructions", ""),
+            "instructions": instructions,
             "image_url": og_image,
             "source": "llm",
         }
