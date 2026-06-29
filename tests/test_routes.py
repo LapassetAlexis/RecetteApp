@@ -181,8 +181,8 @@ def test_ajouter_recette_manuel(client, monkeypatch):
     monkeypatch.setattr(main.notion, "append_instructions", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
     r = client.post("/ajouter-recette", data={
-        "nom": "Gratin", "repas": "Plat", "ingredients_manual": "- pommes de terre\n- crème",
-        "instructions_manual": "Cuire au four.", "image_url": "http://img",
+        "nom": "Gratin", "repas": "Plat", "ingredients_manual": "200 g pommes de terre\ncrème",
+        "steps": ["Éplucher.", "Cuire au four."], "image_url": "http://img",
     })
     assert r.status_code == 200 and "succès" in r.text
     assert created["nom"] == "Gratin"

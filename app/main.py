@@ -758,10 +758,11 @@ async def ajouter_recette(
     tags: list[str] = Form([]),
     moment: str = Form(""),
     ingredients_manual: str = Form(""),
-    instructions_manual: str = Form(""),
+    steps: list[str] = Form([]),
     image_url: str = Form(""),
 ):
     """Ajoute une recette depuis une URL ou manuellement."""
+    instructions_manual = "\n".join(s.strip() for s in steps if s.strip())
     error = None
     success = None
 
@@ -802,11 +803,11 @@ async def ajouter_recette(
                         await notion.append_instructions(page_id, instructions_manual)
                     if image_url:
                         await notion.update_image(page_id, image_url)
-                    # Sauvegarder en cache local
+                    # Cache local : ingrédients STRUCTURÉS (pour scaling + nutrition)
                     if ingredients_manual:
                         ings_list = [
-                            {"nom": l.strip().lstrip("- ").split(":")[0].strip(), "quantite": "", "unite": ""}
-                            for l in ingredients_manual.split("\n") if l.strip()
+                            i for i in (parse_ingredient_line(l) for l in ingredients_manual.split("\n"))
+                            if i and i["nom"]
                         ]
                         await db.save_enriched(
                             notion_id=page_id,
