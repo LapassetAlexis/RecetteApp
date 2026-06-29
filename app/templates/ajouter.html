@@ -75,11 +75,13 @@
     <button type="submit" class="btn btn-primary btn-lg">💾 Ajouter la recette</button>
     <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Analyser une autre URL</button>
 </form>
+{% endblock %}
 
+{% block scripts %}
 <script>
 document.getElementById('btn-analyze')?.addEventListener('click', async function() {
     const url = document.getElementById('url-input').value.trim();
-    if (!url) { alert('Colle une URL d\'abord !'); return; }
+    if (!url) { toast('Colle une URL d\'abord !', 'error'); return; }
 
     const status = document.getElementById('analyze-status');
     const btn = this;

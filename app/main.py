@@ -304,6 +304,29 @@ async def generer(
     pers = [nb_lun, nb_mar, nb_mer, nb_jeu, nb_ven, nb_sam, nb_dim]
     nb_personnes = max(pers)  # On prend le max pour les quantités
     per_day = ",".join(str(p) for p in pers)
+
+    try:
+        day_groups = [int(x) for x in midi_groups.split(",")]
+    except (ValueError, TypeError):
+        day_groups = [1, 1, 2, 2, 2, 3, 4]
+
+    def _error_ctx(message: str) -> dict:
+        """Contexte de re-rendu du formulaire en préservant toute la saisie."""
+        return {
+            "request": request,
+            "error": message,
+            "repas_options": REPAS_OPTIONS,
+            "tag_options": TAG_OPTIONS,
+            "week_start": week_start,
+            "saison_default": saison,
+            "temperature_default": temperature,
+            "day_groups": day_groups,
+            "day_pers": pers,
+            "midi_groups_value": midi_groups,
+            "ingredients_force": ingredients_force,
+            "custom_prompt": custom_prompt,
+        }
+
     try:
         # 1. Récupérer toutes les recettes Notion
         recettes = await notion.get_all_recipes()
@@ -314,13 +337,7 @@ async def generer(
         if not recettes:
             return templates.TemplateResponse(
                 "index.html",
-                {
-                    "request": request,
-                    "error": "Aucune recette trouvée dans Notion. Ajoutez-en d'abord !",
-                    "repas_options": REPAS_OPTIONS,
-                    "tag_options": TAG_OPTIONS,
-                    "custom_prompt": custom_prompt,
-                },
+                _error_ctx("Aucune recette trouvée dans Notion. Ajoutez-en d'abord !"),
             )
 
         # 2. Filtrer par tags si sélectionnés
@@ -393,13 +410,7 @@ async def generer(
         logger.exception("Erreur lors de la génération")
         return templates.TemplateResponse(
             "index.html",
-            {
-                "request": request,
-                "error": f"Erreur : {str(e)}",
-                "repas_options": REPAS_OPTIONS,
-                "tag_options": TAG_OPTIONS,
-                "custom_prompt": custom_prompt,
-            },
+            _error_ctx(f"Erreur : {str(e)}"),
         )
 
 
@@ -486,7 +497,8 @@ async def api_rate(page_id: str, request: Request):
     try:
         data = await request.json()
         note = data.get("note", "")
-        if note not in ("⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"):
+        # "" = retirer la note ; sinon une des 5 valeurs étoilées
+        if note != "" and note not in ("⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"):
             return {"error": "Note invalide"}
         await notion.update_rating(page_id, note)
         return {"success": True}

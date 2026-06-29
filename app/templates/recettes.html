@@ -10,15 +10,22 @@
     </div>
 </div>
 
+<!-- Recherche -->
+<div class="search-bar">
+    <input type="search" id="recipe-search" class="inp" placeholder="🔍 Rechercher une recette...">
+</div>
+
+<!-- Filtres par type (cliquables) -->
 <div class="stats-bar">
+    <span class="stat-chip active" data-type="">Tous : {{ total }}</span>
     {% for type, count in par_type %}
-    <span class="stat-chip">{{ type }} : {{ count }}</span>
+    <span class="stat-chip" data-type="{{ type }}">{{ type }} : {{ count }}</span>
     {% endfor %}
 </div>
 
-<div class="recettes-grid">
+<div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card">
+    <div class="card recipe-card" data-name="{{ recette.nom|lower }}" data-type="{{ recette.repas or 'Non classé' }}">
         <h3>{{ recette.nom }}</h3>
         <div class="recipe-meta">
             {% if recette.repas %}
@@ -38,10 +45,12 @@
             {% endfor %}
         </div>
         {% endif %}
+        {% set note_len = recette.note|length %}
         <div class="recipe-stars" data-id="{{ recette.id }}" data-note="{{ recette.note }}">
             {% for s in range(5) %}
-            <span class="star" data-val="{{ '⭐' * (s+1) }}" style="cursor:pointer;font-size:1.2rem;opacity:{{ recette.note|length > s and 1 or 0.2 }};">★</span>
+            <span class="star {{ '' if s < note_len else 'empty' }}" data-val="{{ s+1 }}">★</span>
             {% endfor %}
+            <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
         </div>
         {% if recette.url %}
         <a href="{{ recette.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
@@ -49,31 +58,83 @@
         <a href="/recette/{{ recette.id }}" class="recipe-link" style="margin-left:6px;">📖 Détail</a>
     </div>
     {% endfor %}
+    <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
+// ── Recherche + filtre par type ─────────────────────
+let activeType = '';
+function applyFilters() {
+    const q = document.getElementById('recipe-search').value.trim().toLowerCase();
+    let visible = 0;
+    document.querySelectorAll('.recipe-card').forEach(card => {
+        const okName = !q || card.dataset.name.includes(q);
+        const okType = !activeType || card.dataset.type === activeType;
+        const show = okName && okType;
+        card.classList.toggle('hidden', !show);
+        if (show) visible++;
+    });
+    document.getElementById('no-result').style.display = visible ? 'none' : 'block';
+}
+document.getElementById('recipe-search').addEventListener('input', applyFilters);
+document.querySelectorAll('.stat-chip').forEach(chip => {
+    chip.addEventListener('click', function() {
+        document.querySelectorAll('.stat-chip').forEach(c => c.classList.remove('active'));
+        this.classList.add('active');
+        activeType = this.dataset.type;
+        applyFilters();
+    });
+});
+
+// ── Notation (survol + clic + effacer) ──────────────
 document.querySelectorAll('.recipe-stars').forEach(container => {
     const stars = container.querySelectorAll('.star');
+    const clearBtn = container.querySelector('.star-clear');
     const pageId = container.dataset.id;
-    stars.forEach(star => {
-        star.addEventListener('click', async function() {
-            const val = this.dataset.val;
+    let current = (container.dataset.note || '').length;
+
+    const paint = (n) => stars.forEach((s, i) => s.classList.toggle('empty', i >= n));
+
+    stars.forEach((star, idx) => {
+        star.addEventListener('mouseenter', () => paint(idx + 1));
+        star.addEventListener('click', async () => {
+            const val = '⭐'.repeat(idx + 1);
             try {
                 const r = await fetch(`/api/rate/${pageId}`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({note: val})
                 });
                 const d = await r.json();
                 if (d.success) {
-                    const noteLen = val.length;
-                    stars.forEach((s, i) => s.style.opacity = i < noteLen ? '1' : '0.2');
-                }
-            } catch(e) { console.error(e); }
+                    current = idx + 1; paint(current);
+                    clearBtn.style.display = '';
+                    toast('Noté ' + val, 'success');
+                } else { toast(d.error || 'Erreur', 'error'); }
+            } catch(e) { toast('Erreur réseau', 'error'); }
         });
     });
+    container.addEventListener('mouseleave', () => paint(current));
+
+    clearBtn.addEventListener('click', async () => {
+        try {
+            const r = await fetch(`/api/rate/${pageId}`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({note: ''})
+            });
+            const d = await r.json();
+            if (d.success) {
+                current = 0; paint(0); clearBtn.style.display = 'none';
+                toast('Note retirée', 'info');
+            } else { toast(d.error || 'Erreur', 'error'); }
+        } catch(e) { toast('Erreur réseau', 'error'); }
+    });
 });
+
+// ── Enrichissement de masse (avec confirmation) ─────
 async function enrichAll() {
+    if (!confirm("Enrichir toutes les recettes ? Cela lance des appels au LLM et écrit dans Notion pour chaque recette sans ingrédients.")) return;
     const btn = document.getElementById('btn-enrich');
     const st = document.getElementById('enrich-status');
     btn.disabled = true; st.textContent = '⏳ Enrichissement en cours...';
@@ -82,10 +143,12 @@ async function enrichAll() {
         const d = await r.json();
         if (d.success) {
             st.textContent = `✅ ${d.enriched}/${d.total} enrichies (${d.skipped} ignorées, ${d.errors} erreurs)`;
+            toast(`${d.enriched} recettes enrichies`, 'success');
         } else {
             st.textContent = '❌ ' + (d.error || 'Erreur');
+            toast(d.error || 'Erreur', 'error');
         }
-    } catch(e) { st.textContent = '❌ Erreur réseau'; }
+    } catch(e) { st.textContent = '❌ Erreur réseau'; toast('Erreur réseau', 'error'); }
     btn.disabled = false;
 }
 </script>

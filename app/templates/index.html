@@ -29,12 +29,13 @@
         </div>
         <div class="form-g">
             <label for="temperature">🌡️ Température</label>
+            {% set temp_val = temperature_default or "Frais (10-18°C)" %}
             <select id="temperature" name="temperature">
-                <option value="Froid (< 10°C)">Froid (&lt; 10°C)</option>
-                <option value="Frais (10-18°C)" selected>Frais (10-18°C)</option>
-                <option value="Doux (18-25°C)">Doux (18-25°C)</option>
-                <option value="Chaud (> 25°C)">Chaud (&gt; 25°C)</option>
-                <option value="Canicule (> 35°C)">Canicule (&gt; 35°C)</option>
+                <option value="Froid (< 10°C)" {% if temp_val == "Froid (< 10°C)" %}selected{% endif %}>Froid (&lt; 10°C)</option>
+                <option value="Frais (10-18°C)" {% if temp_val == "Frais (10-18°C)" %}selected{% endif %}>Frais (10-18°C)</option>
+                <option value="Doux (18-25°C)" {% if temp_val == "Doux (18-25°C)" %}selected{% endif %}>Doux (18-25°C)</option>
+                <option value="Chaud (> 25°C)" {% if temp_val == "Chaud (> 25°C)" %}selected{% endif %}>Chaud (&gt; 25°C)</option>
+                <option value="Canicule (> 35°C)" {% if temp_val == "Canicule (> 35°C)" %}selected{% endif %}>Canicule (&gt; 35°C)</option>
             </select>
         </div>
     </div>
@@ -47,18 +48,18 @@
         </div>
         <div id="midi-groups" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;">
             {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
-            {% set default_groups = [1,1,2,2,2,3,4] %}
-            {% set default_pers = [3,3,3,3,3,4,4] %}
+            {% set groups = day_groups or [1,1,2,2,2,3,4] %}
+            {% set pers = day_pers or [3,3,3,3,3,4,4] %}
             {% for i in range(7) %}
-            <div class="day-group" data-idx="{{ i }}" data-group="{{ default_groups[i] }}" style="cursor:pointer;padding:10px 4px 6px;border-radius:8px;font-size:0.75rem;font-weight:600;transition:all 0.2s;position:relative;">
+            <div class="day-group" data-idx="{{ i }}" data-group="{{ groups[i] }}" style="cursor:pointer;padding:10px 4px 6px;border-radius:8px;font-size:0.75rem;font-weight:600;transition:all 0.2s;position:relative;">
                 <div style="font-size:0.7rem;color:var(--t2);margin-bottom:4px;">{{ jours[i] }}</div>
-                <div class="group-label" style="padding:6px 0;border-radius:6px;margin-bottom:6px;font-size:0.7rem;">G{{ default_groups[i] }}</div>
-                <input type="number" name="nb_{{ jours[i]|lower }}" value="{{ default_pers[i] }}" min="1" max="20" class="nb-input" style="width:100%;text-align:center;padding:4px 0;border:1px solid var(--bo);border-radius:4px;font-size:0.75rem;font-weight:600;">
+                <div class="group-label" style="padding:6px 0;border-radius:6px;margin-bottom:6px;font-size:0.7rem;">G{{ groups[i] }}</div>
+                <input type="number" id="nb_{{ jours[i]|lower }}" name="nb_{{ jours[i]|lower }}" value="{{ pers[i] }}" min="1" max="20" class="nb-input" style="width:100%;text-align:center;padding:4px 0;border:1px solid var(--bo);border-radius:4px;font-size:0.75rem;font-weight:600;">
             </div>
             {% endfor %}
         </div>
         <div id="group-legend" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;font-size:0.75rem;color:var(--t2);"></div>
-        <input type="hidden" name="midi_groups" id="midi-groups-input" value="1,1,2,2,2,3,4">
+        <input type="hidden" name="midi_groups" id="midi-groups-input" value="{{ midi_groups_value or '1,1,2,2,2,3,4' }}">
         <small style="margin-top:6px;display:block;">Clique sur le groupe (G1, G2...) pour changer. Modifie le nombre sous chaque jour. Même groupe = même plat cuisiné.</small>
     </div>
 
@@ -66,7 +67,7 @@
 
     <div class="form-g">
         <label for="ingredients_force">🥫 Restes à écouler</label>
-        <input type="text" id="ingredients_force" name="ingredients_force" placeholder="courgettes, œufs, poulet" class="inp">
+        <input type="text" id="ingredients_force" name="ingredients_force" value="{{ ingredients_force or '' }}" placeholder="courgettes, œufs, poulet" class="inp">
     </div>
 
     <div class="form-g">

@@ -1,7 +1,7 @@
 /* ── Reset & vars ─────────────────────────────── */
 :root {
     --bg: #f5f0eb; --surface: #fff; --text: #2d2a24;
-    --t2: #6b6560; --pr: #e67e22; --prd: #d35400;
+    --t2: #5c574f; --pr: #e67e22; --prd: #d35400;
     --sc: #27ae60; --ac: #8e44ad; --bo: #e0dbd5;
     --sh: 0 2px 8px rgba(0,0,0,0.08); --r: 12px;
 }
@@ -73,9 +73,9 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .meal.midi { border-left-color:var(--pr); }
 .meal.soir { border-left-color:var(--ac); }
 .meal-head { display:flex; align-items:center; justify-content:space-between; }
-.meal-cb { display:flex; align-items:center; gap:3px; cursor:pointer; font-size:0.75rem; }
-.ck { width:12px; height:12px; cursor:pointer; }
-.meal-ch { background:none; border:none; cursor:pointer; font-size:0.8rem; opacity:0.3; padding:2px 4px; border-radius:3px; }
+.meal-cb { display:flex; align-items:center; gap:4px; cursor:pointer; font-size:0.75rem; min-height:32px; }
+.ck { width:18px; height:18px; cursor:pointer; accent-color:var(--pr); }
+.meal-ch { background:none; border:none; cursor:pointer; font-size:1rem; opacity:0.4; padding:6px 8px; border-radius:6px; min-width:32px; min-height:32px; }
 .meal:hover .meal-ch { opacity:1; }
 .meal-ch:hover { background:var(--bg); }
 .meal-name { font-weight:600; font-size:0.75rem; line-height:1.3; margin:2px 0; word-break:break-word; }
@@ -114,7 +114,8 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .shop-i { display:flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid var(--bo); border-radius:6px; cursor:pointer; font-size:0.85rem; }
 .shop-i:hover { border-color:var(--pr); }
 .shop-i:has(.shop-c:checked) { background:#f0faf0; border-color:var(--sc); text-decoration:line-through; opacity:0.6; }
-.shop-c { width:14px; height:14px; accent-color:var(--sc); cursor:pointer; }
+.shop-c { width:20px; height:20px; accent-color:var(--sc); cursor:pointer; flex-shrink:0; }
+.shop-i { min-height:40px; }
 .shop-i small { font-size:0.75rem; color:var(--t2); background:var(--bg); padding:1px 6px; border-radius:8px; margin-left:auto; }
 
 /* ── Footer ──────────────────────────────────── */
@@ -137,9 +138,12 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .tag { font-size:0.7rem; padding:2px 6px; border-radius:10px; background:var(--bg); color:var(--t2); }
 .recipe-link { font-size:0.8rem; color:var(--pr); text-decoration:none; }
 .recipe-link:hover { text-decoration:underline; }
-.recipe-stars { display:flex; gap:2px; margin:6px 0; }
-.star { transition:all 0.15s; user-select:none; cursor:pointer; font-size:1.2rem; }
-.star:hover { transform:scale(1.3); }
+.recipe-stars { display:flex; gap:4px; margin:6px 0; align-items:center; }
+.star { transition:transform 0.12s, color 0.12s; user-select:none; cursor:pointer; font-size:1.5rem; line-height:1; color:#d8b84a; padding:2px; }
+.star.empty { color:var(--bo); }
+.star:hover { transform:scale(1.25); }
+.star-clear { background:none; border:none; cursor:pointer; font-size:0.85rem; color:var(--t2); margin-left:6px; padding:4px 6px; border-radius:6px; }
+.star-clear:hover { background:var(--bg); color:var(--prd); }
 .cook-render { font-size:0.9rem; line-height:1.7; }
 .cook-step { margin-bottom:6px; padding:4px 0; }
 .cook-step:first-child { margin-top:0; }
@@ -170,14 +174,60 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
     .hero h1 { font-size:1.2rem; }
 }
 @media (max-width:480px) {
-    .week-scroll { gap:4px; min-width:350px; }
-    .day-col { min-width:58px; }
-    .meal { padding:4px; }
-    .meal-name { font-size:0.65rem; }
-    .ck { width:10px; height:10px; }
-    .day-head { font-size:0.7rem; padding:6px 2px; }
+    .week-scroll { gap:5px; min-width:430px; }
+    .day-col { min-width:72px; }
+    .meal { padding:5px; }
+    .meal-name { font-size:0.72rem; }
+    .ck { width:16px; height:16px; }
+    .day-head { font-size:0.72rem; padding:6px 2px; }
     .recettes-grid { grid-template-columns:1fr; }
 }
 @media (min-width:1024px) {
     .shop-g { grid-template-columns:repeat(3,1fr); }
+}
+
+/* ── Classes utilitaires (auparavant référencées sans définition) ─ */
+.inp { /* alias sémantique : le style vient du sélecteur input/select/textarea */ }
+.act { text-align:center; margin-top:16px; }
+.hero-sub { color:var(--t2); font-size:0.9rem; }
+.hero-force { color:var(--prd); font-weight:500; }
+.chip-r { background:#fef3e2; color:var(--pr); }
+
+/* Pills de tags (page Ajouter) — cohérence avec .chip/.tag */
+.tgl { display:inline-flex; align-items:center; cursor:pointer; }
+.tgl input { display:none; }
+.tgl span {
+    display:inline-block; padding:5px 12px; border-radius:14px;
+    background:var(--bg); color:var(--t2); border:1px solid var(--bo);
+    font-size:0.8rem; font-weight:500; transition:all 0.15s; user-select:none;
+}
+.tgl input:checked + span { background:var(--pr); color:#fff; border-color:var(--pr); }
+.tgl span:hover { border-color:var(--pr); }
+
+/* ── Toasts ──────────────────────────────────── */
+.toast-zone { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:3000; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none; width:max-content; max-width:90vw; }
+.toast { background:var(--text); color:#fff; padding:10px 18px; border-radius:10px; font-size:0.88rem; font-weight:500; box-shadow:0 4px 16px rgba(0,0,0,0.2); opacity:0; transform:translateY(10px); transition:opacity 0.25s, transform 0.25s; }
+.toast.show { opacity:1; transform:translateY(0); }
+.toast-success { background:var(--sc); }
+.toast-error { background:#c0392b; }
+.toast-info { background:var(--text); }
+
+/* ── Recherche / filtres ─────────────────────── */
+.search-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+.search-bar input { flex:1; min-width:200px; }
+.stat-chip { cursor:pointer; border:1px solid transparent; transition:all 0.15s; }
+.stat-chip:hover { border-color:var(--pr); }
+.stat-chip.active { background:var(--pr); color:#fff; }
+.recipe-card.hidden, .hist-item.hidden { display:none; }
+.no-result { text-align:center; color:var(--t2); padding:24px; grid-column:1/-1; }
+
+/* ── Impression (liste de courses) ───────────── */
+@media print {
+    .nav, .footer, .bulk, .modal, .week-wrapper, .act, .toast-zone,
+    #btn-shop, .shop-h .btn, #shop-status { display:none !important; }
+    body { background:#fff; }
+    .card { box-shadow:none; border:none; padding:0; }
+    .shop-g { grid-template-columns:repeat(2,1fr) !important; }
+    .shop-i { border:none; padding:3px 0; break-inside:avoid; }
+    .shop-i:has(.shop-c:checked) { display:none; } /* ne pas imprimer ce qui est déjà pris */
 }

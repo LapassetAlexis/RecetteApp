@@ -324,10 +324,10 @@ class NotionClient:
         page_id: str,
         note: str,
     ) -> dict[str, Any]:
-        """Met à jour la note d'une recette (⭐ à ⭐⭐⭐⭐⭐)."""
+        """Met à jour la note d'une recette (⭐ à ⭐⭐⭐⭐⭐, ou "" pour effacer)."""
         properties = {
             "Note": {
-                "select": {"name": note}
+                "select": {"name": note} if note else None
             }
         }
         async with httpx.AsyncClient() as client:
