@@ -85,7 +85,6 @@
             {% endfor %}
             <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
         </div>
-        <a class="enrich-btn" href="/recette/{{ recette.id }}/enrichir" title="Compléter / nettoyer depuis la source">✨ Enrichir</a>
     </div>
     {% endfor %}
     <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
@@ -97,7 +96,7 @@
 // ── Carte entière cliquable → fiche détail (sauf zones interactives) ──
 document.querySelectorAll('.recipe-card').forEach(card => {
     card.addEventListener('click', (e) => {
-        if (e.target.closest('.recipe-stars') || e.target.closest('.enrich-btn')) return;
+        if (e.target.closest('.recipe-stars')) return;
         const href = card.dataset.href;
         if (href) { if (window.navStart) window.navStart(); window.location.href = href; }
     });
