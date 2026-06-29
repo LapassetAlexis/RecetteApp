@@ -20,6 +20,15 @@ def test_join_fragments_reassembles_sentences():
     ]
 
 
+def test_flatten_skips_garbage_name():
+    from app.llm_client import _flatten_instructions
+    val = [
+        {"@type": "HowToStep", "text": "", "name": "Array,Array,Array,Array"},
+        {"@type": "HowToStep", "text": "Cuire 10 minutes."},
+    ]
+    assert _flatten_instructions(val) == ["Cuire 10 minutes."]
+
+
 def test_split_blob_ingredients_and_instructions():
     blob = ("Voici la recette\r\nIngrédients pour 4 personnes : - 5 pts / personne -\r\n"
             "\t250 g de lentilles vertes\r\n\t200 g de lardons\r\n\tSel et poivre.\r\n"

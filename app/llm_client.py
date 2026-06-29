@@ -60,6 +60,11 @@ def _first_image(val: Any) -> str:
     return ""
 
 
+def _is_garbage(t: str) -> bool:
+    """Détecte un texte poubelle (ex. 'Array,Array,Array...' mal sérialisé)."""
+    return bool(re.fullmatch(r"(array[\s,]*)+", t, re.IGNORECASE))
+
+
 def _flatten_instructions(val: Any) -> list[str]:
     """recipeInstructions : str | [str] | [HowToStep{text}] | [HowToSection{itemListElement}]."""
     steps: list[str] = []
@@ -67,20 +72,24 @@ def _flatten_instructions(val: Any) -> list[str]:
         # parfois un seul bloc avec sauts de ligne
         for part in re.split(r"\n+|(?<=[.!?])\s{2,}", val):
             t = _clean_text(part)
-            if t:
+            if t and not _is_garbage(t):
                 steps.append(t)
     elif isinstance(val, list):
         for item in val:
             if isinstance(item, str):
                 t = _clean_text(item)
-                if t:
+                if t and not _is_garbage(t):
                     steps.append(t)
             elif isinstance(item, dict):
                 if item.get("@type") == "HowToSection" and "itemListElement" in item:
                     steps.extend(_flatten_instructions(item["itemListElement"]))
                 else:
-                    t = _clean_text(item.get("text") or item.get("name") or "")
-                    if t:
+                    # 'text' d'abord ; 'name' seulement s'il n'est pas du garbage
+                    t = _clean_text(item.get("text") or "")
+                    if not t:
+                        nm = _clean_text(item.get("name") or "")
+                        t = nm if nm and not _is_garbage(nm) else ""
+                    if t and not _is_garbage(t):
                         steps.append(t)
     return steps
 
@@ -284,6 +293,11 @@ def _extract_nutrition(node: dict) -> dict:
         v = _num(n.get(src))
         if v is not None:
             out[dst] = round(v) if dst == "calories" else round(v, 1)
+    # On ne garde la nutrition de la source que si elle est COMPLÈTE (calories +
+    # 3 macros). Sinon (souvent juste calories, parfois fausses) on laissera
+    # l'estimation calculée prendre le relais.
+    if not {"calories", "proteines", "glucides", "lipides"} <= out.keys():
+        return {}
     return out
 
 
@@ -344,15 +358,19 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                     ingredients = deduped
                     if b_instr:
                         instructions = b_instr
-            # Repli : ingrédients dans la description (recette ou vidéo associée).
-            if not ingredients:
-                ingredients = _ingredients_from_text(node.get("description", ""))
-            if not ingredients:
-                for v in (node.get("video") or []):
-                    if isinstance(v, dict):
-                        ingredients = _ingredients_from_text(v.get("description", ""))
-                        if ingredients:
-                            break
+            # Complément via la description (recette/vidéo) : ces sites y mettent
+            # souvent la liste COMPLÈTE + la préparation, alors que
+            # recipeIngredient est partiel et recipeInstructions vide/garbage.
+            # On préfère le blob s'il a PLUS d'ingrédients, et on remplit les
+            # instructions si elles manquent.
+            blobs = [node.get("description", "")]
+            blobs += [v.get("description", "") for v in (node.get("video") or []) if isinstance(v, dict)]
+            for b in blobs:
+                b_ings, b_instr = _split_blob(b)
+                if len(b_ings) > len(ingredients):
+                    ingredients = b_ings
+                if not instructions and b_instr:
+                    instructions = b_instr
             kw = node.get("keywords", "")
             keywords = [k.strip() for k in kw.split(",")] if isinstance(kw, str) else [
                 _clean_text(k) for k in (kw or [])
