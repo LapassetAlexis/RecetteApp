@@ -37,47 +37,34 @@ def clean_recipe_title(name: str) -> str:
     return s.strip()
 
 
-_UNITS = {
-    "g", "kg", "mg", "ml", "cl", "dl", "l", "cs", "cc", "càs", "càc",
-    "pincée", "pincées", "gousse", "gousses", "tranche", "tranches",
-    "sachet", "sachets", "boîte", "boîtes", "pièce", "pièces", "verre", "verres",
-    "tasse", "tasses", "botte", "bottes", "branche", "branches", "feuille",
-    "feuilles", "brin", "brins", "cuillère", "cuillères", "cuillere", "cuilleres",
-}
-
-
 def parse_ingredient_line(line: str) -> dict | None:
-    """Transforme une ligne texte en {nom, quantite, unite}. Tolérant.
+    """Transforme une ligne en {quantite, nom} en PRÉSERVANT le libellé source.
 
-    "200 g de farine" -> {nom:"farine", quantite:"200", unite:"g"}
-    "3 oignons"       -> {nom:"oignons", quantite:"3", unite:""}
-    "farine : 200 g"  -> {nom:"farine", quantite:"200", unite:"g"}
-    "sel"             -> {nom:"sel", quantite:"", unite:""}
+    On extrait seulement le nombre de tête (pour pouvoir scaler les portions) et
+    on garde TOUT le reste tel quel comme libellé — pas de découpe d'unité (qui
+    cassait « cuillère à café », « d'épinards »...). `unite` reste vide.
+
+    "700 g d'épinards"                 -> {quantite:"700", nom:"g d'épinards", unite:""}
+    "1/2 cuillère à café de fond ..."  -> {quantite:"1/2", nom:"cuillère à café de fond ...", unite:""}
+    "4 œufs"                           -> {quantite:"4", nom:"œufs", unite:""}
+    "Sel, poivre"                      -> {quantite:"", nom:"Sel, poivre", unite:""}
+    "farine : 200 g" (legacy)          -> {quantite:"200", nom:"farine", unite:"g"}
     """
     s = line.strip().lstrip("-•*–").strip()
     if not s:
         return None
-    # format "nom : quantité unité"
-    if ":" in s:
-        nom, _, rest = s.partition(":")
-        nom, rest = nom.strip(), rest.strip()
-        m = re.match(r"^([\d.,/]+)\s*(.*)$", rest)
+    # Ancien format interne "nom : quantité unité"
+    if " : " in s:
+        nom, _, rest = s.partition(" : ")
+        m = re.match(r"^([\d.,/]+)\s*(.*)$", rest.strip())
         if m:
-            return {"nom": nom, "quantite": m.group(1).replace(",", "."), "unite": m.group(2).strip()}
-        return {"nom": nom, "quantite": "", "unite": rest}
-    # format "quantité unité nom"
+            return {"nom": nom.strip(), "quantite": m.group(1).replace(",", "."), "unite": m.group(2).strip()}
+        return {"nom": nom.strip(), "quantite": "", "unite": ""}
+    # Format source "quantité <libellé>" : on garde le libellé intact
     m = re.match(r"^([\d.,/]+)\s+(.*)$", s)
-    if not m:
-        return {"nom": s, "quantite": "", "unite": ""}
-    qty = m.group(1).replace(",", ".")
-    rest = m.group(2).strip()
-    parts = rest.split(None, 1)
-    if parts and parts[0].lower().rstrip(".") in _UNITS:
-        unite = parts[0]
-        nom = parts[1] if len(parts) > 1 else ""
-        nom = re.sub(r"^(de\s+|d')", "", nom, flags=re.IGNORECASE).strip()
-        return {"nom": nom, "quantite": qty, "unite": unite}
-    return {"nom": rest, "quantite": qty, "unite": ""}
+    if m:
+        return {"nom": m.group(2).strip(), "quantite": m.group(1).replace(",", "."), "unite": ""}
+    return {"nom": s, "quantite": "", "unite": ""}
 
 
 def split_instructions(text: str) -> list[str]:

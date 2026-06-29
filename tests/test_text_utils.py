@@ -20,11 +20,13 @@ def test_split_instructions_empty():
 
 
 def test_parse_ingredient_line():
-    assert parse_ingredient_line("200 g de farine") == {"nom": "farine", "quantite": "200", "unite": "g"}
-    assert parse_ingredient_line("3 oignons") == {"nom": "oignons", "quantite": "3", "unite": ""}
+    # On extrait seulement la quantité de tête ; le libellé source reste intact.
+    assert parse_ingredient_line("700 g d'épinards") == {"nom": "g d'épinards", "quantite": "700", "unite": ""}
+    assert parse_ingredient_line("1/2 cuillère à café de fond de volaille") == {
+        "nom": "cuillère à café de fond de volaille", "quantite": "1/2", "unite": ""}
+    assert parse_ingredient_line("4 œufs") == {"nom": "œufs", "quantite": "4", "unite": ""}
+    assert parse_ingredient_line("Sel, poivre") == {"nom": "Sel, poivre", "quantite": "", "unite": ""}
     assert parse_ingredient_line("farine : 200 g") == {"nom": "farine", "quantite": "200", "unite": "g"}
-    assert parse_ingredient_line("sel") == {"nom": "sel", "quantite": "", "unite": ""}
-    assert parse_ingredient_line("  - 2 gousses d'ail") == {"nom": "ail", "quantite": "2", "unite": "gousses"}
     assert parse_ingredient_line("   ") is None
 
 

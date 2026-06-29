@@ -365,22 +365,32 @@ class NotionClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def replace_instructions(self, page_id: str, instructions_text: str) -> dict[str, Any]:
-        """Remplace les instructions : supprime les anciens blocks d'instructions
-        (titre + étapes numérotées) puis ré-écrit les nouvelles. Évite les doublons."""
+    async def rewrite_recipe_body(self, page_id: str, instructions_text: str) -> dict[str, Any]:
+        """Nettoie le corps de la page (anciennes sections recette accumulées :
+        Ingrédients / Préparation / Instructions, titres + listes/paragraphes)
+        puis ré-écrit les instructions à jour. Évite les doublons et résidus."""
+        keywords = ("ingrédient", "ingredient", "préparation", "preparation", "instruction")
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
                 headers=self._headers, timeout=30,
             )
+            to_delete: list[str] = []
             if resp.status_code < 400:
+                in_section = False
                 for b in resp.json().get("results", []):
-                    t = b.get("type")
-                    is_heading = t == "heading_3" and "Instructions" in "".join(
-                        x.get("plain_text", "") for x in b.get("heading_3", {}).get("rich_text", [])
-                    )
-                    if t == "numbered_list_item" or is_heading:
-                        await client.delete(f"{BASE_URL}/blocks/{b['id']}", headers=self._headers, timeout=30)
+                    t = b.get("type", "")
+                    if t.startswith("heading_"):
+                        txt = "".join(
+                            x.get("plain_text", "") for x in b.get(t, {}).get("rich_text", [])
+                        ).lower()
+                        in_section = any(k in txt for k in keywords)
+                        if in_section:
+                            to_delete.append(b["id"])
+                    elif in_section and t in ("bulleted_list_item", "numbered_list_item", "paragraph"):
+                        to_delete.append(b["id"])
+            for bid in to_delete:
+                await client.delete(f"{BASE_URL}/blocks/{bid}", headers=self._headers, timeout=30)
         return await self.append_instructions(page_id, instructions_text)
 
     async def update_recipe_meta(

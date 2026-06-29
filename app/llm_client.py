@@ -88,6 +88,59 @@ def _flatten_instructions(val: Any) -> list[str]:
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
+_ING_HINT = re.compile(r"^\s*[\d½¼¾]|(\b(?:g|kg|mg|ml|cl|dl|l|cuill|pinc|gousse|tranche|sachet|càs|càc|c\.)\b)", re.IGNORECASE)
+
+
+def _ingredients_from_text(blob: str) -> list[str]:
+    """Extrait des ingrédients d'un bloc texte (description JSON-LD ou corps) :
+    lignes situées entre un titre « Ingrédient(s) » et « Préparation/Instructions ».
+    Couvre les sites qui listent les ingrédients en texte (séparés par \\n/\\t)
+    plutôt qu'en recipeIngredient (ex. platetrecette.fr)."""
+    if not blob or "ngr" not in blob.lower():
+        return []
+    lines = [l.strip(" -•\t\xa0") for l in re.split(r"[\n\r]+", blob.replace("\t", "\n"))]
+    out: list[str] = []
+    capture = False
+    for l in lines:
+        low = l.lower()
+        if not capture:
+            if "ingr" in low and "dient" in low:
+                capture = True
+            continue
+        if l and any(k in low for k in ("préparation", "preparation", "instruction", "étape", "etape", "réalisation")) and len(l) < 40:
+            break
+        if l and len(l) <= 120:
+            out.append(l)
+    return out
+
+
+def _scrape_ingredient_list(html_text: str) -> list[str]:
+    """Récupère la liste <ul><li> d'ingrédients du HTML, sans LLM. Utile quand le
+    JSON-LD n'expose pas recipeIngredient (ex. platetrecette.fr).
+
+    On évalue chaque <ul> suivant un « Ingrédient » et on retient celle dont les
+    items ressemblent vraiment à des ingrédients (chiffres/unités) — pas un menu
+    de navigation.
+    """
+    best: list[str] = []
+    best_score = 0
+    for m in re.finditer(r"[Ii]ngr[ée]dient", html_text):
+        window = html_text[m.start():m.start() + 4000]
+        lm = re.search(r"<ul[^>]*>(.*?)</ul>", window, re.S | re.I)
+        if not lm:
+            continue
+        items = [c for c in (_clean_text(x) for x in re.findall(r"<li[^>]*>(.*?)</li>", lm.group(1), re.S | re.I)) if c and len(c) <= 120]
+        if len(items) < 2:
+            continue
+        score = sum(1 for c in items if _ING_HINT.search(c))
+        if score > best_score:
+            best_score, best = score, items
+    # au moins la moitié des items doivent ressembler à des ingrédients
+    if best and best_score >= max(2, len(best) // 2):
+        return best
+    return []
+
+
 def _visible_text(html_text: str) -> str:
     """Texte visible d'une page (balises script/style/html retirées)."""
     t = re.sub(r"<script[^>]*>.*?</script>", "", html_text, flags=re.DOTALL | re.IGNORECASE)
@@ -210,6 +263,16 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                 c for c in (_clean_text(i) for i in (node.get("recipeIngredient") or node.get("ingredients") or []))
                 if c and c.lower() not in _NOISE
             ]
+            # Repli : certains sites mettent les ingrédients dans la description
+            # de la recette ou de la vidéo associée (ex. platetrecette.fr).
+            if not ingredients:
+                ingredients = _ingredients_from_text(node.get("description", ""))
+            if not ingredients:
+                for v in (node.get("video") or []):
+                    if isinstance(v, dict):
+                        ingredients = _ingredients_from_text(v.get("description", ""))
+                        if ingredients:
+                            break
             instructions = _flatten_instructions(node.get("recipeInstructions", ""))
             kw = node.get("keywords", "")
             keywords = [k.strip() for k in kw.split(",")] if isinstance(kw, str) else [
@@ -856,21 +919,26 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
         except Exception as e:
             logger.warning(f"Impossible de récupérer la page {url}: {e}")
 
+        # Liste d'ingrédients scrapée du HTML (exact). Sert quand le JSON-LD
+        # n'expose pas recipeIngredient.
+        scraped = _scrape_ingredient_list(html_text) if html_text else []
+
         # 1) JSON-LD schema.org : données telles quelles, aucune déformation.
         ld = _extract_jsonld_recipe(html_text) if html_text else None
-        if ld and ld.get("ingredients"):
-            logger.info("Recette extraite via JSON-LD (exact, sans LLM)")
+        ld_ings = (ld.get("ingredients") if ld else []) or scraped
+        if ld and ld_ings:
+            logger.info("Recette extraite via JSON-LD/scrape (exact, sans LLM pour les ingrédients)")
             type_repas, tags = await self._classify_type_tags(
-                ld["nom"], ld["ingredients"], ld.get("keywords", []),
+                ld["nom"], ld_ings, ld.get("keywords", []),
             )
             return {
                 "nom": ld["nom"],
                 "type_repas": type_repas,
                 "tags": tags,
-                "ingredients": ld["ingredients"],          # list[str], lignes brutes
+                "ingredients": ld_ings,                    # list[str], lignes brutes
                 "instructions": ld["instructions"],
                 "image_url": ld.get("image_url") or og_image,
-                "source": "jsonld",
+                "source": "jsonld" if ld.get("ingredients") else "scrape",
             }
 
         # 1bis) Handler spécifique au domaine (sites sans JSON-LD exploitable).
@@ -928,6 +996,9 @@ Réponds UNIQUEMENT ce JSON :
         ingredients = data.get("ingredients", [])
         if isinstance(ingredients, str):
             ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
+        # Les ingrédients scrapés du HTML sont plus fiables que ceux du LLM.
+        if scraped:
+            ingredients = scraped
         return {
             "nom": clean_recipe_title(data.get("nom", "")),
             "type_repas": type_repas,

@@ -5,7 +5,32 @@ from app.llm_client import (
     _first_image,
     _flatten_instructions,
     _handler_amandinecooking,
+    _ingredients_from_text,
+    _scrape_ingredient_list,
 )
+
+
+def test_scrape_ingredient_list_keeps_real_list():
+    html = "<h2>Ingrédients</h2><ul><li>200 g farine</li><li>3 oeufs</li><li>1 pincée de sel</li></ul>"
+    assert _scrape_ingredient_list(html) == ["200 g farine", "3 oeufs", "1 pincée de sel"]
+
+
+def test_scrape_ingredient_list_ignores_nav():
+    # un menu de navigation ne ressemble pas à des ingrédients -> rejeté
+    html = "<p>Ingrédients</p><ul><li>Accueil</li><li>Contact</li><li>Blog</li></ul>"
+    assert _scrape_ingredient_list(html) == []
+
+
+def test_ingredients_from_text_blob():
+    # cas platetrecette : ingrédients en blob texte (séparés \n / \t)
+    blob = ("Voici la recette ...\nIngrédients pour 4 personnes : 3 SP / personne -\n"
+            "\t700 g d'épinards\n\t4 œufs\n\t30 g de parmesan\nPréparation :\nLavez et hachez...")
+    r = _ingredients_from_text(blob)
+    assert r == ["700 g d'épinards", "4 œufs", "30 g de parmesan"]
+
+
+def test_ingredients_from_text_none():
+    assert _ingredients_from_text("Texte sans liste d'ingrédients") == []
 
 
 def test_first_image_variants():

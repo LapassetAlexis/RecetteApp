@@ -236,11 +236,15 @@ def test_enrich_one(client, monkeypatch):
 def test_enrichir_page_and_submit(client, monkeypatch):
     async def _get(pid):
         return _recipe("Curry", id="abc", url="http://r")
+    async def _extract(url):
+        # source : ingrédients bruts + instructions
+        return {"ingredients": ["200 g riz", "1 oignon"], "instructions": "Cuire le riz."}
     async def _enriched(nid):
         return {"ingredients": json.dumps([{"nom": "riz", "quantite": "200", "unite": "g"}])}
     async def _instr(pid):
         return ["Cuire le riz."]
     monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.llm, "extract_recipe_from_url", _extract)
     monkeypatch.setattr(main.db, "get_enriched", _enriched)
     monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
     # étape 1 : page pré-remplie
@@ -256,7 +260,7 @@ def test_enrichir_page_and_submit(client, monkeypatch):
         return None
     monkeypatch.setattr(main.db, "save_enriched", _save)
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
-    monkeypatch.setattr(main.notion, "replace_instructions", _noop)
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
     r = client.post("/recette/abc/enrichir", data={

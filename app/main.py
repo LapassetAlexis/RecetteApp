@@ -277,28 +277,30 @@ async def enrichir_page(request: Request, page_id: str):
     instructions_text = ""
     image_url = ""
 
-    cached = await db.get_enriched(page_id)
-    if cached and cached.get("ingredients"):
-        try:
-            ingredients = json.loads(cached["ingredients"])
-        except (json.JSONDecodeError, TypeError):
-            ingredients = []
-    try:
-        instructions_text = "\n".join(await notion.get_recipe_instructions(page_id))
-    except Exception:
-        instructions_text = ""
-
-    # Re-fetch la source pour compléter ce qui manque
-    if recette.get("url") and (not ingredients or not instructions_text):
+    # « Enrichir » = re-fetch la SOURCE en priorité (données d'origine), pas le
+    # cache qui peut contenir d'anciennes extractions inexactes.
+    if recette.get("url"):
         try:
             info = await llm.extract_recipe_from_url(recette["url"])
-            if not ingredients:
-                ingredients = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", [])) if i and i["nom"]]
-            if not instructions_text:
-                instructions_text = info.get("instructions", "")
+            ingredients = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", [])) if i and i["nom"]]
+            instructions_text = info.get("instructions", "")
             image_url = info.get("image_url", "")
         except Exception as e:
             logger.warning(f"Re-extraction enrichir {page_id}: {e}")
+
+    # Repli sur le cache / les blocks Notion si la source n'a rien donné
+    if not ingredients:
+        cached = await db.get_enriched(page_id)
+        if cached and cached.get("ingredients"):
+            try:
+                ingredients = json.loads(cached["ingredients"])
+            except (json.JSONDecodeError, TypeError):
+                ingredients = []
+    if not instructions_text:
+        try:
+            instructions_text = "\n".join(await notion.get_recipe_instructions(page_id))
+        except Exception:
+            instructions_text = ""
 
     return templates.TemplateResponse(
         "enrichir.html",
@@ -338,7 +340,7 @@ async def enrichir_submit(
             await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured))
             await notion.update_ingredients(page_id, _ingredients_to_text(structured))
         if instructions_text:
-            await notion.replace_instructions(page_id, instructions_text)
+            await notion.rewrite_recipe_body(page_id, instructions_text)
         if image_url:
             await notion.update_image(page_id, image_url)
         await notion.update_recipe_meta(page_id, repas=repas, tags=tags or None)
@@ -622,11 +624,15 @@ async def api_analyze_url(request: Request):
 
 
 def _ingredients_to_text(ings: list[dict]) -> str:
-    """Formate une liste d'ingrédients structurés en texte (pour Notion)."""
-    return "\n".join(
-        f"- {i['nom']}" + (f" : {i.get('quantite', '')} {i.get('unite', '')}" if i.get("quantite") else "")
-        for i in ings if i.get("nom")
-    )
+    """Formate les ingrédients en lignes propres « - 700 g d'épinards »."""
+    out = []
+    for i in ings:
+        nom = (i.get("nom") or "").strip()
+        if not nom:
+            continue
+        parts = [str(i.get("quantite", "")).strip(), str(i.get("unite", "")).strip(), nom]
+        out.append("- " + " ".join(p for p in parts if p))
+    return "\n".join(out)
 
 
 @app.post("/api/enrich/{page_id}")
