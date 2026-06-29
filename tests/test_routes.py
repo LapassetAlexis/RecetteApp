@@ -288,3 +288,42 @@ def test_enrich_all(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _upd)
     d = client.post("/api/enrich-all").json()
     assert d.get("success") and d["enriched"] == 1
+
+
+def test_update_meal_invalid_params(client):
+    # Validation : jour hors [1,7] ou moment invalide -> erreur sans toucher la base
+    bad = client.post("/api/update-meal/1", json={"jour": 999, "moment": "xyz", "nouvelle_recette": "X"}).json()
+    assert "error" in bad
+    bad2 = client.post("/api/update-meal/1", json={"jour": 1, "moment": "midi", "nouvelle_recette": ""}).json()
+    assert "error" in bad2
+
+
+def test_update_side_invalid_params(client):
+    bad = client.post("/api/update-side/1", json={"jour": 0, "moment": "midi"}).json()
+    assert "error" in bad
+    bad2 = client.post("/api/update-side/1", json={"jour": 3, "moment": "nope"}).json()
+    assert "error" in bad2
+
+
+def test_enrich_all_stream(client, monkeypatch):
+    async def _all():
+        return [_recipe("Poulet", id="p1", url="http://r"), _recipe("SansUrl", id="p2")]
+    async def _enriched(nid):
+        return None
+    async def _ext(nom, url="", nb=4):
+        return {"ingredients": [{"nom": "poulet", "quantite": "1", "unite": "kg"}]}
+    async def _save(*a, **k):
+        return None
+    async def _upd(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
+    monkeypatch.setattr(main.notion, "update_ingredients", _upd)
+    r = client.get("/api/enrich-all/stream")
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers["content-type"]
+    body = r.text
+    assert "event: done" in body
+    assert '"enriched": 1' in body  # Poulet enrichi, SansUrl ignoré
