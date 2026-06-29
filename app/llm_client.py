@@ -438,8 +438,29 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                 "instructions": "\n".join(instructions),
                 "keywords": [k for k in keywords if k],
                 "nutrition": _extract_nutrition(node),
+                "duree_minutes": _recipe_duration_min(node),
             }
     return None
+
+
+def _iso_duration_to_min(val: Any) -> int | None:
+    """Convertit une durée ISO-8601 (ex. « PT1H30M », « PT45M ») en minutes."""
+    if not isinstance(val, str):
+        return None
+    m = re.fullmatch(r"P(?:\d+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:\d+S)?", val.strip(), re.IGNORECASE)
+    if not m or not (m.group(1) or m.group(2)):
+        return None
+    return int(m.group(1) or 0) * 60 + int(m.group(2) or 0)
+
+
+def _recipe_duration_min(node: dict) -> int | None:
+    """Durée totale d'une recette : totalTime, sinon prepTime + cookTime."""
+    total = _iso_duration_to_min(node.get("totalTime"))
+    if total:
+        return total
+    prep = _iso_duration_to_min(node.get("prepTime")) or 0
+    cook = _iso_duration_to_min(node.get("cookTime")) or 0
+    return (prep + cook) or None
 
 
 # ── Handlers spécifiques par site ────────────────────────────────────
@@ -1172,6 +1193,7 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
                 "instructions": ld["instructions"],
                 "image_url": ld.get("image_url") or og_image,
                 "nutrition": ld.get("nutrition", {}),
+                "duree_minutes": ld.get("duree_minutes"),
                 "source": "jsonld" if ld.get("ingredients") else "scrape",
             }
 

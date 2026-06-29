@@ -285,12 +285,13 @@ async def liste_recettes(request: Request):
         logger.error(f"Erreur Notion: {e}")
         recettes = []
 
-    # Ingrédients en cache (pour la recherche par ingrédient) — 1 seule requête
+    # Ingrédients + durée en cache (recherche par ingrédient, badge temps)
     try:
         ings_by_id = await db.get_all_enriched_ingredients()
+        duree_by_id = await db.get_all_enriched_durations()
     except Exception as e:
-        logger.warning(f"Lecture ingrédients cache échouée: {e}")
-        ings_by_id = {}
+        logger.warning(f"Lecture cache recettes échouée: {e}")
+        ings_by_id, duree_by_id = {}, {}
 
     # Stats pour les filtres (type / état / tag)
     total = len(recettes)
@@ -299,6 +300,7 @@ async def liste_recettes(request: Request):
     par_tag: dict[str, int] = {}
     for r in recettes:
         r["ingredients_search"] = ings_by_id.get(r["id"], "")
+        r["duree"] = duree_by_id.get(r["id"], 0)
         par_type[r["repas"] or "Non classé"] = par_type.get(r["repas"] or "Non classé", 0) + 1
         if r["etat"]:
             par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1
@@ -368,6 +370,7 @@ async def detail_recette(request: Request, page_id: str):
         if not nutrition and ingredients:
             nutrition = estimate_nutrition(ingredients, BASE_SERVINGS)
 
+        duree = cached.get("cuisson_minutes") if cached else 0
         return templates.TemplateResponse(
             "recette_detail.html",
             {
@@ -377,6 +380,7 @@ async def detail_recette(request: Request, page_id: str):
                 "base_servings": BASE_SERVINGS,
                 "instructions": instructions,
                 "nutrition": nutrition,
+                "duree": duree or 0,
             },
         )
     except Exception:
@@ -396,6 +400,7 @@ async def enrichir_page(request: Request, page_id: str):
     instructions_text = ""
     image_url = ""
     nutrition_src: dict = {}
+    duree_minutes = 0
 
     # « Enrichir » = re-fetch la SOURCE en priorité (données d'origine), pas le
     # cache qui peut contenir d'anciennes extractions inexactes.
@@ -406,6 +411,7 @@ async def enrichir_page(request: Request, page_id: str):
             instructions_text = info.get("instructions", "")
             image_url = info.get("image_url", "")
             nutrition_src = info.get("nutrition") or {}
+            duree_minutes = info.get("duree_minutes") or 0
         except Exception as e:
             logger.warning(f"Re-extraction enrichir {page_id}: {e}")
 
@@ -432,6 +438,7 @@ async def enrichir_page(request: Request, page_id: str):
             "steps": split_instructions(instructions_text),
             "image_url": image_url,
             "nutrition_json": json.dumps(nutrition_src),
+            "duree_minutes": duree_minutes,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
         },
@@ -448,6 +455,7 @@ async def enrichir_submit(
     steps: list[str] = Form([]),
     image_url: str = Form(""),
     nutrition_json: str = Form(""),
+    duree_minutes: int = Form(0),
 ):
     """Étape 2 : applique les changements validés à la recette Notion + cache."""
     recette = await notion.get_recipe(page_id)
@@ -467,7 +475,8 @@ async def enrichir_submit(
         nutrition = ""
     try:
         if structured:
-            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured), nutrition=nutrition)
+            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured),
+                                   cuisson_minutes=duree_minutes or 0, nutrition=nutrition)
             await notion.update_ingredients(page_id, _ingredients_to_text(structured))
         if instructions_text:
             await notion.rewrite_recipe_body(page_id, instructions_text)

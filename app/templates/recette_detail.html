@@ -6,6 +6,7 @@
     <div class="hero" style="padding-bottom:10px;">
         <h1 style="font-size:1.5rem;">{{ recette.nom | clean_title }}</h1>
         <div class="detail-chips">
+            {% if duree %}<span class="chip chip-duree">⏱ {{ duree }} min</span>{% endif %}
             {% if recette.repas %}<span class="chip chip-repas">{{ recette.repas }}</span>{% endif %}
             {% if recette.etat %}<span class="chip chip-etat">{{ recette.etat }}</span>{% endif %}
             {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
