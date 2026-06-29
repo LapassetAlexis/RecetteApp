@@ -1,6 +1,7 @@
 """Petites fonctions de nettoyage de texte partagées (app + extraction)."""
 
 import re
+import unicodedata
 
 # Marqueurs typiques d'un suffixe « source » à retirer du titre d'une recette.
 _SOURCE_MARKERS = (
@@ -64,6 +65,21 @@ def _fmt_qty(n: float) -> str:
     return f"{round(n, 2):g}"
 
 
+def _normalize_form(s: str) -> str:
+    """Normalise la FORME d'un libellé pour le regroupement (pas le sens).
+
+    Minuscule, sans accents, espaces compactés, singulier/pluriel replié
+    (retrait d'un s/x final par mot de >3 lettres). Regroupe « Oignons » et
+    « oignon », mais PAS « oignon rouge » et « oignon jaune » (qualificatif
+    différent), ni « tomate » et « tomate cerise ».
+    """
+    s = unicodedata.normalize("NFD", s.strip().lower())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")  # retire accents
+    s = re.sub(r"\s+", " ", s)
+    words = [re.sub(r"(?<=\w{3})[sx]$", "", w) for w in s.split(" ")]
+    return " ".join(words)
+
+
 def merge_ingredients(items: list[dict]) -> list[dict]:
     """Fusionne une liste d'ingrédients par (nom, unité).
 
@@ -80,7 +96,9 @@ def merge_ingredients(items: list[dict]) -> list[dict]:
             continue
         unite = (ing.get("unite") or "").strip()
         qty = str(ing.get("quantite", "") or "").strip()
-        key = (nom.lower(), unite.lower())
+        # clé normalisée (forme) : regroupe singulier/pluriel + casse/accents,
+        # mais conserve distinctes les variantes (oignon rouge / jaune).
+        key = (_normalize_form(nom), _normalize_form(unite))
         if key not in out:
             out[key] = {"nom": nom, "quantite": qty, "unite": unite}
             order.append(key)
