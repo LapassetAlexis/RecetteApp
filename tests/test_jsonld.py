@@ -100,3 +100,34 @@ def test_entities_decoded():
     r = _extract_jsonld_recipe(html)
     assert r["nom"] == "Boeuf & carottes"
     assert "à soupe" in r["ingredients"][0]
+
+
+def test_recipe_root_with_graph_sibling():
+    # Cas Ricardo : la racine EST un Recipe mais porte aussi un @graph (WebSite).
+    # Il ne faut pas perdre le Recipe en ne regardant que @graph.
+    html = """
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Recipe","name":"Nougat",
+     "recipeIngredient":["sucre","miel"],"recipeInstructions":"Cuire.",
+     "@graph":[{"@type":"WebSite","name":"site"}]}
+    </script>
+    """
+    r = _extract_jsonld_recipe(html)
+    assert r is not None and r["nom"] == "Nougat"
+    assert r["ingredients"] == ["sucre", "miel"]
+
+
+def test_site_handler_registry():
+    # On passe par le module vivant (et non par les noms importés au top) pour
+    # rester correct même si un autre test a rechargé app.llm_client (reload).
+    import app.llm_client as L
+
+    def _dummy(html_text):
+        return {"nom": "X", "ingredients": ["a"], "instructions": "", "image_url": "", "keywords": []}
+    L.SITE_HANDLERS["exemple-test.com"] = _dummy
+    try:
+        assert L._site_handler("https://www.exemple-test.com/r/1") is _dummy
+        assert L._site_handler("http://exemple-test.com/x") is _dummy
+        assert L._site_handler("https://autre.com/x") is None
+    finally:
+        del L.SITE_HANDLERS["exemple-test.com"]

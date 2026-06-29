@@ -6,7 +6,8 @@ import httpx
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import urlparse
 
 from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 
@@ -169,12 +170,18 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
             data = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        # Aplatir les structures possibles : objet, liste, ou {"@graph": [...]}
+        # Aplatir les structures possibles : objet, liste, ou {"@graph": [...]}.
+        # NB : on inclut TOUJOURS la racine ET les noeuds @graph — certains sites
+        # (ex. Ricardo) mettent le Recipe à la racine MAIS ajoutent aussi un
+        # @graph (WebSite). Remplacer la racine par @graph perdait le Recipe.
         candidates: list[Any] = []
         if isinstance(data, list):
             candidates = data
         elif isinstance(data, dict):
-            candidates = data.get("@graph", [data]) if "@graph" in data else [data]
+            candidates = [data]
+            graph = data.get("@graph")
+            if isinstance(graph, list):
+                candidates += graph
         for node in candidates:
             if not isinstance(node, dict):
                 continue
@@ -202,6 +209,33 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                 "keywords": [k for k in keywords if k],
             }
     return None
+
+
+# ── Handlers spécifiques par site ────────────────────────────────────
+# Pour les sites SANS JSON-LD exploitable. Un handler reçoit le HTML brut et
+# renvoie le MÊME dict que _extract_jsonld_recipe
+#   {nom, image_url, ingredients: list[str], instructions: str, keywords: list[str]}
+# ou None s'il échoue. Ordre d'extraction : JSON-LD générique → handler de
+# domaine → repli LLM. Ajouter un site = écrire une fonction + l'enregistrer ci-dessous.
+#
+# Exemple :
+#   def _handler_monsite(html_text: str) -> dict[str, Any] | None:
+#       nom = _clean_text(re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.S).group(1))
+#       ings = [_clean_text(x) for x in re.findall(r'<li class="ingredient">(.*?)</li>', html_text, re.S)]
+#       if not ings:
+#           return None
+#       return {"nom": nom, "image_url": "", "ingredients": ings, "instructions": "", "keywords": []}
+#   SITE_HANDLERS = {"monsite.com": _handler_monsite}
+
+SITE_HANDLERS: dict[str, Callable[[str], dict[str, Any] | None]] = {}
+
+
+def _site_handler(url: str) -> Callable[[str], dict[str, Any] | None] | None:
+    """Renvoie le handler enregistré pour le domaine de l'URL (ou None)."""
+    domain = urlparse(url).netloc.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return SITE_HANDLERS.get(domain)
 
 
 class LLMClient:
@@ -707,6 +741,29 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
                 "image_url": ld.get("image_url") or og_image,
                 "source": "jsonld",
             }
+
+        # 1bis) Handler spécifique au domaine (sites sans JSON-LD exploitable).
+        handler = _site_handler(url)
+        if handler and html_text:
+            try:
+                h = handler(html_text)
+            except Exception as e:
+                logger.warning(f"Handler de domaine échoué: {e}")
+                h = None
+            if h and h.get("ingredients"):
+                logger.info("Recette extraite via handler de domaine")
+                type_repas, tags = await self._classify_type_tags(
+                    h.get("nom", ""), h["ingredients"], h.get("keywords", []),
+                )
+                return {
+                    "nom": h.get("nom", ""),
+                    "type_repas": type_repas,
+                    "tags": tags,
+                    "ingredients": h["ingredients"],
+                    "instructions": h.get("instructions", ""),
+                    "image_url": h.get("image_url") or og_image,
+                    "source": "handler",
+                }
 
         # 2) Repli LLM : texte visible de la page (plus large car pas de JSON-LD).
         text = re.sub(r'<script[^>]*>.*?</script>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
