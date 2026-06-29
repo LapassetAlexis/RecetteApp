@@ -110,6 +110,26 @@ def _balanced_json(text: str, start: int) -> str | None:
     return None
 
 
+def _find_enclosing_start(text: str, idx: int) -> int:
+    """Remonte depuis `idx` jusqu'au '{' qui ouvre l'objet le contenant.
+
+    Compte les accolades à l'envers pour sauter les objets imbriqués déjà
+    fermés (ex. un VideoObject listé avant la clé "@context" du parent).
+    """
+    depth = 0
+    i = idx
+    while i >= 0:
+        ch = text[i]
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            if depth == 0:
+                return i
+            depth -= 1
+        i -= 1
+    return -1
+
+
 def _jsonld_candidates(html_text: str) -> list[str]:
     """Rassemble les objets JSON schema.org de la page.
 
@@ -123,8 +143,16 @@ def _jsonld_candidates(html_text: str) -> list[str]:
         r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         html_text, re.DOTALL | re.IGNORECASE,
     )
-    for m in re.finditer(r'\{\s*"@context"', html_text):
-        obj = _balanced_json(html_text, m.start())
+    # Repli : ancrer sur "@context" puis remonter au '{' ouvrant de son objet.
+    # Couvre les pages où @context n'est pas la première clé (ex. Ricardo) ou
+    # où l'attribut type du <script> est encodé en entités HTML (ex. Marmiton).
+    seen_starts: set[int] = set()
+    for m in re.finditer(r'"@context"', html_text):
+        start = _find_enclosing_start(html_text, m.start())
+        if start < 0 or start in seen_starts:
+            continue
+        seen_starts.add(start)
+        obj = _balanced_json(html_text, start)
         if obj:
             out.append(obj)
     return out
