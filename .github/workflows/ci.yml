@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        # Seuil = garde anti-régression. Le code non couvert est surtout du
+        # plumbing HTTP (Notion/Ollama/Gemini), intestable sans services live ;
+        # toute la logique métier est couverte.
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=65

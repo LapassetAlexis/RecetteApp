@@ -66,3 +66,12 @@ def _cleanup_env():
     yield
     for k in ("DATABASE_PATH", "AUTH_USER", "AUTH_PASSWORD", "NOTION_TOKEN"):
         os.environ.pop(k, None)
+    # Restaurer un app.main propre (sans middleware d'auth) pour les autres
+    # fichiers de tests : le reload ci-dessus laisse sinon l'auth activée sur le
+    # module partagé.
+    import app.config, app.database, app.notion_client, app.llm_client, app.main
+    importlib.reload(app.config)
+    importlib.reload(app.database)
+    importlib.reload(app.notion_client)
+    importlib.reload(app.llm_client)
+    importlib.reload(app.main)

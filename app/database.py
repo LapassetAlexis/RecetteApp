@@ -132,11 +132,13 @@ class Database:
         """Retourne les noms de recettes utilisées dans les N dernières semaines."""
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
+            # SQLite ne connaît PAS le modificateur 'weeks' (renvoie NULL et
+            # n'exclut rien). On convertit en jours : N semaines + 7 j de marge.
             rows = await db.execute_fetchall(
                 """SELECT DISTINCT recipe_name FROM planning_recipes pr
                    JOIN planning_history ph ON pr.planning_id = ph.id
-                   WHERE ph.created_at >= datetime('now', ? || ' weeks', '-7 days')""",
-                (f"-{weeks}",),
+                   WHERE ph.created_at >= datetime('now', ? || ' days')""",
+                (f"-{weeks * 7 + 7}",),
             )
             return {r["recipe_name"] for r in rows}
 
