@@ -538,6 +538,34 @@ async def api_analyze_url(request: Request):
         return {"error": str(e)}
 
 
+def _ingredients_to_text(ings: list[dict]) -> str:
+    """Formate une liste d'ingrédients structurés en texte (pour Notion)."""
+    return "\n".join(
+        f"- {i['nom']}" + (f" : {i.get('quantite', '')} {i.get('unite', '')}" if i.get("quantite") else "")
+        for i in ings if i.get("nom")
+    )
+
+
+@app.post("/api/enrich/{page_id}")
+async def api_enrich_one(page_id: str):
+    """Enrichit UNE recette : extrait ses ingrédients (depuis sa page) et les
+    écrit dans Notion + le cache."""
+    try:
+        recette = await notion.get_recipe(page_id)
+        if not recette:
+            return {"error": "Recette introuvable"}
+        d = await llm.extract_ingredients(recette["nom"], recette.get("url", ""))
+        ings = d.get("ingredients", [])
+        if not ings:
+            return {"error": "Aucun ingrédient extrait (pas d'URL exploitable ?)"}
+        await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(ings))
+        await notion.update_ingredients(page_id, _ingredients_to_text(ings))
+        return {"success": True, "count": len(ings)}
+    except Exception as e:
+        logger.exception("Erreur enrichissement unitaire")
+        return {"error": str(e)}
+
+
 @app.post("/api/enrich-all")
 async def api_enrich_all():
     """Parcourt toutes les recettes Notion et ajoute les ingrédients manquants."""

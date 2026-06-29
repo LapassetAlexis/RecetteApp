@@ -41,7 +41,8 @@
     {% else %}
     <div class="card empty">
         <p>Aucun ingrédient enregistré pour cette recette.</p>
-        <p style="font-size:0.85rem;">Ajoute-les via <strong>🔄 Enrichir</strong> sur la page Recettes, ou en générant un planning.</p>
+        <button type="button" class="btn btn-primary" id="detail-enrich" data-id="{{ recette.id }}">✨ Extraire les ingrédients</button>
+        <p id="detail-enrich-status" class="muted-sm" style="margin-top:8px;"></p>
     </div>
     {% endif %}
 
@@ -104,5 +105,17 @@ document.getElementById('srv-plus')?.addEventListener('click', () => {
     servings = Math.min(50, servings + 1); render();
 });
 render();
+
+// Enrichissement depuis l'état vide
+document.getElementById('detail-enrich')?.addEventListener('click', async function () {
+    const st = document.getElementById('detail-enrich-status');
+    this.disabled = true; this.textContent = '⏳ Extraction...';
+    try {
+        const r = await fetch(`/api/enrich/${this.dataset.id}`, {method: 'POST'});
+        const d = await r.json();
+        if (d.success) { toast(`${d.count} ingrédients ajoutés`, 'success'); setTimeout(() => location.reload(), 700); }
+        else { st.textContent = d.error || 'Erreur'; this.disabled = false; this.textContent = '✨ Extraire les ingrédients'; }
+    } catch (e) { st.textContent = 'Erreur réseau'; this.disabled = false; this.textContent = '✨ Extraire les ingrédients'; }
+});
 </script>
 {% endblock %}

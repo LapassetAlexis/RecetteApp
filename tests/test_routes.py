@@ -215,6 +215,24 @@ def test_alternatives_and_shopping(client, monkeypatch):
     assert shop.get("success") and shop["liste_courses"][0]["nom"] == "sel"
 
 
+def test_enrich_one(client, monkeypatch):
+    async def _get(pid):
+        return _recipe("Curry", id="abc", url="http://r") if pid == "abc" else None
+    async def _ext(nom, url="", nb=4):
+        return {"ingredients": [{"nom": "riz", "quantite": "200", "unite": "g"}]}
+    async def _save(*a, **k):
+        return None
+    async def _upd(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _upd)
+    d = client.post("/api/enrich/abc").json()
+    assert d.get("success") and d["count"] == 1
+    assert "error" in client.post("/api/enrich/zzz").json()  # introuvable
+
+
 def test_enrich_all(client, monkeypatch):
     async def _all():
         return [_recipe("Poulet", id="p1", url="http://r")]

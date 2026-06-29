@@ -274,6 +274,10 @@ a.meal-name:hover { text-decoration:underline; }
 .recipe-card:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,0.10); }
 .recipe-title { color:var(--text); text-decoration:none; }
 .recipe-card:hover .recipe-title { color:var(--prd); }
+.enrich-btn { margin-top:8px; align-self:flex-start; background:none; border:1px solid var(--bo); color:var(--prd); border-radius:8px; padding:4px 10px; font-size:0.76rem; font-weight:600; cursor:pointer; transition:all 0.15s; }
+.enrich-btn:hover { background:var(--pr); color:#fff; border-color:var(--pr); }
+.enrich-btn:disabled { opacity:0.6; cursor:default; }
+.recipe-card { display:flex; flex-direction:column; }
 
 /* ── Impression (liste de courses) ───────────── */
 @media print {
