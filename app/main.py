@@ -1,12 +1,14 @@
 """App FastAPI — Menu Planner avec génération IA."""
 
-import asyncio
 import json
 import logging
-from datetime import date, datetime, timedelta
+import random
+from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Query, Request
+import aiosqlite
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,18 +25,30 @@ VERSION = "1.1.0"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=settings.app_title, version="1.0.0")
+# Instances
+db = Database()
+notion = NotionClient()
+llm = LLMClient()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await db.init()
+    logger.info("Base SQLite initialisée")
+    try:
+        await notion.ensure_ingredients_field()
+    except Exception as e:
+        logger.warning(f"Impossible de créer le champ Ingrédients Notion: {e}")
+    yield
+
+
+app = FastAPI(title=settings.app_title, version=VERSION, lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 # Static files & templates
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-
-# Instances
-db = Database()
-notion = NotionClient()
-llm = LLMClient()
 # Version dans tous les templates
 templates.env.globals["version"] = VERSION
 
@@ -64,16 +78,6 @@ TAG_OPTIONS = [
     "Végétarien proténiné",
     "1 personne",
 ]
-
-
-@app.on_event("startup")
-async def startup():
-    await db.init()
-    logger.info("Base SQLite initialisée")
-    try:
-        await notion.ensure_ingredients_field()
-    except Exception as e:
-        logger.warning(f"Impossible de créer le champ Ingrédients Notion: {e}")
 
 
 # ── Pages ──────────────────────────────────────────────────────────
@@ -179,7 +183,6 @@ async def detail_recette(request: Request, page_id: str):
         cached = await db.get_enriched(page_id)
         cook_content = f">> Serves: 4\n>> Source: {recette.get('url', '')}\n\n"
         if cached and cached.get("ingredients"):
-            import json
             try:
                 ings = json.loads(cached["ingredients"])
                 for i in ings:
@@ -191,7 +194,7 @@ async def detail_recette(request: Request, page_id: str):
                         cook_content += f"@{i['nom']}{{{q}}}\n"
                     else:
                         cook_content += f"@{i['nom']}\n"
-            except: pass
+            except Exception: pass
         cook_content += "\n"
 
         recipe_obj = parse_cook(cook_content)
@@ -206,9 +209,9 @@ async def detail_recette(request: Request, page_id: str):
                 "cook_raw": cook_content,
             },
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur détail recette")
-        return HTMLResponse(f"Erreur: {e}", status_code=500)
+        return HTMLResponse("Erreur interne lors du chargement de la recette.", status_code=500)
 
 
 @app.get("/ajouter", response_class=HTMLResponse)
@@ -295,8 +298,6 @@ async def generer(
         logger.info(f"{len(recettes)} recettes dispo, {len(exclues)} exclues")
 
         # Filtrer les exclues
-        import random
-        random.seed()
         recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
         # Limiter à 30 max pour éviter le 413 Payload Too Large (Groq 8K ctx)
         if len(recettes_filtered) > 30:
@@ -367,7 +368,6 @@ async def generer(
 @app.post("/generate-shopping/{planning_id}")
 async def generate_shopping(planning_id: int, request: Request):
     """Génère la liste de courses pour un planning existant."""
-    import json
     try:
         planning = await db.get_planning_with_recipes(planning_id)
         if not planning:
@@ -395,10 +395,10 @@ async def generate_shopping(planning_id: int, request: Request):
                                 q1 = float(str(courses_map[k]["quantite"]).replace(",", "."))
                                 q2 = float(str(ing["quantite"]).replace(",", "."))
                                 courses_map[k]["quantite"] = str(q1 + q2)
-                            except: pass
+                            except Exception: pass
                         else:
                             courses_map[k] = {"nom": ing["nom"], "quantite": ing.get("quantite", ""), "unite": ing.get("unite", "")}
-                except: pass
+                except Exception: pass
             liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
 
         # Ajouter les ingrédients forcés
@@ -409,7 +409,6 @@ async def generate_shopping(planning_id: int, request: Request):
                     liste_courses.append({"nom": f, "quantite": "", "unite": ""})
 
         # Mettre à jour le planning
-        import aiosqlite
         async with aiosqlite.connect(settings.database_path) as db_conn:
             planning_data["liste_courses"] = liste_courses
             await db_conn.execute(
@@ -461,7 +460,6 @@ async def api_rate(page_id: str, request: Request):
 @app.post("/api/analyze-url")
 async def api_analyze_url(request: Request):
     """Analyse une URL et retourne les infos extraites."""
-    import json
     try:
         data = await request.json()
         url = data.get("url", "")
@@ -485,7 +483,7 @@ async def api_analyze_url(request: Request):
                         f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
                         for i in ings
                     )
-            except: pass
+            except Exception: pass
 
         return {
             "nom": nom,
@@ -524,7 +522,6 @@ async def api_enrich_all():
             ingredients_txt = ""
 
             if cached and cached.get("ingredients"):
-                import json
                 try:
                     ing_list = json.loads(cached["ingredients"])
                     if ing_list:
@@ -532,7 +529,7 @@ async def api_enrich_all():
                             f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
                             for i in ing_list
                         )
-                except: pass
+                except Exception: pass
 
             # Sinon, extraire via LLM
             if not ingredients_txt and r.get("url"):
@@ -546,7 +543,7 @@ async def api_enrich_all():
                         )
                         # Mettre en cache
                         await db.save_enriched(nid, nom, ingredients=json.dumps(ings))
-                except: pass
+                except Exception: pass
 
             if ingredients_txt:
                 try:
@@ -625,7 +622,6 @@ async def ajouter_recette(
                     if image_url:
                         await notion.update_image(page_id, image_url)
                     # Sauvegarder en cache local
-                    import json
                     if ingredients_manual:
                         ings_list = [
                             {"nom": l.strip().lstrip("- ").split(":")[0].strip(), "quantite": "", "unite": ""}
@@ -686,7 +682,6 @@ async def api_update_meal(
     request: Request,
 ):
     """Remplace un repas dans le planning et regénère la liste de courses."""
-    import json
 
     data = await request.json()
     jour = data.get("jour")
@@ -727,46 +722,60 @@ async def api_update_meal(
         if not trouve:
             return {"error": "Repas non trouvé dans le planning"}
 
-        # Regénérer la liste de courses
-        liste_courses = []
-        courses_map = {}
+        # Regénérer la liste de courses. On privilégie le cache local pour
+        # chaque plat ; on n'appelle le LLM que pour les recettes sans cache
+        # (typiquement uniquement le plat qui vient d'être remplacé).
+        courses_map: dict[str, dict] = {}
+        nb_personnes = planning.get("nb_personnes", 4)
+
+        def _merge(ings: list[dict]) -> None:
+            for ing in ings:
+                if not ing.get("nom"):
+                    continue
+                nom_ing = ing["nom"].lower().strip()
+                if nom_ing in courses_map:
+                    existing = courses_map[nom_ing]
+                    if existing["unite"] == ing.get("unite", ""):
+                        try:
+                            q1 = float(str(existing["quantite"]).replace(",", "."))
+                            q2 = float(str(ing["quantite"]).replace(",", "."))
+                            existing["quantite"] = str(q1 + q2)
+                        except (ValueError, TypeError):
+                            pass
+                else:
+                    courses_map[nom_ing] = {
+                        "nom": ing["nom"],
+                        "quantite": ing.get("quantite", ""),
+                        "unite": ing.get("unite", ""),
+                    }
 
         for plat in plats:
+            nid = plat.get("notion_id", "")
+            cached = await db.get_enriched(nid) if nid else None
+            if cached and cached.get("ingredients"):
+                try:
+                    _merge(json.loads(cached["ingredients"]))
+                    continue
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.debug(f"Cache ingrédients illisible pour {nid}: {e}")
+            # Pas de cache → extraction LLM, puis mise en cache
             try:
                 ingredients_data = await llm.extract_ingredients(
-                    plat["nom_recette"],
-                    plat.get("url", ""),
-                    planning.get("nb_personnes", 4),
+                    plat["nom_recette"], plat.get("url", ""), nb_personnes,
                 )
-                for ing in ingredients_data.get("ingredients", []):
-                    nom_ing = ing["nom"].lower().strip()
-                    if nom_ing in courses_map:
-                        existing = courses_map[nom_ing]
-                        if existing["unite"] == ing.get("unite", ""):
-                            try:
-                                q1 = float(str(existing["quantite"]).replace(",", "."))
-                                q2 = float(str(ing["quantite"]).replace(",", "."))
-                                existing["quantite"] = str(q1 + q2)
-                            except (ValueError, TypeError):
-                                pass
-                    else:
-                        courses_map[nom_ing] = {
-                            "nom": ing["nom"],
-                            "quantite": ing.get("quantite", ""),
-                            "unite": ing.get("unite", ""),
-                        }
-            except Exception:
-                pass
+                ings = ingredients_data.get("ingredients", [])
+                _merge(ings)
+                if nid and ings:
+                    await db.save_enriched(nid, plat["nom_recette"], ingredients=json.dumps(ings))
+            except Exception as e:
+                logger.warning(f"Extraction ingrédients échouée pour {plat['nom_recette']}: {e}")
 
         liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
         planning_data["liste_courses"] = liste_courses
 
-        # Sauvegarder
-        await db.save_planning(
-            week_start=planning["week_start"],
-            saison=planning["saison"],
-            nb_personnes=planning["nb_personnes"],
-            ingredients_force=planning.get("ingredients_force", ""),
+        # Mettre à jour le planning existant (ne pas en créer un nouveau)
+        await db.update_planning(
+            planning_id=planning_id,
             data_json=json.dumps(planning_data, ensure_ascii=False),
             recipes=[{"notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"], "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"]} for p in plats],
         )

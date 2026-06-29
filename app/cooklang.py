@@ -9,6 +9,7 @@ Format Cooklang :
 Ajouter @oignons{2} émincés et cuire @temps{5%minutes}.
 """
 
+import html
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -67,7 +68,7 @@ def parse(raw: str) -> CookRecipe:
             if key == "serves":
                 try:
                     recipe.serves = int(val)
-                except: pass
+                except Exception: pass
             elif key == "time":
                 recipe.time = val
             elif key == "source":
@@ -110,7 +111,10 @@ def to_html(recipe: CookRecipe, highlight_ings: list[str] | None = None) -> str:
     ings_hl = {i.lower() for i in (highlight_ings or [])}
 
     for step in recipe.steps:
-        text = step.text
+        # Échapper le HTML d'abord (les noms/quantités viennent du LLM/Notion).
+        # quote=False : on est dans du contenu texte, pas dans un attribut, donc
+        # les apostrophes restent intactes (sinon les regex de noms cassent).
+        text = html.escape(step.text, quote=False)
         # Remplacer @ingrédient{quantité%unité} par du HTML
         ing_full = re.compile(r"@(\w[\w\s\-'àâçéèêëîïôûù]*)\{([^}]*)\}")
         text = ing_full.sub(_ingredient_repl(ings_hl), text)

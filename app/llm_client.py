@@ -1,5 +1,6 @@
 """Client LLM — supporte Ollama (local) et Gemini (cloud)."""
 
+import asyncio
 import httpx
 import json
 import logging
@@ -13,8 +14,8 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT_PLANNING = """Tu es un chef cuisinier. Tu planifies des repas équilibrés.
 
 RÈGLES :
-- Choisis EXACTEMENT 14 recettes de la liste ci-dessous (7 jours × midi + soir).
-- JAMAIS deux fois la même recette dans la semaine (ni midi ni soir).
+- Remplis EXACTEMENT 14 créneaux (7 jours × midi + soir).
+- Ne répète JAMAIS une recette, SAUF quand la "RÉPARTITION DES MIDIS" demande explicitement le même plat pour plusieurs jours groupés (dans ce cas, mets bien le même nom de recette sur ces créneaux).
 - Équilibre viande/poisson/végé sur la semaine.
 - Ne prends PAS de recettes dans la liste "exclues".
 - Tiens compte de la saison et de la température.
@@ -131,7 +132,6 @@ class LLMClient:
             resp = await client.post(self._url, json=payload, headers=headers)
             if resp.status_code == 429:
                 logger.warning("⚠️ Groq rate limit (429). Attente 5s puis retry...")
-                import asyncio
                 await asyncio.sleep(5)
                 resp = await client.post(self._url, json=payload, headers=headers)
             resp.raise_for_status()
@@ -463,19 +463,18 @@ Répond UNIQUEMENT ce JSON :
                 html = resp.text
 
                 # Extraire l'image og:image
-                import re as re2
-                og_match = re2.search(
+                og_match = re.search(
                     r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
-                    html, re2.IGNORECASE
+                    html, re.IGNORECASE
                 )
                 if og_match:
                     og_image = og_match.group(1)
 
                 # Extraire le texte visible (stripper les balises)
-                text = re2.sub(r'<script[^>]*>.*?</script>', '', html, flags=re2.DOTALL | re2.IGNORECASE)
-                text = re2.sub(r'<style[^>]*>.*?</style>', '', text, flags=re2.DOTALL | re2.IGNORECASE)
-                text = re2.sub(r'<[^>]+>', ' ', text)
-                text = re2.sub(r'\s+', ' ', text).strip()
+                text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r'<[^>]+>', ' ', text)
+                text = re.sub(r'\s+', ' ', text).strip()
                 # Garder les 4000 premiers caractères utiles
                 page_text = text[:4000]
 

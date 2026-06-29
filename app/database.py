@@ -96,6 +96,38 @@ class Database:
             await db.commit()
             return planning_id
 
+    async def update_planning(
+        self,
+        planning_id: int,
+        data_json: str,
+        recipes: list[dict[str, Any]],
+    ) -> None:
+        """Met à jour un planning existant (data_json + recettes) sans en créer un nouveau."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "UPDATE planning_history SET data_json = ? WHERE id = ?",
+                (data_json, planning_id),
+            )
+            await db.execute(
+                "DELETE FROM planning_recipes WHERE planning_id = ?",
+                (planning_id,),
+            )
+            for r in recipes:
+                await db.execute(
+                    """INSERT INTO planning_recipes
+                       (planning_id, notion_id, recipe_name, repas_type, jour, moment)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        planning_id,
+                        r.get("notion_id"),
+                        r["recipe_name"],
+                        r.get("repas_type", ""),
+                        r["jour"],
+                        r["moment"],
+                    ),
+                )
+            await db.commit()
+
     async def get_recent_recipe_names(self, weeks: int = 4) -> set[str]:
         """Retourne les noms de recettes utilisées dans les N dernières semaines."""
         async with aiosqlite.connect(self.path) as db:

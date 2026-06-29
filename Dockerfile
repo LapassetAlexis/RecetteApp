@@ -20,10 +20,18 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 COPY app/ /app/app/
 COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Utilisateur non-root + dossier de données lui appartenant
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
 
 # Volume pour les données SQLite
 VOLUME ["/data"]
 
 EXPOSE 8000
+
+USER appuser
 
 ENTRYPOINT ["/app/entrypoint.sh"]
