@@ -8,7 +8,16 @@ from app.llm_client import (
     _ingredients_from_text,
     _scrape_ingredient_list,
     _split_blob,
+    _join_fragments,
 )
+
+
+def test_join_fragments_reassembles_sentences():
+    frags = ["Épluchez l'oignon", "l'ail et les carottes puis coupez-les.", "Cuire 45 min."]
+    assert _join_fragments(frags) == [
+        "Épluchez l'oignon, l'ail et les carottes puis coupez-les.",
+        "Cuire 45 min.",
+    ]
 
 
 def test_split_blob_ingredients_and_instructions():
