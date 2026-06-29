@@ -365,6 +365,44 @@ class NotionClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def replace_instructions(self, page_id: str, instructions_text: str) -> dict[str, Any]:
+        """Remplace les instructions : supprime les anciens blocks d'instructions
+        (titre + étapes numérotées) puis ré-écrit les nouvelles. Évite les doublons."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
+                headers=self._headers, timeout=30,
+            )
+            if resp.status_code < 400:
+                for b in resp.json().get("results", []):
+                    t = b.get("type")
+                    is_heading = t == "heading_3" and "Instructions" in "".join(
+                        x.get("plain_text", "") for x in b.get("heading_3", {}).get("rich_text", [])
+                    )
+                    if t == "numbered_list_item" or is_heading:
+                        await client.delete(f"{BASE_URL}/blocks/{b['id']}", headers=self._headers, timeout=30)
+        return await self.append_instructions(page_id, instructions_text)
+
+    async def update_recipe_meta(
+        self, page_id: str, repas: str = "", tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Met à jour le type (Repas) et les tags d'une recette existante."""
+        properties: dict[str, Any] = {}
+        if repas:
+            properties["Repas"] = {"select": {"name": repas}}
+        if tags is not None:
+            properties["Tag"] = {"multi_select": [{"name": t} for t in tags]}
+        if not properties:
+            return {}
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers, json={"properties": properties}, timeout=30,
+            )
+            resp.raise_for_status()
+            self.invalidate_cache()
+            return resp.json()
+
 
     # ── Mise à jour de la note ──────────────────────────────────
 

@@ -21,7 +21,7 @@ from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
-from app.text_utils import clean_recipe_title, merge_ingredients
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line
 
 VERSION = "1.1.0"
 
@@ -263,6 +263,88 @@ async def detail_recette(request: Request, page_id: str):
     except Exception:
         logger.exception("Erreur détail recette")
         return HTMLResponse("Erreur interne lors du chargement de la recette.", status_code=500)
+
+
+@app.get("/recette/{page_id}/enrichir", response_class=HTMLResponse)
+async def enrichir_page(request: Request, page_id: str):
+    """Étape 1 : re-fetch la source et pré-remplit un formulaire éditable
+    (ingrédients structurés + instructions nettoyées) à valider."""
+    recette = await notion.get_recipe(page_id)
+    if not recette:
+        return HTMLResponse("Recette non trouvée", status_code=404)
+
+    ingredients: list[dict] = []
+    instructions_text = ""
+    image_url = ""
+
+    cached = await db.get_enriched(page_id)
+    if cached and cached.get("ingredients"):
+        try:
+            ingredients = json.loads(cached["ingredients"])
+        except (json.JSONDecodeError, TypeError):
+            ingredients = []
+    try:
+        instructions_text = "\n".join(await notion.get_recipe_instructions(page_id))
+    except Exception:
+        instructions_text = ""
+
+    # Re-fetch la source pour compléter ce qui manque
+    if recette.get("url") and (not ingredients or not instructions_text):
+        try:
+            info = await llm.extract_recipe_from_url(recette["url"])
+            if not ingredients:
+                ingredients = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", [])) if i and i["nom"]]
+            if not instructions_text:
+                instructions_text = info.get("instructions", "")
+            image_url = info.get("image_url", "")
+        except Exception as e:
+            logger.warning(f"Re-extraction enrichir {page_id}: {e}")
+
+    return templates.TemplateResponse(
+        "enrichir.html",
+        {
+            "request": request,
+            "recette": recette,
+            "ingredients": ingredients,
+            "instructions_text": instructions_text,
+            "image_url": image_url,
+            "repas_options": REPAS_OPTIONS,
+            "tag_options": TAG_OPTIONS,
+        },
+    )
+
+
+@app.post("/recette/{page_id}/enrichir")
+async def enrichir_submit(
+    request: Request,
+    page_id: str,
+    repas: str = Form(""),
+    tags: list[str] = Form([]),
+    ingredients_text: str = Form(""),
+    instructions_text: str = Form(""),
+    image_url: str = Form(""),
+):
+    """Étape 2 : applique les changements validés à la recette Notion + cache."""
+    recette = await notion.get_recipe(page_id)
+    if not recette:
+        return RedirectResponse(url="/recettes", status_code=303)
+
+    structured = [
+        i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
+    ]
+    try:
+        if structured:
+            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured))
+            await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+        if instructions_text.strip():
+            await notion.replace_instructions(page_id, instructions_text)
+        if image_url:
+            await notion.update_image(page_id, image_url)
+        await notion.update_recipe_meta(page_id, repas=repas, tags=tags or None)
+    except Exception:
+        logger.exception("Erreur validation enrichissement")
+
+    return RedirectResponse(url=f"/recette/{page_id}", status_code=303)
 
 
 @app.get("/ajouter", response_class=HTMLResponse)

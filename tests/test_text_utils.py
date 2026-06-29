@@ -1,6 +1,15 @@
 """Tests du nettoyage des titres de recettes."""
 
-from app.text_utils import clean_recipe_title, merge_ingredients
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line
+
+
+def test_parse_ingredient_line():
+    assert parse_ingredient_line("200 g de farine") == {"nom": "farine", "quantite": "200", "unite": "g"}
+    assert parse_ingredient_line("3 oignons") == {"nom": "oignons", "quantite": "3", "unite": ""}
+    assert parse_ingredient_line("farine : 200 g") == {"nom": "farine", "quantite": "200", "unite": "g"}
+    assert parse_ingredient_line("sel") == {"nom": "sel", "quantite": "", "unite": ""}
+    assert parse_ingredient_line("  - 2 gousses d'ail") == {"nom": "ail", "quantite": "2", "unite": "gousses"}
+    assert parse_ingredient_line("   ") is None
 
 
 def test_strip_site_suffix_dash():

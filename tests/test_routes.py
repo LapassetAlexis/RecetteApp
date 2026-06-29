@@ -233,6 +233,38 @@ def test_enrich_one(client, monkeypatch):
     assert "error" in client.post("/api/enrich/zzz").json()  # introuvable
 
 
+def test_enrichir_page_and_submit(client, monkeypatch):
+    async def _get(pid):
+        return _recipe("Curry", id="abc", url="http://r")
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": "riz", "quantite": "200", "unite": "g"}])}
+    async def _instr(pid):
+        return ["Cuire le riz."]
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
+    # étape 1 : page pré-remplie
+    page = client.get("/recette/abc/enrichir")
+    assert page.status_code == 200
+    assert "riz" in page.text and "Cuire le riz." in page.text
+    assert "Valider" in page.text
+
+    # étape 2 : validation
+    async def _noop(*a, **k):
+        return {}
+    async def _save(*a, **k):
+        return None
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "replace_instructions", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
+    r = client.post("/recette/abc/enrichir", data={
+        "repas": "Plat", "ingredients_text": "200 g riz\n1 oignon", "instructions_text": "Cuire.",
+    }, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/recette/abc"
+
+
 def test_enrich_all(client, monkeypatch):
     async def _all():
         return [_recipe("Poulet", id="p1", url="http://r")]

@@ -84,7 +84,7 @@
             {% endfor %}
             <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
         </div>
-        <button type="button" class="enrich-btn" data-id="{{ recette.id }}" title="Extraire les ingrédients depuis la source">✨ Enrichir</button>
+        <a class="enrich-btn" href="/recette/{{ recette.id }}/enrichir" title="Compléter / nettoyer depuis la source">✨ Enrichir</a>
     </div>
     {% endfor %}
     <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
@@ -102,20 +102,7 @@ document.querySelectorAll('.recipe-card').forEach(card => {
     });
 });
 
-// ── Enrichissement unitaire ─────────────────────────
-document.querySelectorAll('.enrich-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const old = btn.textContent;
-        btn.disabled = true; btn.textContent = '⏳';
-        try {
-            const r = await fetch(`/api/enrich/${btn.dataset.id}`, {method: 'POST'});
-            const d = await r.json();
-            if (d.success) { toast(`${d.count} ingrédients ajoutés`, 'success'); btn.textContent = '✓ Enrichi'; }
-            else { toast(d.error || 'Erreur', 'error'); btn.disabled = false; btn.textContent = old; }
-        } catch (e) { toast('Erreur réseau', 'error'); btn.disabled = false; btn.textContent = old; }
-    });
-});
+// (le bouton « Enrichir » est un lien vers la page d'enrichissement en 2 temps)
 
 // ── Recherche + filtres combinés (type / état / tag) ─
 const active = {type: '', etat: '', tag: ''};
