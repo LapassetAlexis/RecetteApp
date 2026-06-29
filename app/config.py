@@ -60,3 +60,34 @@ class Settings:
 
 
 settings = Settings()
+
+
+# Valeurs autorisées des champs Notion (source unique, partagée par l'app et le
+# client LLM pour la classification). Doivent correspondre EXACTEMENT aux options
+# de la base Notion.
+REPAS_OPTIONS = [
+    "Plat",
+    "Dessert",
+    "Entrée",
+    "Goûter",
+    "Accompagnement",
+    "Apéro",
+    "Boisson",
+    "Petit dej",
+    "Légume",
+]
+TAG_OPTIONS = [
+    "Viande",
+    "Poisson",
+    "Légumes",
+    "Soupe",
+    "Salade",
+    "Diet",
+    "Fun",
+    "Quiche/tarte",
+    "Tartines",
+    "Invités",
+    "Sur le pouce",
+    "Végétarien proténiné",
+    "1 personne",
+]

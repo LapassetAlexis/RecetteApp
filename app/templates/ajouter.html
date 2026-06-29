@@ -129,7 +129,10 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
 
         document.getElementById('step1').style.display = 'none';
         document.getElementById('step2').style.display = 'block';
-        status.textContent = '✅ Analyse terminée — vérifie et ajoute !';
+        const exact = d.source === 'jsonld';
+        status.textContent = exact
+            ? '✅ Données extraites de la fiche recette (exactes) — vérifie et ajoute !'
+            : '✅ Analyse terminée (approximative, par IA) — vérifie bien et ajuste !';
     } catch(e) {
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '🔍 Analyser';

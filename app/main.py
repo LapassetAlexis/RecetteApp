@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import settings
+from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
@@ -95,34 +95,6 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Version dans tous les templates
 templates.env.globals["version"] = VERSION
-
-REPAS_OPTIONS = [
-    "Plat",
-    "Dessert",
-    "Entrée",
-    "Goûter",
-    "Accompagnement",
-    "Apéro",
-    "Boisson",
-    "Petit dej",
-    "Légume",
-]
-TAG_OPTIONS = [
-    "Viande",
-    "Poisson",
-    "Légumes",
-    "Soupe",
-    "Salade",
-    "Diet",
-    "Fun",
-    "Quiche/tarte",
-    "Tartines",
-    "Invit��s",
-    "Sur le pouce",
-    "Végétarien proténiné",
-    "1 personne",
-]
-
 
 # ── Pages ──────────────────────────────────────────────────────────
 
@@ -525,33 +497,24 @@ async def api_analyze_url(request: Request):
         if not url:
             return {"error": "URL manquante"}
 
-        # Extraire les infos générales
+        # Extraction unifiée : titre, type, tags, ingrédients, instructions,
+        # image — depuis la page elle-même (JSON-LD si dispo, sinon LLM).
+        # Plus de second appel "à l'aveugle" qui hallucinait les ingrédients.
         info = await llm.extract_recipe_from_url(url)
-        nom = info.get("nom", "")
-        repas = info.get("type_repas", "")
-        tags = info.get("tags", [])
 
-        # Extraire les ingrédients
-        ingredients = ""
-        if nom:
-            try:
-                d = await llm.extract_ingredients(nom, url, 4)
-                ings = d.get("ingredients", [])
-                if ings:
-                    ingredients = "\n".join(
-                        f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
-                        for i in ings
-                    )
-            except Exception: pass
+        # Les ingrédients sortent en liste de lignes brutes → texte pour le form
+        ings = info.get("ingredients", [])
+        ingredients = "\n".join(ings) if isinstance(ings, list) else str(ings)
 
         return {
-            "nom": nom,
-            "repas": repas,
-            "tags": tags,
+            "nom": info.get("nom", ""),
+            "repas": info.get("type_repas", ""),
+            "tags": info.get("tags", []),
             "ingredients": ingredients,
             "instructions": info.get("instructions", ""),
             "image_url": info.get("image_url", ""),
             "moment": "Les deux",
+            "source": info.get("source", ""),
         }
 
     except Exception as e:

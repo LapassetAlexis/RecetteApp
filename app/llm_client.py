@@ -1,13 +1,14 @@
 """Client LLM — supporte Ollama (local) et Gemini (cloud)."""
 
 import asyncio
+import html
 import httpx
 import json
 import logging
 import re
 from typing import Any
 
-from app.config import settings
+from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,99 @@ Répond UNIQUEMENT avec ce JSON :
 {"ingredients": [{"nom": "...", "quantite": "...", "unite": "..."}]}
 
 Pas de texte avant ou après le JSON."""
+
+
+def _clean_text(s: str) -> str:
+    """Décode les entités HTML et retire d'éventuelles balises résiduelles."""
+    s = re.sub(r"<[^>]+>", " ", s or "")
+    s = html.unescape(s)
+    return re.sub(r"[ \t]+", " ", s).strip()
+
+
+def _first_image(val: Any) -> str:
+    """image JSON-LD peut être une str, un objet {url}, ou une liste de ceux-ci."""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        return val.get("url", "") or val.get("contentUrl", "")
+    if isinstance(val, list) and val:
+        return _first_image(val[0])
+    return ""
+
+
+def _flatten_instructions(val: Any) -> list[str]:
+    """recipeInstructions : str | [str] | [HowToStep{text}] | [HowToSection{itemListElement}]."""
+    steps: list[str] = []
+    if isinstance(val, str):
+        # parfois un seul bloc avec sauts de ligne
+        for part in re.split(r"\n+|(?<=[.!?])\s{2,}", val):
+            t = _clean_text(part)
+            if t:
+                steps.append(t)
+    elif isinstance(val, list):
+        for item in val:
+            if isinstance(item, str):
+                t = _clean_text(item)
+                if t:
+                    steps.append(t)
+            elif isinstance(item, dict):
+                if item.get("@type") == "HowToSection" and "itemListElement" in item:
+                    steps.extend(_flatten_instructions(item["itemListElement"]))
+                else:
+                    t = _clean_text(item.get("text") or item.get("name") or "")
+                    if t:
+                        steps.append(t)
+    return steps
+
+
+def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
+    """Parse les blocs <script type=ld+json> et renvoie la 1re recette schema.org.
+
+    Source la plus fiable : pas de LLM, données telles que publiées par le site.
+    """
+    blocks = re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html_text, re.DOTALL | re.IGNORECASE,
+    )
+    for block in blocks:
+        raw = block.strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        # Aplatir les structures possibles : objet, liste, ou {"@graph": [...]}
+        candidates: list[Any] = []
+        if isinstance(data, list):
+            candidates = data
+        elif isinstance(data, dict):
+            candidates = data.get("@graph", [data]) if "@graph" in data else [data]
+        for node in candidates:
+            if not isinstance(node, dict):
+                continue
+            t = node.get("@type", "")
+            types = t if isinstance(t, list) else [t]
+            if not any("Recipe" in str(x) for x in types):
+                continue
+            ingredients = [
+                _clean_text(i) for i in (node.get("recipeIngredient") or node.get("ingredients") or [])
+                if _clean_text(i)
+            ]
+            instructions = _flatten_instructions(node.get("recipeInstructions", ""))
+            kw = node.get("keywords", "")
+            keywords = [k.strip() for k in kw.split(",")] if isinstance(kw, str) else [
+                _clean_text(k) for k in (kw or [])
+            ]
+            cat = node.get("recipeCategory", "")
+            if isinstance(cat, str) and cat:
+                keywords.append(cat)
+            return {
+                "nom": _clean_text(node.get("name", "")),
+                "image_url": _first_image(node.get("image", "")),
+                "ingredients": ingredients,
+                "instructions": "\n".join(instructions),
+                "keywords": [k for k in keywords if k],
+            }
+    return None
 
 
 class LLMClient:
@@ -446,12 +540,66 @@ Répond UNIQUEMENT ce JSON :
             logger.warning("Batch ingrédients : JSON invalide, fallback extraction individuelle")
             return []
 
+    # ── Classification type + tags ───────────────────────────────
+    async def _classify_type_tags(
+        self, nom: str, ingredients: list[str], keywords: list[str],
+    ) -> tuple[str, list[str]]:
+        """Choisit type_repas + tags parmi les valeurs Notion autorisées.
+
+        Petit appel LLM (cheap) : ne touche PAS au contenu (nom/ingrédients/
+        instructions restent ceux de la page), juste le classement.
+        """
+        ing_sample = ", ".join(ingredients[:12])
+        prompt = f"""Recette : "{nom}"
+Ingrédients : {ing_sample or "inconnus"}
+Mots-clés du site : {", ".join(keywords) or "aucun"}
+
+Classe cette recette :
+- type_repas : EXACTEMENT une valeur parmi {REPAS_OPTIONS}
+- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+
+Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
+        try:
+            raw = await self._chat(
+                "", prompt, temperature=0.0, max_tokens=150,
+                label="classify", json_mode=True,
+            )
+            data = self._parse_json(raw)
+            type_repas = data.get("type_repas", "")
+            if type_repas not in REPAS_OPTIONS:
+                type_repas = ""
+            tags = [t for t in data.get("tags", []) if t in TAG_OPTIONS]
+            return type_repas, tags
+        except Exception as e:
+            logger.warning(f"Classification échouée ({e}), repli sur mots-clés")
+            # Repli sans LLM : tags par correspondance avec les mots-clés
+            kw_lower = {k.lower() for k in keywords}
+            tags = [t for t in TAG_OPTIONS if t.lower() in kw_lower]
+            return "", tags[:4]
+
+    @staticmethod
+    def _parse_json(raw: str) -> dict[str, Any]:
+        """Parse une réponse JSON LLM (tolère fences ```)."""
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        if raw.endswith("```"):
+            raw = raw.rsplit("```", 1)[0]
+        raw = raw.strip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+        return {}
+
     # ── Extraction depuis URL ────────────────────────────────────
-    async def extract_recipe_from_url(
-        self, url: str
-    ) -> dict[str, Any]:
-        """Récupère le contenu réel de l'URL et extrait les infos via LLM."""
-        page_text = ""
+    async def extract_recipe_from_url(self, url: str) -> dict[str, Any]:
+        """Extrait une recette d'une URL : titre, type, tags, ingrédients,
+        instructions, image. Tente d'abord le JSON-LD schema.org (exact, sans
+        LLM), puis repli sur une extraction LLM si la page n'en contient pas."""
+        html_text = ""
         og_image = ""
 
         try:
@@ -460,55 +608,71 @@ Répond UNIQUEMENT ce JSON :
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 })
                 resp.raise_for_status()
-                html = resp.text
-
-                # Extraire l'image og:image
+                html_text = resp.text
                 og_match = re.search(
                     r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
-                    html, re.IGNORECASE
+                    html_text, re.IGNORECASE,
                 )
                 if og_match:
                     og_image = og_match.group(1)
-
-                # Extraire le texte visible (stripper les balises)
-                text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
-                text = re.sub(r'<[^>]+>', ' ', text)
-                text = re.sub(r'\s+', ' ', text).strip()
-                # 2500 caractères suffisent pour nom + étapes ; au-delà c'est
-                # surtout du boilerplate (commentaires, suggestions) = tokens perdus.
-                page_text = text[:2500]
-
         except Exception as e:
             logger.warning(f"Impossible de récupérer la page {url}: {e}")
 
-        user_prompt = f"""Voici le contenu textuel d'une page web de recette de cuisine.
+        # 1) JSON-LD schema.org : données telles quelles, aucune déformation.
+        ld = _extract_jsonld_recipe(html_text) if html_text else None
+        if ld and ld.get("ingredients"):
+            logger.info("Recette extraite via JSON-LD (exact, sans LLM)")
+            type_repas, tags = await self._classify_type_tags(
+                ld["nom"], ld["ingredients"], ld.get("keywords", []),
+            )
+            return {
+                "nom": ld["nom"],
+                "type_repas": type_repas,
+                "tags": tags,
+                "ingredients": ld["ingredients"],          # list[str], lignes brutes
+                "instructions": ld["instructions"],
+                "image_url": ld.get("image_url") or og_image,
+                "source": "jsonld",
+            }
 
-CONTENU DE LA PAGE :
-{page_text or "Contenu non accessible, utilise tes connaissances."}
+        # 2) Repli LLM : texte visible de la page (plus large car pas de JSON-LD).
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        page_text = re.sub(r'\s+', ' ', text).strip()[:5000]
 
-À partir de ce contenu, extrais EXACTEMENT les informations suivantes :
-- nom : le nom de la recette (copie-le tel quel depuis le texte)
-- type_repas : le type (Plat, Dessert, Entrée, Goûter, Accompagnement, Apéro, Petit dej)
-- tags : une liste de tags parmi : Viande, Poisson, Légumes, Soupe, Salade, Diet, Fun, Quiche/tarte, Tartines, Invités, Sur le pouce, Végétarien proténiné
-- instructions : RECOPIE TEXTUELLEMENT les étapes de cuisson, sans reformuler, sans ajouter d'introduction, séparées par des retours à la ligne
-- image_url : "{og_image}" (utilise cette URL si elle existe, sinon laisse vide)
+        user_prompt = f"""Contenu d'une page de recette :
 
-Répond UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."], "instructions": "...", "image_url": "{og_image}"}}"""
+{page_text or "Contenu inaccessible, utilise tes connaissances sur cette recette."}
 
-        raw = await self._chat("", user_prompt, temperature=0.1, max_tokens=1500, label="url-extract", json_mode=True)
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw.rsplit("```", 1)[0]
-        raw = raw.strip()
+Extrais sans rien inventer ni reformuler :
+- nom : titre exact de la recette
+- type_repas : une valeur parmi {REPAS_OPTIONS}
+- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+- ingredients : liste des ingrédients avec quantités, recopiés tels quels (un par entrée)
+- instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
 
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            return {"nom": "", "type_repas": "", "tags": []}
+Réponds UNIQUEMENT ce JSON :
+{{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+
+        raw = await self._chat(
+            "", user_prompt, temperature=0.1, max_tokens=2000,
+            label="url-extract", json_mode=True,
+        )
+        data = self._parse_json(raw)
+        # Normaliser / valider
+        type_repas = data.get("type_repas", "")
+        if type_repas not in REPAS_OPTIONS:
+            type_repas = ""
+        ingredients = data.get("ingredients", [])
+        if isinstance(ingredients, str):
+            ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
+        return {
+            "nom": data.get("nom", ""),
+            "type_repas": type_repas,
+            "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
+            "ingredients": [str(i) for i in ingredients],
+            "instructions": data.get("instructions", ""),
+            "image_url": og_image,
+            "source": "llm",
+        }
