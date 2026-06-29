@@ -2,6 +2,7 @@
 {% block title %}{{ recette.nom | clean_title }}{% endblock %}
 {% block content %}
 <div class="detail">
+    {% if recette.image %}<img class="detail-img" src="{{ recette.image }}" alt="{{ recette.nom | clean_title }}">{% endif %}
     <div class="hero" style="padding-bottom:10px;">
         <h1 style="font-size:1.5rem;">{{ recette.nom | clean_title }}</h1>
         <div class="detail-chips">

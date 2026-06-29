@@ -148,6 +148,12 @@ class NotionClient:
         if sel:
             moment = sel.get("name", "")
 
+        # Image = couverture de la page (external ou fichier uploadé)
+        image = ""
+        cover = page.get("cover")
+        if cover:
+            image = cover.get("external", {}).get("url", "") or cover.get("file", {}).get("url", "")
+
         return {
             "id": page["id"],
             "nom": nom,
@@ -158,6 +164,7 @@ class NotionClient:
             "note": note,
             "etat": etat,
             "moment": moment,
+            "image": image,
         }
 
     # ── Création d'une fiche ──────────────────────────────────────

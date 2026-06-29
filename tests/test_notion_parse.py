@@ -58,6 +58,16 @@ def test_parse_missing_columns_does_not_crash():
     assert r["note"] == "" and r["etat"] == "" and r["moment"] == ""
 
 
+def test_parse_cover_image():
+    page = _page({"Nom": {"type": "title", "title": [{"plain_text": "X"}]}})
+    page["cover"] = {"type": "external", "external": {"url": "http://img.jpg"}}
+    assert notion._parse_page(page)["image"] == "http://img.jpg"
+    page["cover"] = {"type": "file", "file": {"url": "http://up.jpg"}}
+    assert notion._parse_page(page)["image"] == "http://up.jpg"
+    del page["cover"]
+    assert notion._parse_page(page)["image"] == ""
+
+
 def test_parse_empty_selects():
     page = _page({
         "Nom": {"type": "title", "title": []},
