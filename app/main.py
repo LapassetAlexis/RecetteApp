@@ -21,7 +21,7 @@ from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
-from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
 
 VERSION = "1.1.0"
 
@@ -306,7 +306,7 @@ async def enrichir_page(request: Request, page_id: str):
             "request": request,
             "recette": recette,
             "ingredients": ingredients,
-            "instructions_text": instructions_text,
+            "steps": split_instructions(instructions_text),
             "image_url": image_url,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
@@ -321,7 +321,7 @@ async def enrichir_submit(
     repas: str = Form(""),
     tags: list[str] = Form([]),
     ingredients_text: str = Form(""),
-    instructions_text: str = Form(""),
+    steps: list[str] = Form([]),
     image_url: str = Form(""),
 ):
     """Étape 2 : applique les changements validés à la recette Notion + cache."""
@@ -332,11 +332,12 @@ async def enrichir_submit(
     structured = [
         i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
     ]
+    instructions_text = "\n".join(s.strip() for s in steps if s.strip())
     try:
         if structured:
             await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured))
             await notion.update_ingredients(page_id, _ingredients_to_text(structured))
-        if instructions_text.strip():
+        if instructions_text:
             await notion.replace_instructions(page_id, instructions_text)
         if image_url:
             await notion.update_image(page_id, image_url)

@@ -36,8 +36,17 @@
         </div>
 
         <div class="form-g">
-            <label for="instructions_text">👨‍🍳 Instructions</label>
-            <textarea id="instructions_text" name="instructions_text" rows="8" class="inp">{{ instructions_text }}</textarea>
+            <label>👨‍🍳 Instructions <small class="muted-sm">(une étape par bloc)</small></label>
+            <div id="steps">
+                {% for step in steps %}
+                <div class="step-row">
+                    <span class="step-num"></span>
+                    <textarea name="steps" rows="2" class="inp">{{ step }}</textarea>
+                    <button type="button" class="step-del" title="Supprimer l'étape">✕</button>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" id="add-step" class="btn btn-ghost btn-sm" style="margin-top:6px;">+ Ajouter une étape</button>
         </div>
 
         <div class="form-g">
@@ -50,4 +59,27 @@
         <a href="/recette/{{ recette.id }}" class="btn btn-ghost btn-lg" style="margin-top:6px;">Annuler</a>
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function renumberSteps() {
+    document.querySelectorAll('#steps .step-num').forEach((el, i) => { el.textContent = (i + 1) + '.'; });
+}
+function bindDel(btn) {
+    btn.addEventListener('click', () => { btn.closest('.step-row').remove(); renumberSteps(); });
+}
+document.querySelectorAll('.step-del').forEach(bindDel);
+document.getElementById('add-step')?.addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'step-row';
+    row.innerHTML = '<span class="step-num"></span><textarea name="steps" rows="2" class="inp"></textarea>'
+        + '<button type="button" class="step-del" title="Supprimer l\'étape">✕</button>';
+    document.getElementById('steps').appendChild(row);
+    bindDel(row.querySelector('.step-del'));
+    renumberSteps();
+    row.querySelector('textarea').focus();
+});
+renumberSteps();
+</script>
 {% endblock %}

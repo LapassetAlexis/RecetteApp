@@ -279,6 +279,13 @@ a.meal-name:hover { text-decoration:underline; }
 .enrich-btn:disabled { opacity:0.6; cursor:default; }
 .recipe-card { display:flex; flex-direction:column; }
 
+/* ── Éditeur d'étapes (enrichir) ─────────────── */
+.step-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }
+.step-num { flex:0 0 22px; padding-top:9px; font-weight:700; color:var(--prd); font-size:0.85rem; }
+.step-row textarea { flex:1; }
+.step-del { flex:0 0 auto; background:none; border:1px solid var(--bo); color:var(--t2); border-radius:6px; cursor:pointer; padding:6px 10px; }
+.step-del:hover { background:#fde8e8; color:#c0392b; border-color:#f5c6c6; }
+
 /* ── Impression (liste de courses) ───────────── */
 @media print {
     .nav, .footer, .bulk, .modal, .week-wrapper, .act, .toast-zone,

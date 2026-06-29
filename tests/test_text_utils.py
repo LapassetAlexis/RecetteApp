@@ -1,6 +1,22 @@
 """Tests du nettoyage des titres de recettes."""
 
-from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
+
+
+def test_split_instructions_multiline():
+    assert split_instructions("Étape 1\nÉtape 2\nÉtape 3") == ["Étape 1", "Étape 2", "Étape 3"]
+
+
+def test_split_instructions_single_block_into_sentences():
+    txt = "Lavez les épinards. Dans une poêle chauffez l'huile. Enfournez 25 minutes."
+    steps = split_instructions(txt)
+    assert len(steps) == 3
+    assert steps[0] == "Lavez les épinards."
+    assert steps[2] == "Enfournez 25 minutes."
+
+
+def test_split_instructions_empty():
+    assert split_instructions("") == []
 
 
 def test_parse_ingredient_line():

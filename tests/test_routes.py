@@ -260,7 +260,8 @@ def test_enrichir_page_and_submit(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_image", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
     r = client.post("/recette/abc/enrichir", data={
-        "repas": "Plat", "ingredients_text": "200 g riz\n1 oignon", "instructions_text": "Cuire.",
+        "repas": "Plat", "ingredients_text": "200 g riz\n1 oignon",
+        "steps": ["Cuire le riz.", "Ajouter l'oignon."],
     }, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/recette/abc"
 

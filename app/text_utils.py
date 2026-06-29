@@ -80,6 +80,22 @@ def parse_ingredient_line(line: str) -> dict | None:
     return {"nom": rest, "quantite": qty, "unite": ""}
 
 
+def split_instructions(text: str) -> list[str]:
+    """Découpe des instructions en étapes.
+
+    - plusieurs lignes -> une étape par ligne ;
+    - un seul bloc -> découpage par phrases (. ! ?) suivies d'une majuscule/chiffre.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    if len(lines) > 1:
+        return lines
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÀ-ÝÉÈ0-9])", text)
+    return [s.strip() for s in sentences if s.strip()]
+
+
 def _parse_qty(value) -> float | None:
     """Convertit une quantité en nombre. Gère décimales (1,5) et fractions (1/2).
 
