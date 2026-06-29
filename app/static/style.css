@@ -196,6 +196,7 @@ a.meal-name:hover { text-decoration:underline; }
 .hist-item:hover { border-color:var(--pr); }
 .hist-item .date { font-weight:600; font-size:0.9rem; }
 .hist-item .meta { font-size:0.8rem; color:var(--t2); margin:4px 0; }
+.hist-dup { margin-top:8px; width:100%; }
 
 /* ── Responsive ──────────────────────────────── */
 @media (max-width:768px) {

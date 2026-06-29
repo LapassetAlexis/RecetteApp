@@ -8,13 +8,27 @@
 {% if plannings %}
 <div class="hist-grid">
     {% for p in plannings %}
-    <a href="/planning/{{ p.id }}" class="hist-item" style="text-decoration:none;color:inherit;display:block;">
-        <div class="date">📅 Semaine du {{ p.week_start }}</div>
-        <div class="meta">{{ p.saison }} · {{ p.nb_personnes }} pers.</div>
-        <div class="meta">Créé le {{ p.created_at[:10] }}</div>
-    </a>
+    <div class="hist-item">
+        <a href="/planning/{{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
+            <div class="date">📅 Semaine du {{ p.week_start }}</div>
+            <div class="meta">{{ p.saison }} · {{ p.nb_personnes }} pers.</div>
+            <div class="meta">Créé le {{ p.created_at[:10] }}</div>
+        </a>
+        <button class="btn btn-ghost btn-sm hist-dup" data-id="{{ p.id }}" title="Refaire cette semaine en brouillon">🔁 Refaire</button>
+    </div>
     {% endfor %}
 </div>
+<script>
+document.querySelectorAll('.hist-dup').forEach(b => b.onclick = async function() {
+    this.disabled = true; this.textContent = '⏳';
+    try {
+        const r = await fetch(`/planning/${this.dataset.id}/dupliquer`, {method:'POST'});
+        const d = await r.json();
+        if (d.success) { if (window.navStart) window.navStart(); window.location.href = `/planning/${d.planning_id}`; }
+        else { this.disabled = false; this.textContent = '🔁 Refaire'; }
+    } catch(e) { this.disabled = false; this.textContent = '🔁 Refaire'; }
+});
+</script>
 {% else %}
 <div class="card text-center">
     <p>Aucun planning généré pour le moment.</p>

@@ -238,6 +238,34 @@ async def voir_planning(request: Request, planning_id: int):
     )
 
 
+@app.post("/planning/{planning_id}/dupliquer")
+async def dupliquer_planning(planning_id: int):
+    """Recopie un planning existant en nouveau brouillon (sans liste de courses),
+    daté de la semaine en cours. Permet de « refaire » une semaine appréciée."""
+    src = await db.get_planning_with_recipes(planning_id)
+    if not src:
+        return {"error": "Planning introuvable"}
+    data = json.loads(src["data_json"])
+    plats = data.get("plats", [])
+    today = date.today()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+
+    await db.delete_draft_plannings()
+    new_data = {"plats": plats, "liste_courses": [], "per_day": data.get("per_day", "")}
+    new_id = await db.save_planning(
+        week_start=week_start,
+        saison=src.get("saison", ""),
+        nb_personnes=src.get("nb_personnes", 4),
+        ingredients_force=src.get("ingredients_force", ""),
+        data_json=json.dumps(new_data, ensure_ascii=False),
+        recipes=[{
+            "notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"],
+            "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"],
+        } for p in plats],
+    )
+    return {"success": True, "planning_id": new_id}
+
+
 @app.post("/planning/{planning_id}/valider")
 async def valider_planning(planning_id: int):
     """Valide un brouillon de planning : il rejoint l'historique."""
