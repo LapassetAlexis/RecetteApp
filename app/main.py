@@ -25,6 +25,12 @@ from app.notion_client import NotionClient
 
 VERSION = "1.1.0"
 
+# Nombre max de recettes envoyées au LLM pour la génération du planning.
+# Plus haut = plus de variété ; reste léger en tokens grâce au format compact.
+# Surtout utile en cloud (Gemini/Groq) ; en Ollama local un petit modèle peut
+# ralentir avec une très longue liste.
+MAX_RECIPES_FOR_LLM = 100
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -354,9 +360,12 @@ async def generer(
 
         # Filtrer les exclues
         recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
-        # Limiter à 30 max pour éviter le 413 Payload Too Large (Groq 8K ctx)
-        if len(recettes_filtered) > 30:
-            recettes_sample = random.sample(recettes_filtered, 30)
+        # On envoie le plus de recettes possible pour maximiser la variété du
+        # menu. Grâce au format compact (~15 tokens/recette), MAX_RECIPES_FOR_LLM
+        # tient largement dans le contexte de Gemini/Groq. On n'échantillonne
+        # au hasard que si la base dépasse ce plafond.
+        if len(recettes_filtered) > MAX_RECIPES_FOR_LLM:
+            recettes_sample = random.sample(recettes_filtered, MAX_RECIPES_FOR_LLM)
         else:
             recettes_sample = recettes_filtered
         logger.info(f"Envoi de {len(recettes_sample)} recettes au LLM (sur {len(recettes_filtered)} dispo)")

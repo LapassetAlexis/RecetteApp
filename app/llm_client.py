@@ -11,12 +11,15 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_PLANNING = """Tu es un chef. Tu planifies des repas équilibrés.
+SYSTEM_PROMPT_PLANNING = """Tu es un chef. Tu planifies des repas variés et équilibrés.
 
 RÈGLES :
 - Remplis EXACTEMENT 14 créneaux (Jour 1 à 7, midi + soir).
 - Ne répète jamais une recette, SAUF si la "RÉPARTITION DES MIDIS" demande le même plat sur des jours groupés (recopie alors le même nom).
-- Équilibre viande/poisson/végé. Ignore les recettes "exclues". Tiens compte de la saison/température.
+- VARIÉTÉ MAXIMALE : pioche dans TOUTE la liste fournie, pas seulement les premières. Alterne les protéines (viande / poisson / végé / œufs) et les styles (mijoté, four, poêle, cru, soupe...). Évite deux plats du même type ou de la même base deux jours de suite.
+- Utilise des recettes différentes de celles des semaines précédentes (liste "exclues").
+- Tiens compte de la saison et de la température.
+- N'invente AUCUN plat : choisis uniquement des noms présents dans la liste.
 
 Réponds UNIQUEMENT par 14 lignes au format exact, rien d'autre :
 N - Jour X - midi|soir - Nom exact de la recette"""
@@ -230,11 +233,13 @@ RÉPARTITION DES MIDIS :
 {midi_desc}
 - Soirs : tous différents, légers/rapides (un soir = restes).
 
-Donne les 14 lignes."""
+Choisis des recettes VARIÉES réparties sur toute la liste ci-dessus. Donne les 14 lignes."""
 
+        # Température un peu plus haute (0.5) pour diversifier les choix d'une
+        # génération à l'autre, sans casser le format (parser tolérant).
         raw = await self._chat(
             SYSTEM_PROMPT_PLANNING, user_prompt,
-            temperature=0.3, max_tokens=600, label="planning",
+            temperature=0.5, max_tokens=600, label="planning",
         )
         return self._parse_planning(raw)
 
