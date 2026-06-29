@@ -99,7 +99,7 @@ document.querySelectorAll('.recipe-card').forEach(card => {
     card.addEventListener('click', (e) => {
         if (e.target.closest('.recipe-stars') || e.target.closest('.enrich-btn')) return;
         const href = card.dataset.href;
-        if (href) window.location.href = href;
+        if (href) { if (window.navStart) window.navStart(); window.location.href = href; }
     });
 });
 
@@ -145,6 +145,7 @@ document.querySelectorAll('.recipe-stars').forEach(container => {
         star.addEventListener('mouseenter', () => paint(idx + 1));
         star.addEventListener('click', async () => {
             const val = '⭐'.repeat(idx + 1);
+            container.classList.add('saving');
             try {
                 const r = await fetch(`/api/rate/${pageId}`, {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -157,11 +158,13 @@ document.querySelectorAll('.recipe-stars').forEach(container => {
                     toast('Noté ' + val, 'success');
                 } else { toast(d.error || 'Erreur', 'error'); }
             } catch(e) { toast('Erreur réseau', 'error'); }
+            finally { container.classList.remove('saving'); }
         });
     });
     container.addEventListener('mouseleave', () => paint(current));
 
     clearBtn.addEventListener('click', async () => {
+        container.classList.add('saving');
         try {
             const r = await fetch(`/api/rate/${pageId}`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -173,6 +176,7 @@ document.querySelectorAll('.recipe-stars').forEach(container => {
                 toast('Note retirée', 'info');
             } else { toast(d.error || 'Erreur', 'error'); }
         } catch(e) { toast('Erreur réseau', 'error'); }
+        finally { container.classList.remove('saving'); }
     });
 });
 

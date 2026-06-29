@@ -35,9 +35,34 @@
         <p>Menu Planner v{{ version }} — hébergé sur le homelab Tristabeau ⚡</p>
     </footer>
 
+    <!-- Barre de progression de navigation (retour visuel à chaque action) -->
+    <div id="nav-progress"></div>
     <!-- Conteneur de notifications (toasts) -->
     <div id="toast-zone" class="toast-zone" aria-live="polite"></div>
     <script>
+    // Barre de progression : affichée dès qu'on quitte la page (clic lien,
+    // soumission de formulaire, navigation JS). Donne un retour visuel pendant
+    // les chargements serveur (fiche recette, enrichissement, etc.).
+    window.navStart = function() {
+        const b = document.getElementById('nav-progress');
+        if (b) b.classList.add('active');
+    };
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest('a');
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!href || href.startsWith('#') || a.target === '_blank' || a.hasAttribute('download')) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        try { if (new URL(a.href, location.href).origin !== location.origin) return; } catch (_) { return; }
+        window.navStart();
+    });
+    document.addEventListener('submit', () => window.navStart(), true);
+    window.addEventListener('pageshow', (e) => {
+        // au retour arrière (bfcache), la page réapparaît : on coupe la barre
+        const b = document.getElementById('nav-progress');
+        if (b) b.classList.remove('active');
+    });
+
     // Toast global : remplace les alert() natifs.
     window.toast = function(msg, type) {
         const zone = document.getElementById('toast-zone');

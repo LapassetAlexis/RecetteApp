@@ -229,6 +229,13 @@ a.meal-name:hover { text-decoration:underline; }
 .preview-box { display:none; margin-top:8px; }
 .preview-area { font-family:monospace; font-size:0.78rem; background:var(--bg); }
 
+/* ── Barre de progression de navigation ──────── */
+#nav-progress { position:fixed; top:0; left:0; height:3px; width:0; background:linear-gradient(90deg,var(--pr),var(--prd)); z-index:5000; opacity:0; }
+#nav-progress.active { opacity:1; width:92%; transition:width 8s cubic-bezier(0.05,0.7,0.1,1); }
+
+/* étoiles en cours d'enregistrement */
+.recipe-stars.saving { opacity:0.5; pointer-events:none; }
+
 /* ── Toasts ──────────────────────────────────── */
 .toast-zone { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:3000; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none; width:max-content; max-width:90vw; }
 .toast { background:var(--text); color:#fff; padding:10px 18px; border-radius:10px; font-size:0.88rem; font-weight:500; box-shadow:0 4px 16px rgba(0,0,0,0.2); opacity:0; transform:translateY(10px); transition:opacity 0.25s, transform 0.25s; }
