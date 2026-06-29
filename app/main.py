@@ -6,6 +6,7 @@ import json
 import logging
 import random
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -94,6 +95,9 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Version dans tous les templates
 templates.env.globals["version"] = VERSION
+# Identifiant d'asset (change à chaque démarrage) → casse le cache CSS/SW au
+# redéploiement sans dépendre du SW pour rafraîchir.
+templates.env.globals["asset_version"] = str(int(time.time()))
 # Filtre de nettoyage des titres de recettes (retire les suffixes de site)
 templates.env.filters["clean_title"] = clean_recipe_title
 
