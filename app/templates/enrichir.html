@@ -9,6 +9,7 @@
 
     <form method="POST" action="/recette/{{ recette.id }}/enrichir" class="card" id="enrich-form">
         <input type="hidden" name="nutrition_json" value="{{ nutrition_json }}">
+        <input type="hidden" name="duree_minutes" value="{{ duree_minutes or 0 }}">
         <div class="form-r">
             <div class="form-g">
                 <label for="repas">🍽️ Type</label>

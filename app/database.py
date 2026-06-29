@@ -304,3 +304,12 @@ class Database:
             except (json.JSONDecodeError, TypeError, AttributeError):
                 continue
         return out
+
+    async def get_all_enriched_durations(self) -> dict[str, int]:
+        """{notion_id: durée en minutes} pour les recettes ayant un temps connu."""
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT notion_id, cuisson_minutes FROM enriched_recipes "
+                "WHERE cuisson_minutes IS NOT NULL AND cuisson_minutes > 0"
+            )
+        return {nid: int(m) for nid, m in rows}

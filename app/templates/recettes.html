@@ -24,6 +24,7 @@
             {% for type, count in par_type %}
             <span class="stat-chip" data-filter="type" data-value="{{ type }}">{{ type }} ({{ count }})</span>
             {% endfor %}
+            <span class="stat-chip chip-rapide" id="chip-rapide" title="Recettes de 30 min ou moins">⏱ ≤ 30 min</span>
         </div>
     </div>
     {% if par_etat %}
@@ -57,10 +58,13 @@
 } %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-type="{{ recette.repas or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-type="{{ recette.repas or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
         {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
         <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
+            {% if recette.duree %}
+            <span class="chip chip-duree">⏱ {{ recette.duree }} min</span>
+            {% endif %}
             {% if recette.repas %}
             <span class="chip chip-repas">{{ recette.repas }}</span>
             {% endif %}
@@ -105,7 +109,7 @@ document.querySelectorAll('.recipe-card').forEach(card => {
 // (le bouton « Enrichir » est un lien vers la page d'enrichissement en 2 temps)
 
 // ── Recherche + filtres combinés (type / état / tag) ─
-const active = {type: '', etat: '', tag: ''};
+const active = {type: '', etat: '', tag: '', rapide: false};
 function applyFilters() {
     const q = document.getElementById('recipe-search').value.trim().toLowerCase();
     let visible = 0;
@@ -117,12 +121,19 @@ function applyFilters() {
         const okType = !active.type || card.dataset.type === active.type;
         const okEtat = !active.etat || card.dataset.etat === active.etat;
         const okTag = !active.tag || (card.dataset.tags || '').split('|').includes(active.tag.toLowerCase());
-        const show = okName && okType && okEtat && okTag;
+        const duree = parseInt(card.dataset.duree || '0', 10);
+        const okRapide = !active.rapide || (duree > 0 && duree <= 30);
+        const show = okName && okType && okEtat && okTag && okRapide;
         card.classList.toggle('hidden', !show);
         if (show) visible++;
     });
     document.getElementById('no-result').style.display = visible ? 'none' : 'block';
 }
+document.getElementById('chip-rapide').addEventListener('click', function() {
+    active.rapide = !active.rapide;
+    this.classList.toggle('active', active.rapide);
+    applyFilters();
+});
 document.getElementById('recipe-search').addEventListener('input', applyFilters);
 document.querySelectorAll('.stat-chip').forEach(chip => {
     chip.addEventListener('click', function() {
