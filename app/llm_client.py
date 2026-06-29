@@ -603,11 +603,9 @@ class LLMClient:
 
     @classmethod
     def _needs_side(cls, r: dict[str, Any]) -> bool:
-        """Un plat typé « Plat » est complet → seul. Un main NON-Plat (entrée /
-        sans type / protéine nature) reçoit un accompagnement."""
-        if cls._is_side(r):
-            return False
-        return r.get("repas") != "Plat"
+        """On propose un accompagnement par défaut à tout plat principal
+        (l'utilisateur peut le vider/changer). Un accompagnement n'en reçoit pas."""
+        return not cls._is_side(r)
 
     async def generate_planning(
         self,

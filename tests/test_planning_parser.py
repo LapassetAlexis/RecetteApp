@@ -9,32 +9,30 @@ client = LLMClient()
 
 
 def test_needs_side_and_is_side():
-    # Un « Plat » est complet -> jamais d'accompagnement.
-    assert not client._needs_side({"repas": "Plat", "tags": ["Viande"]})
-    assert not client._needs_side({"repas": "Plat", "tags": []})
-    # Un main NON-Plat (entrée / sans type) reçoit un accompagnement.
-    assert client._needs_side({"repas": "", "tags": ["Viande"]})
+    # Accompagnement proposé par défaut à tout plat principal.
+    assert client._needs_side({"repas": "Plat", "tags": ["Viande"]})
+    assert client._needs_side({"repas": "", "tags": []})
     assert client._needs_side({"repas": "Entrée", "tags": []})
-    # Un accompagnement n'a pas lui-même besoin d'un accompagnement.
+    # Un accompagnement n'en reçoit pas lui-même.
     assert not client._needs_side({"repas": "Légume", "tags": []})
     assert client._is_side({"repas": "Légume", "tags": []})
     assert client._is_side({"repas": "Accompagnement", "tags": []})
     assert not client._is_side({"repas": "Plat", "tags": ["Viande"]})
 
 
-def test_attach_sides_only_non_plat():
+def test_attach_sides_default_for_all_mains():
     meta = {
-        "salade de chèvre": {"nom": "Salade de chèvre", "repas": "", "tags": ["Poisson"]},
         "lasagnes": {"nom": "Lasagnes", "repas": "Plat", "tags": ["Viande"]},
+        "riz pilaf": {"nom": "Riz pilaf", "repas": "Accompagnement", "tags": []},
     }
     sides = [{"nom": "Haricots verts", "repas": "Légume", "tags": []}]
     plats = [
-        client._make_plat(1, "midi", "Salade de chèvre"),
-        client._make_plat(1, "soir", "Lasagnes"),
+        client._make_plat(1, "midi", "Lasagnes"),
+        client._make_plat(1, "soir", "Riz pilaf"),
     ]
     client._attach_sides(plats, meta, sides)
-    assert plats[0]["accompagnement"]["nom_recette"] == "Haricots verts"
-    assert plats[1]["accompagnement"] is None  # Plat complet
+    assert plats[0]["accompagnement"]["nom_recette"] == "Haricots verts"  # plat -> côté
+    assert plats[1]["accompagnement"] is None  # un accompagnement n'en reçoit pas
 
 
 def test_liste_numerotee():
