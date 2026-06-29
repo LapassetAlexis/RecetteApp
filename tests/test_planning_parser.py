@@ -9,30 +9,32 @@ client = LLMClient()
 
 
 def test_needs_side_and_is_side():
-    assert client._needs_side({"repas": "Plat", "tags": ["Viande"]})
-    assert client._needs_side({"repas": "Plat", "tags": ["Poisson"]})
-    # plat complet (légume / quiche / soupe) -> pas d'accompagnement
-    assert not client._needs_side({"repas": "Plat", "tags": ["Viande", "Légumes"]})
-    assert not client._needs_side({"repas": "Plat", "tags": ["Quiche/tarte"]})
-    assert not client._needs_side({"repas": "Dessert", "tags": ["Viande"]})
+    # Un « Plat » est complet -> jamais d'accompagnement.
+    assert not client._needs_side({"repas": "Plat", "tags": ["Viande"]})
+    assert not client._needs_side({"repas": "Plat", "tags": []})
+    # Un main NON-Plat (entrée / sans type) reçoit un accompagnement.
+    assert client._needs_side({"repas": "", "tags": ["Viande"]})
+    assert client._needs_side({"repas": "Entrée", "tags": []})
+    # Un accompagnement n'a pas lui-même besoin d'un accompagnement.
+    assert not client._needs_side({"repas": "Légume", "tags": []})
     assert client._is_side({"repas": "Légume", "tags": []})
     assert client._is_side({"repas": "Accompagnement", "tags": []})
     assert not client._is_side({"repas": "Plat", "tags": ["Viande"]})
 
 
-def test_attach_sides_pairs_only_protein_dishes():
+def test_attach_sides_only_non_plat():
     meta = {
-        "poulet rôti": {"nom": "Poulet rôti", "repas": "Plat", "tags": ["Viande"]},
-        "lasagnes": {"nom": "Lasagnes", "repas": "Plat", "tags": ["Viande", "Légumes"]},
+        "salade de chèvre": {"nom": "Salade de chèvre", "repas": "", "tags": ["Poisson"]},
+        "lasagnes": {"nom": "Lasagnes", "repas": "Plat", "tags": ["Viande"]},
     }
     sides = [{"nom": "Haricots verts", "repas": "Légume", "tags": []}]
     plats = [
-        client._make_plat(1, "midi", "Poulet rôti"),
+        client._make_plat(1, "midi", "Salade de chèvre"),
         client._make_plat(1, "soir", "Lasagnes"),
     ]
     client._attach_sides(plats, meta, sides)
     assert plats[0]["accompagnement"]["nom_recette"] == "Haricots verts"
-    assert plats[1]["accompagnement"] is None
+    assert plats[1]["accompagnement"] is None  # Plat complet
 
 
 def test_liste_numerotee():

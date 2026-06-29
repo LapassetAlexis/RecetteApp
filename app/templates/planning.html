@@ -43,14 +43,19 @@
                 {% else %}
                 <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
                 {% endif %}
+                <div class="meal-side" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
                 {% if plat.accompagnement %}
-                {% set acc = plat.accompagnement %}
-                {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
-                <div class="meal-side">+
+                    {% set acc = plat.accompagnement %}
+                    {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
+                    <span class="side-txt">+
                     {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
-                    {% else %}{{ acc.nom_recette | clean_title }}{% endif %}
-                </div>
+                    {% else %}{{ acc.nom_recette | clean_title }}{% endif %}</span>
+                    <button class="side-ch" title="Changer l'accompagnement">↻</button>
+                    <button class="side-rm" title="Retirer l'accompagnement">✕</button>
+                {% else %}
+                    <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
                 {% endif %}
+                </div>
                 {% if plat.repas or plat.tags %}
                 <div class="meal-chips">
                     {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
@@ -177,6 +182,7 @@ function u() {
 document.getElementById('bulk-clr').onclick = ()=>{ document.querySelectorAll('.ck:checked').forEach(c=>c.checked=false); u(); };
 document.getElementById('bulk-go').onclick = ()=>{
     if (!bul.length) return;
+    sideMode=false; document.querySelector('#modal h3').textContent='↻ Changer';
     document.getElementById('modal-ctx').textContent = bul.map(b=>js[b.j-1]+' '+b.m).join(', ');
     document.getElementById('modal').style.display='flex';
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
@@ -184,19 +190,60 @@ document.getElementById('bulk-go').onclick = ()=>{
 };
 document.querySelectorAll('.meal-ch').forEach(b=>b.onclick=function(){
     bul=[{j:+this.dataset.jour,m:this.dataset.moment}];
+    sideMode=false; document.querySelector('#modal h3').textContent='↻ Changer';
     document.getElementById('modal-ctx').textContent=js[bul[0].j-1]+' '+bul[0].m;
     document.getElementById('modal').style.display='flex';
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 });
 
+// ── Accompagnements : changer / retirer / ajouter ──────
+let sideMode=false, sideSlot=null;  // sideSlot={j,m}
+function openSidePicker(j,m){
+    sideMode=true; sideSlot={j,m};
+    document.getElementById('modal-ctx').textContent=js[j-1]+' '+m+' — accompagnement';
+    document.querySelector('#modal h3').textContent='🥦 Accompagnement';
+    document.getElementById('modal').style.display='flex';
+    document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
+    la();
+}
+function bindSideBtns(){
+    document.querySelectorAll('.side-add,.side-ch').forEach(b=>b.onclick=function(){
+        const s=this.closest('.meal-side'); openSidePicker(+s.dataset.jour,s.dataset.moment);
+    });
+    document.querySelectorAll('.side-rm').forEach(b=>b.onclick=function(){
+        const s=this.closest('.meal-side'); setSide(+s.dataset.jour,s.dataset.moment,'');
+    });
+}
+async function setSide(j,m,nom){
+    const r=await fetch(`/api/update-side/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:j,moment:m,nouvelle_recette:nom})});
+    const d=await r.json();
+    if(!d.success){ toast(d.error||'Erreur accompagnement','error'); return; }
+    renderSide(j,m,d.accompagnement);
+    toast(nom?'Accompagnement mis à jour ✓':'Accompagnement retiré ✓','success');
+}
+function renderSide(j,m,acc){
+    const box=document.querySelector(`.meal-side[data-jour="${j}"][data-moment="${m}"]`);
+    if(!box) return;
+    if(acc && acc.nom_recette){
+        const link=acc.notion_id?('/recette/'+acc.notion_id):(acc.url||'');
+        const nameHtml=link?`<a href="${link}"${acc.notion_id?'':' target="_blank" rel="noopener"'}>${acc.nom_recette}</a>`:acc.nom_recette;
+        box.innerHTML=`<span class="side-txt">+ ${nameHtml}</span><button class="side-ch" title="Changer l'accompagnement">↻</button><button class="side-rm" title="Retirer l'accompagnement">✕</button>`;
+    } else {
+        box.innerHTML=`<button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>`;
+    }
+    bindSideBtns();
+}
+bindSideBtns();
+
 async function la() {
     const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
-    const alts=d.alternatives||[];
+    let alts=d.alternatives||[];
+    if(sideMode) alts=alts.filter(a=>a.repas==='Légume'||a.repas==='Accompagnement');
     const el=document.getElementById('alt-list');
     if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
     el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${a.repas?`<span class="chip chip-r">${a.repas}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');
-    document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>rpl(b.dataset.n));
+    document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>{ if(sideMode){ setSide(sideSlot.j,sideSlot.m,b.dataset.n); c(); } else { rpl(b.dataset.n); } });
     document.getElementById('flt').oninput=function(){const q=this.value.toLowerCase();document.querySelectorAll('.alt').forEach(e=>e.style.display=e.dataset.n.includes(q)?'flex':'none');};
 }
 async function rpl(n) {
@@ -243,7 +290,7 @@ async function genShop(regen) {
         if(btn){ btn.disabled=false; btn.textContent='🛒 Réessayer'; }
     }
 }
-function c(){document.getElementById('modal').style.display='none';}
+function c(){document.getElementById('modal').style.display='none';sideMode=false;sideSlot=null;}
 document.querySelector('.modal-bg')?.addEventListener('click',c);
 </script>
 {% endblock %}

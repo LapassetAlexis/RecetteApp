@@ -596,9 +596,6 @@ class LLMClient:
 
     # ── Génération planning ──────────────────────────────────────
 
-    # Un plat tagué ainsi est considéré « complet » (pas besoin d'accompagnement).
-    _COMPLETE_TAGS = {"Légumes", "Soupe", "Salade", "Quiche/tarte"}
-
     @staticmethod
     def _is_side(r: dict[str, Any]) -> bool:
         """Recette utilisable comme accompagnement (légume / garniture)."""
@@ -606,11 +603,11 @@ class LLMClient:
 
     @classmethod
     def _needs_side(cls, r: dict[str, Any]) -> bool:
-        """Plat « protéine nature » (viande/poisson) sans légume → mérite un côté."""
-        if r.get("repas") not in ("Plat", ""):
+        """Un plat typé « Plat » est complet → seul. Un main NON-Plat (entrée /
+        sans type / protéine nature) reçoit un accompagnement."""
+        if cls._is_side(r):
             return False
-        tags = set(r.get("tags") or [])
-        return bool(tags & {"Viande", "Poisson"}) and not (tags & cls._COMPLETE_TAGS)
+        return r.get("repas") != "Plat"
 
     async def generate_planning(
         self,

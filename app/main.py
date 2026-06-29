@@ -968,6 +968,48 @@ async def api_update_meal(
         return {"error": str(e)}
 
 
+@app.post("/api/update-side/{planning_id}")
+async def api_update_side(planning_id: int, request: Request):
+    """Change ou retire l'accompagnement d'un repas. nouvelle_recette vide = retirer."""
+    data = await request.json()
+    jour = data.get("jour")
+    moment = data.get("moment")
+    nouvelle_recette = (data.get("nouvelle_recette") or "").strip()
+
+    if not jour or not moment:
+        return {"error": "Paramètres manquants (jour, moment)"}
+
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        plats = planning_data["plats"]
+
+        cible = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
+        if not cible:
+            return {"error": "Repas non trouvé dans le planning"}
+
+        if not nouvelle_recette:
+            cible["accompagnement"] = None
+        else:
+            acc = {"nom_recette": nouvelle_recette, "notion_id": "", "url": "", "notion_url": ""}
+            recettes = await notion.get_all_recipes()
+            for r in recettes:
+                if r["nom"].lower().strip() == nouvelle_recette.lower().strip():
+                    acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
+                    break
+            cible["accompagnement"] = acc
+
+        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
+        return {"success": True, "accompagnement": cible["accompagnement"]}
+
+    except Exception as e:
+        logger.exception("Erreur update side")
+        return {"error": str(e)}
+
+
 @app.get("/sw.js")
 async def service_worker():
     """Sert le service worker depuis la racine (scope = tout le site)."""
