@@ -1,8 +1,29 @@
-"""Tests du parsing des pages Notion (_parse_page), sans réseau."""
+"""Tests du parsing des pages Notion (_parse_page) + cache, sans réseau."""
+
+import asyncio
 
 from app.notion_client import NotionClient
 
 notion = NotionClient()
+
+
+def test_get_all_recipes_uses_cache(monkeypatch):
+    n = NotionClient()
+    calls = {"c": 0}
+
+    async def _fetch():
+        calls["c"] += 1
+        return [{"nom": "X"}]
+
+    monkeypatch.setattr(n, "_fetch_all_recipes", _fetch)
+    asyncio.run(n.get_all_recipes())
+    asyncio.run(n.get_all_recipes())   # servi par le cache
+    assert calls["c"] == 1
+    n.invalidate_cache()
+    asyncio.run(n.get_all_recipes())   # refetch après invalidation
+    assert calls["c"] == 2
+    asyncio.run(n.get_all_recipes(force=True))
+    assert calls["c"] == 3
 
 
 def _page(props):

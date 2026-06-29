@@ -17,7 +17,6 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
-from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
@@ -209,43 +208,45 @@ async def liste_recettes(request: Request):
     )
 
 
+BASE_SERVINGS = 4  # base d'extraction des ingrédients (cf. extract_ingredients)
+
+
 @app.get("/recette/{page_id}", response_class=HTMLResponse)
 async def detail_recette(request: Request, page_id: str):
-    """Page détail d'une recette avec rendu Cooklang."""
+    """Fiche détail : ingrédients (Cooklang, portions ajustables) + instructions."""
     try:
-        recettes = await notion.get_all_recipes()
-        recette = next((r for r in recettes if r["id"] == page_id), None)
+        recette = await notion.get_recipe(page_id)  # 1 appel, pas toute la base
         if not recette:
             return HTMLResponse("Recette non trouvée", status_code=404)
 
-        # Chercher les ingrédients dans le cache
+        # Ingrédients structurés depuis le cache local
+        ingredients: list[dict] = []
         cached = await db.get_enriched(page_id)
-        cook_content = f">> Serves: 4\n>> Source: {recette.get('url', '')}\n\n"
         if cached and cached.get("ingredients"):
             try:
-                ings = json.loads(cached["ingredients"])
-                for i in ings:
-                    q = i.get("quantite", "")
-                    u = i.get("unite", "")
-                    if q and u:
-                        cook_content += f"@{i['nom']}{{{q}%{u}}}\n"
-                    elif q:
-                        cook_content += f"@{i['nom']}{{{q}}}\n"
-                    else:
-                        cook_content += f"@{i['nom']}\n"
-            except Exception: pass
-        cook_content += "\n"
+                ingredients = [
+                    {"nom": i.get("nom", ""), "quantite": str(i.get("quantite", "") or ""),
+                     "unite": i.get("unite", "")}
+                    for i in json.loads(cached["ingredients"]) if i.get("nom")
+                ]
+            except (json.JSONDecodeError, TypeError):
+                ingredients = []
 
-        recipe_obj = parse_cook(cook_content)
-        html_content = cook_to_html(recipe_obj)
+        # Instructions depuis les blocks Notion (best-effort)
+        try:
+            instructions = await notion.get_recipe_instructions(page_id)
+        except Exception as e:
+            logger.warning(f"Instructions illisibles pour {page_id}: {e}")
+            instructions = []
 
         return templates.TemplateResponse(
             "recette_detail.html",
             {
                 "request": request,
                 "recette": recette,
-                "cook_html": html_content,
-                "cook_raw": cook_content,
+                "ingredients": ingredients,
+                "base_servings": BASE_SERVINGS,
+                "instructions": instructions,
             },
         )
     except Exception:

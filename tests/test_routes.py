@@ -150,14 +150,21 @@ def test_planning_draft_then_validate(client, monkeypatch):
 
 
 def test_detail_recette(client, monkeypatch):
-    async def _all():
-        return [_recipe("Tarte", "Dessert", id="abc")]
+    async def _get(pid):
+        return _recipe("Tarte", "Dessert", id="abc") if pid == "abc" else None
+    async def _instr(pid):
+        return ["Préchauffer le four.", "Enfourner 30 min."]
     async def _enriched(nid):
         return {"ingredients": json.dumps([{"nom": "farine", "quantite": "200", "unite": "g"}])}
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
     monkeypatch.setattr(main.db, "get_enriched", _enriched)
     r = client.get("/recette/abc")
-    assert r.status_code == 200 and "Tarte" in r.text
+    assert r.status_code == 200
+    assert "Tarte" in r.text
+    assert "farine" in r.text                 # ingrédient
+    assert "Enfourner 30 min." in r.text      # instruction
+    assert 'id="srv-n"' in r.text             # sélecteur de portions
     # recette inconnue -> 404
     assert client.get("/recette/zzz").status_code == 404
 

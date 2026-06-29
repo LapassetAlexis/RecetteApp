@@ -25,8 +25,8 @@
 
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|lower }}" data-type="{{ recette.repas or 'Non classé' }}">
-        <h3>{{ recette.nom }}</h3>
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-type="{{ recette.repas or 'Non classé' }}">
+        <h3><a href="/recette/{{ recette.id }}" class="recipe-title">{{ recette.nom | clean_title }}</a></h3>
         <div class="recipe-meta">
             {% if recette.repas %}
             <span class="chip chip-repas">{{ recette.repas }}</span>
@@ -52,10 +52,10 @@
             {% endfor %}
             <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
         </div>
-        {% if recette.url %}
-        <a href="{{ recette.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
-        {% endif %}
-        <a href="/recette/{{ recette.id }}" class="recipe-link" style="margin-left:6px;">📖 Détail</a>
+        <div class="recipe-actions">
+            <a href="/recette/{{ recette.id }}" class="recipe-link">📖 Détail</a>
+            {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="recipe-link">🔗 Source</a>{% endif %}
+        </div>
     </div>
     {% endfor %}
     <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
