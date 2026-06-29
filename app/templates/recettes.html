@@ -19,27 +19,33 @@
 <div class="filters">
     <div class="filter-row">
         <span class="filter-label">Type</span>
-        <span class="stat-chip active" data-filter="type" data-value="">Tous ({{ total }})</span>
-        {% for type, count in par_type %}
-        <span class="stat-chip" data-filter="type" data-value="{{ type }}">{{ type }} ({{ count }})</span>
-        {% endfor %}
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="type" data-value="">Tous ({{ total }})</span>
+            {% for type, count in par_type %}
+            <span class="stat-chip" data-filter="type" data-value="{{ type }}">{{ type }} ({{ count }})</span>
+            {% endfor %}
+        </div>
     </div>
     {% if par_etat %}
     <div class="filter-row">
         <span class="filter-label">État</span>
-        <span class="stat-chip active" data-filter="etat" data-value="">Tous</span>
-        {% for e, count in par_etat %}
-        <span class="stat-chip" data-filter="etat" data-value="{{ e }}">{{ e }} ({{ count }})</span>
-        {% endfor %}
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="etat" data-value="">Tous</span>
+            {% for e, count in par_etat %}
+            <span class="stat-chip" data-filter="etat" data-value="{{ e }}">{{ e }} ({{ count }})</span>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
     {% if par_tag %}
     <div class="filter-row">
         <span class="filter-label">Tag</span>
-        <span class="stat-chip active" data-filter="tag" data-value="">Tous</span>
-        {% for t, count in par_tag %}
-        <span class="stat-chip" data-filter="tag" data-value="{{ t }}">{{ t }} ({{ count }})</span>
-        {% endfor %}
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="tag" data-value="">Tous</span>
+            {% for t, count in par_tag %}
+            <span class="stat-chip" data-filter="tag" data-value="{{ t }}">{{ t }} ({{ count }})</span>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 </div>
