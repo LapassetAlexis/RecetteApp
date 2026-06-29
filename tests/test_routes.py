@@ -343,3 +343,18 @@ def test_dupliquer_planning(client, monkeypatch):
     assert d["success"] and d["planning_id"] != pid
     # la copie est un brouillon (bandeau de validation présent)
     assert "Valider la semaine" in client.get(f"/planning/{d['planning_id']}").text
+
+
+def test_week_nutrition(client):
+    import asyncio, json
+    async def run():
+        await main.db.save_enriched("n1", "Pâtes", ingredients=json.dumps([
+            {"nom": "g de pâtes", "quantite": "200", "unite": ""}]))
+        plats = [{"jour": j, "moment": m, "nom_recette": "Pâtes", "notion_id": "n1",
+                  "accompagnement": None} for j in range(1, 8) for m in ("midi", "soir")]
+        nut = await main._week_nutrition(plats)
+        assert nut and nut["calories"] > 0 and nut["meals_total"] == 14
+        # aucune recette estimable -> None
+        assert await main._week_nutrition([{"jour": 1, "moment": "midi", "nom_recette": "X",
+                                            "notion_id": "zzz", "accompagnement": None}]) is None
+    asyncio.run(run())

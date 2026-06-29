@@ -100,3 +100,16 @@ def test_categorize_and_group():
     assert "Fruits & légumes" in rayons and "Viande & poisson" in rayons and "Autre" in rayons
     # ordre magasin : fruits/légumes avant viande
     assert rayons.index("Fruits & légumes") < rayons.index("Viande & poisson")
+
+
+# ── Temps de préparation (ISO-8601) ──────────────────────────
+def test_iso_duration_parsing():
+    from app.llm_client import _iso_duration_to_min, _recipe_duration_min
+    assert _iso_duration_to_min("PT30M") == 30
+    assert _iso_duration_to_min("PT1H15M") == 75
+    assert _iso_duration_to_min("PT2H") == 120
+    assert _iso_duration_to_min("") is None
+    assert _iso_duration_to_min("nope") is None
+    assert _recipe_duration_min({"totalTime": "PT45M"}) == 45
+    assert _recipe_duration_min({"prepTime": "PT10M", "cookTime": "PT20M"}) == 30
+    assert _recipe_duration_min({}) is None
