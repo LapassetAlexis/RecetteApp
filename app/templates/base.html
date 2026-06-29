@@ -55,8 +55,14 @@
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
         try { if (new URL(a.href, location.href).origin !== location.origin) return; } catch (_) { return; }
         window.navStart();
+        if (a.classList.contains('btn')) a.classList.add('loading');  // spinner sur le lien-bouton
     });
-    document.addEventListener('submit', () => window.navStart(), true);
+    // Sur soumission : barre + bouton submit en loader (désactivé après l'envoi)
+    document.addEventListener('submit', (e) => {
+        window.navStart();
+        const btn = e.target.querySelector('button[type="submit"], button:not([type])');
+        if (btn) { btn.classList.add('loading'); btn.disabled = true; }
+    }, true);
     window.addEventListener('pageshow', (e) => {
         // au retour arrière (bfcache), la page réapparaît : on coupe la barre
         const b = document.getElementById('nav-progress');
