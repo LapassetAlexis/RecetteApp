@@ -189,9 +189,12 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
             types = t if isinstance(t, list) else [t]
             if not any("Recipe" in str(x) for x in types):
                 continue
+            # Certains sites (ex. CuisineActuelle) glissent un en-tête
+            # "Ingrédients" comme 1re entrée du tableau : on l'écarte.
+            _NOISE = {"ingrédients", "ingredients", "ingrédient", "ingredient"}
             ingredients = [
-                _clean_text(i) for i in (node.get("recipeIngredient") or node.get("ingredients") or [])
-                if _clean_text(i)
+                c for c in (_clean_text(i) for i in (node.get("recipeIngredient") or node.get("ingredients") or []))
+                if c and c.lower() not in _NOISE
             ]
             instructions = _flatten_instructions(node.get("recipeInstructions", ""))
             kw = node.get("keywords", "")

@@ -122,6 +122,18 @@ def test_recipe_root_with_graph_sibling():
     assert r["ingredients"] == ["sucre", "miel"]
 
 
+def test_ingredient_header_noise_filtered():
+    # CuisineActuelle met un en-tête "Ingrédients" dans le tableau recipeIngredient.
+    html = """
+    <script type="application/ld+json">
+    {"@type":"Recipe","name":"Galettes","recipeIngredient":["Ingr&eacute;dients","1 courgette","2 oeufs"],
+     "recipeInstructions":"Cuire."}
+    </script>
+    """
+    r = _extract_jsonld_recipe(html)
+    assert r["ingredients"] == ["1 courgette", "2 oeufs"]
+
+
 def test_handler_amandinecooking():
     html = """
     <title>Salade de lentilles - Amandine Cooking</title>
