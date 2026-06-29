@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -734,74 +734,85 @@ async def api_enrich_one(page_id: str):
         return {"error": str(e)}
 
 
+def _ing_lines(items: list[dict]) -> str:
+    """Formate des ingrédients en lignes « - nom : qté unité »."""
+    return "\n".join(
+        f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
+        for i in items
+    )
+
+
+async def _enrich_one(r: dict) -> str:
+    """Enrichit une recette Notion. Retourne 'enriched' | 'skipped' | 'error'."""
+    nid, nom = r.get("id"), r.get("nom")
+    if not nid or not nom:
+        return "skipped"
+    ingredients_txt = ""
+    cached = await db.get_enriched(nid)
+    if cached and cached.get("ingredients"):
+        try:
+            ing_list = json.loads(cached["ingredients"])
+            if ing_list:
+                ingredients_txt = _ing_lines(ing_list)
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            logger.warning(f"Cache ingrédients illisible pour {nom}: {e}")
+    if not ingredients_txt and r.get("url"):
+        try:
+            d = await llm.extract_ingredients(nom, r.get("url", ""))
+            ings = d.get("ingredients", [])
+            if ings:
+                ingredients_txt = _ing_lines(ings)
+                await db.save_enriched(nid, nom, ingredients=json.dumps(ings))
+        except Exception as e:
+            logger.warning(f"Extraction LLM échouée pour {nom}: {e}")
+    if not ingredients_txt:
+        return "skipped"
+    try:
+        await notion.update_ingredients(nid, ingredients_txt)
+        return "enriched"
+    except Exception as e:
+        logger.warning(f"Erreur écriture pour {nom}: {e}")
+        return "error"
+
+
 @app.post("/api/enrich-all")
 async def api_enrich_all():
     """Parcourt toutes les recettes Notion et ajoute les ingrédients manquants."""
     try:
         recettes = await notion.get_all_recipes()
-        total = len(recettes)
-        enriched = 0
-        skipped = 0
-        errors = 0
-
+        counts = {"enriched": 0, "skipped": 0, "errors": 0}
         for r in recettes:
-            nid = r["id"]
-            nom = r["nom"]
-            if not nid or not nom:
-                skipped += 1
-                continue
-
-            # Chercher dans le cache local
-            cached = await db.get_enriched(nid)
-            ingredients_txt = ""
-
-            if cached and cached.get("ingredients"):
-                try:
-                    ing_list = json.loads(cached["ingredients"])
-                    if ing_list:
-                        ingredients_txt = "\n".join(
-                            f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
-                            for i in ing_list
-                        )
-                except (json.JSONDecodeError, TypeError, KeyError) as e:
-                    logger.warning(f"Cache ingrédients illisible pour {nom}: {e}")
-
-            # Sinon, extraire via LLM
-            if not ingredients_txt and r.get("url"):
-                try:
-                    d = await llm.extract_ingredients(nom, r.get("url", ""))
-                    ings = d.get("ingredients", [])
-                    if ings:
-                        ingredients_txt = "\n".join(
-                            f"- {i['nom']}" + (f" : {i.get('quantite','')} {i.get('unite','')}" if i.get('quantite') else "")
-                            for i in ings
-                        )
-                        # Mettre en cache
-                        await db.save_enriched(nid, nom, ingredients=json.dumps(ings))
-                except Exception as e:
-                    logger.warning(f"Extraction LLM échouée pour {nom}: {e}")
-
-            if ingredients_txt:
-                try:
-                    await notion.update_ingredients(nid, ingredients_txt)
-                    enriched += 1
-                except Exception as e:
-                    logger.warning(f"Erreur écriture pour {nom}: {e}")
-                    errors += 1
-            else:
-                skipped += 1
-
-        return {
-            "success": True,
-            "total": total,
-            "enriched": enriched,
-            "skipped": skipped,
-            "errors": errors,
-        }
-
+            status = await _enrich_one(r)
+            counts["errors" if status == "error" else status] += 1
+        return {"success": True, "total": len(recettes), **counts}
     except Exception as e:
         logger.exception("Erreur enrichissement masse")
         return {"error": str(e)}
+
+
+@app.get("/api/enrich-all/stream")
+async def api_enrich_all_stream():
+    """Variante SSE : enrichit toutes les recettes en streamant la progression
+    (évite le timeout d'une requête synchrone longue et donne un retour live)."""
+    async def gen():
+        try:
+            recettes = await notion.get_all_recipes()
+            total = len(recettes)
+            counts = {"enriched": 0, "skipped": 0, "errors": 0}
+            yield f"data: {json.dumps({'total': total, 'done': 0})}\n\n"
+            for i, r in enumerate(recettes, 1):
+                status = await _enrich_one(r)
+                counts["errors" if status == "error" else status] += 1
+                payload = {"total": total, "done": i, "nom": r.get("nom", ""), "status": status, **counts}
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'total': total, **counts})}\n\n"
+        except Exception as e:
+            logger.exception("Erreur enrichissement masse (stream)")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+    })
 
 
 @app.post("/ajouter-recette")
