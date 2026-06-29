@@ -49,7 +49,8 @@ class Database:
                     ingredients TEXT,
                     cuisson_minutes INTEGER,
                     saison TEXT,
-                    dernier_usage TEXT
+                    dernier_usage TEXT,
+                    nutrition TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_planning_recipes_recipe
@@ -66,6 +67,10 @@ class Database:
                     "ALTER TABLE planning_history ADD COLUMN valide INTEGER NOT NULL DEFAULT 0"
                 )
                 await db.execute("UPDATE planning_history SET valide = 1")
+            except Exception:
+                pass  # colonne déjà présente
+            try:
+                await db.execute("ALTER TABLE enriched_recipes ADD COLUMN nutrition TEXT")
             except Exception:
                 pass  # colonne déjà présente
             await db.commit()
@@ -234,13 +239,14 @@ class Database:
         ingredients: str = "",
         cuisson_minutes: int = 0,
         saison: str = "",
+        nutrition: str = "",
     ) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 """INSERT OR REPLACE INTO enriched_recipes
-                   (notion_id, recipe_name, ingredients, cuisson_minutes, saison, dernier_usage)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'))""",
-                (notion_id, recipe_name, ingredients, cuisson_minutes, saison),
+                   (notion_id, recipe_name, ingredients, cuisson_minutes, saison, dernier_usage, nutrition)
+                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
+                (notion_id, recipe_name, ingredients, cuisson_minutes, saison, nutrition),
             )
             await db.commit()
 

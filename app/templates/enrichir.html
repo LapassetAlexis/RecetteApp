@@ -8,6 +8,7 @@
     </div>
 
     <form method="POST" action="/recette/{{ recette.id }}/enrichir" class="card" id="enrich-form">
+        <input type="hidden" name="nutrition_json" value="{{ nutrition_json }}">
         <div class="form-r">
             <div class="form-g">
                 <label for="repas">🍽️ Type</label>

@@ -226,6 +226,29 @@ def _jsonld_candidates(html_text: str) -> list[str]:
     return out
 
 
+def _num(value) -> float | None:
+    """Extrait le 1er nombre d'une valeur ("250 kcal" -> 250)."""
+    m = re.search(r"[\d]+(?:[.,]\d+)?", str(value))
+    return float(m.group().replace(",", ".")) if m else None
+
+
+def _extract_nutrition(node: dict) -> dict:
+    """Nutrition schema.org (NutritionInformation, par part) -> dict normalisé."""
+    n = node.get("nutrition")
+    if not isinstance(n, dict):
+        return {}
+    out: dict[str, float] = {}
+    mapping = {
+        "calories": "calories", "proteinContent": "proteines",
+        "carbohydrateContent": "glucides", "fatContent": "lipides",
+    }
+    for src, dst in mapping.items():
+        v = _num(n.get(src))
+        if v is not None:
+            out[dst] = round(v) if dst == "calories" else round(v, 1)
+    return out
+
+
 def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
     """Renvoie la 1re recette schema.org de la page (script ld+json OU inline).
 
@@ -287,6 +310,7 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                 "ingredients": ingredients,
                 "instructions": "\n".join(instructions),
                 "keywords": [k for k in keywords if k],
+                "nutrition": _extract_nutrition(node),
             }
     return None
 
@@ -938,6 +962,7 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
                 "ingredients": ld_ings,                    # list[str], lignes brutes
                 "instructions": ld["instructions"],
                 "image_url": ld.get("image_url") or og_image,
+                "nutrition": ld.get("nutrition", {}),
                 "source": "jsonld" if ld.get("ingredients") else "scrape",
             }
 
