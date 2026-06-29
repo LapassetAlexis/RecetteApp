@@ -10,7 +10,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 
 /* ── Nav ─────────────────────────────────────── */
 .nav { background: var(--surface); border-bottom:1px solid var(--bo); position:sticky; top:0; z-index:100; box-shadow:var(--sh); }
-.nav-inner { max-width:1100px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }
+.nav-inner { max-width:1320px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }
 .nav-brand { font-size:1.15rem; font-weight:700; text-decoration:none; color:var(--prd); }
 .nav-links { display:flex; gap:4px; }
 .nav-links a { text-decoration:none; color:var(--text); padding:6px 12px; border-radius:8px; font-weight:500; font-size:0.9rem; }
@@ -18,7 +18,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 .nav-links a.active { background:var(--bg); color:var(--prd); }
 
 /* ── Layout ──────────────────────────────────── */
-.container { max-width:1100px; margin:0 auto; padding:16px; }
+.container { max-width:1320px; margin:0 auto; padding:16px; }
 .hero { text-align:center; padding:16px 0 8px; }
 .hero h1 { font-size:1.4rem; }
 .hero p { color:var(--t2); font-size:0.9rem; }
@@ -79,7 +79,7 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 /* Cellule fusionnée (plusieurs jours) : contenu centré pour combler la largeur */
 .meal.merged { align-items:center; text-align:center; }
 .meal.merged .meal-head { width:100%; }
-.meal.merged .meal-name { margin-top:auto; max-width:340px; }
+.meal.merged .meal-name { margin-top:auto; max-width:440px; }
 .meal.merged .meal-side { justify-content:center; }
 .meal.merged .meal-chips { margin-top:0; margin-bottom:auto; padding-top:6px; justify-content:center; }
 .meal-tag { font-size:0.66rem; font-weight:700; letter-spacing:0.3px; color:var(--t2); text-transform:uppercase; }
