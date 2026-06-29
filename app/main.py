@@ -142,6 +142,30 @@ async def index(request: Request):
     )
 
 
+def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
+    """Regroupe les jours consécutifs partageant le même repas (plat + même
+    accompagnement) en « runs » pour fusionner les cases du planning.
+    Retourne {"midi": [run, ...], "soir": [...]} avec run = {start, span, jours, plat}."""
+    rows: dict[str, list[dict]] = {"midi": [], "soir": []}
+    for moment in ("midi", "soir"):
+        by_day = {p["jour"]: p for p in plats if p["moment"] == moment}
+        run: dict | None = None
+        for jour in range(1, 8):
+            plat = by_day.get(jour)
+            if not plat:
+                run = None
+                continue
+            acc = plat.get("accompagnement") or {}
+            key = (plat.get("nom_recette", ""), acc.get("nom_recette", ""))
+            if run and run["key"] == key and run["start"] + run["span"] == jour:
+                run["span"] += 1
+                run["jours"].append(jour)
+            else:
+                run = {"key": key, "start": jour, "span": 1, "jours": [jour], "plat": plat}
+                rows[moment].append(run)
+    return rows
+
+
 @app.get("/planning/{planning_id}", response_class=HTMLResponse)
 async def voir_planning(request: Request, planning_id: int):
     """Affiche un planning existant."""
@@ -166,6 +190,7 @@ async def voir_planning(request: Request, planning_id: int):
             "request": request,
             "planning": planning,
             "plats": data.get("plats", []),
+            "week_rows": _group_week(data.get("plats", [])),
             "liste_courses": data.get("liste_courses", []),
             "per_day": per_day,
             "valide": bool(planning.get("valide", 0)),
@@ -256,11 +281,15 @@ async def detail_recette(request: Request, page_id: str):
         nutrition = None
         if cached and cached.get("nutrition"):
             try:
-                nutrition = json.loads(cached["nutrition"]) or None
-                if nutrition:
-                    nutrition.setdefault("source", "source")
+                src = json.loads(cached["nutrition"]) or {}
             except (json.JSONDecodeError, TypeError):
-                nutrition = None
+                src = {}
+            # n'utiliser la nutrition de la source que si COMPLÈTE (calories +
+            # 3 macros) ; sinon (souvent juste calories, parfois fausses) on estime
+            if src and all(src.get(k) is not None for k in ("calories", "proteines", "glucides", "lipides")):
+                src.setdefault("source", "source")
+                src.setdefault("confiance", "Excellente")  # valeurs officielles du site
+                nutrition = src
         if not nutrition and ingredients:
             nutrition = estimate_nutrition(ingredients, BASE_SERVINGS)
 
@@ -561,13 +590,26 @@ async def generate_shopping(planning_id: int, request: Request):
         if not plats:
             return {"error": "Aucun plat dans ce planning"}
 
+        # Inclure les accompagnements (légumes appariés) dans les courses.
+        extract_plats = []
+        for p in plats:
+            extract_plats.append(p)
+            acc = p.get("accompagnement")
+            if acc and acc.get("nom_recette"):
+                extract_plats.append({
+                    "nom_recette": acc["nom_recette"],
+                    "moment": p.get("moment", ""),
+                    "url": acc.get("url", ""),
+                    "notion_id": acc.get("notion_id", ""),
+                })
+
         liste_courses = []
         try:
-            liste_courses = await llm.batch_extract_ingredients(plats, planning["nb_personnes"])
+            liste_courses = await llm.batch_extract_ingredients(extract_plats, planning["nb_personnes"])
         except Exception as e:
             logger.warning(f"Batch échoué ({e}), extraction individuelle...")
             collected = []
-            for plat in plats:
+            for plat in extract_plats:
                 try:
                     d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
                     collected.extend(d.get("ingredients", []))
@@ -948,6 +990,48 @@ async def api_update_meal(
 
     except Exception as e:
         logger.exception("Erreur update meal")
+        return {"error": str(e)}
+
+
+@app.post("/api/update-side/{planning_id}")
+async def api_update_side(planning_id: int, request: Request):
+    """Change ou retire l'accompagnement d'un repas. nouvelle_recette vide = retirer."""
+    data = await request.json()
+    jour = data.get("jour")
+    moment = data.get("moment")
+    nouvelle_recette = (data.get("nouvelle_recette") or "").strip()
+
+    if not jour or not moment:
+        return {"error": "Paramètres manquants (jour, moment)"}
+
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        plats = planning_data["plats"]
+
+        cible = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
+        if not cible:
+            return {"error": "Repas non trouvé dans le planning"}
+
+        if not nouvelle_recette:
+            cible["accompagnement"] = None
+        else:
+            acc = {"nom_recette": nouvelle_recette, "notion_id": "", "url": "", "notion_url": ""}
+            recettes = await notion.get_all_recipes()
+            for r in recettes:
+                if r["nom"].lower().strip() == nouvelle_recette.lower().strip():
+                    acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
+                    break
+            cible["accompagnement"] = acc
+
+        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
+        return {"success": True, "accompagnement": cible["accompagnement"]}
+
+    except Exception as e:
+        logger.exception("Erreur update side")
         return {"error": str(e)}
 
 

@@ -8,6 +8,33 @@ from app.llm_client import LLMClient
 client = LLMClient()
 
 
+def test_needs_side_and_is_side():
+    # Accompagnement proposé par défaut à tout plat principal.
+    assert client._needs_side({"repas": "Plat", "tags": ["Viande"]})
+    assert client._needs_side({"repas": "", "tags": []})
+    assert client._needs_side({"repas": "Entrée", "tags": []})
+    # Un accompagnement n'en reçoit pas lui-même.
+    assert not client._needs_side({"repas": "Légume", "tags": []})
+    assert client._is_side({"repas": "Légume", "tags": []})
+    assert client._is_side({"repas": "Accompagnement", "tags": []})
+    assert not client._is_side({"repas": "Plat", "tags": ["Viande"]})
+
+
+def test_attach_sides_default_for_all_mains():
+    meta = {
+        "lasagnes": {"nom": "Lasagnes", "repas": "Plat", "tags": ["Viande"]},
+        "riz pilaf": {"nom": "Riz pilaf", "repas": "Accompagnement", "tags": []},
+    }
+    sides = [{"nom": "Haricots verts", "repas": "Légume", "tags": []}]
+    plats = [
+        client._make_plat(1, "midi", "Lasagnes"),
+        client._make_plat(1, "soir", "Riz pilaf"),
+    ]
+    client._attach_sides(plats, meta, sides)
+    assert plats[0]["accompagnement"]["nom_recette"] == "Haricots verts"  # plat -> côté
+    assert plats[1]["accompagnement"] is None  # un accompagnement n'en reçoit pas
+
+
 def test_liste_numerotee():
     raw = "\n".join(
         f"{i+1} - Jour {i//2+1} - {'midi' if i%2==0 else 'soir'} - Recette {i+1}"

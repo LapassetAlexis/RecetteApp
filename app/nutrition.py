@@ -103,10 +103,18 @@ def _to_grams(quantite: str, label: str, unite: str = "") -> float | None:
     u = _norm(unite)
     if u and u in UNIT_GRAMS:
         grams = (qty if qty is not None else 1) * UNIT_GRAMS[u]
-    # 1) sinon unité en tête du libellé (ex. "g de pâtes", "cuillère à café ...")
+    # 1) cuillères composées (café ≈ 5 g, soupe ≈ 15 g), gère le pluriel
+    if grams is None:
+        sp = re.search(r"\bcuill?[eè]res?\s+[aà]\s+(caf[eé]|soupe)", n)
+        if not sp:
+            sp = re.match(r"^c\.?\s*[aà]\.?\s*(c|s)\b", n)  # "c. à s.", "c à c"
+        if sp:
+            g = sp.group(1)
+            grams = (qty if qty is not None else 1) * (5 if g in ("cafe", "café", "c") else 15)
+    # 2) sinon unité en tête du libellé (ex. "g de pâtes"), pluriel toléré
     if grams is None:
         for unit, g in sorted(UNIT_GRAMS.items(), key=lambda kv: -len(kv[0])):
-            if re.match(rf"^{re.escape(unit)}\b", n):
+            if re.match(rf"^{re.escape(unit)}s?\b", n):
                 grams = (qty if qty is not None else 1) * g
                 break
     # 2) compté en pièces (ex. "2 courgettes", "1 oignon")
@@ -146,6 +154,13 @@ def estimate_nutrition(ingredients: list[dict], servings: int = 4) -> dict | Non
         tot["lipides"] += macros[3] * f
     if matched == 0:
         return None
+    ratio = matched / len(ingredients)
+    if ratio >= 0.7:
+        confiance = "Bonne"
+    elif ratio >= 0.4:
+        confiance = "Moyenne"
+    else:
+        confiance = "Mauvaise"
     return {
         "calories": round(tot["calories"] / servings),
         "proteines": round(tot["proteines"] / servings, 1),
@@ -154,4 +169,5 @@ def estimate_nutrition(ingredients: list[dict], servings: int = 4) -> dict | Non
         "matched": matched,
         "total": len(ingredients),
         "source": "estimation",
+        "confiance": confiance,
     }

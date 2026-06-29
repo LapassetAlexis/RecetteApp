@@ -60,6 +60,11 @@ def _first_image(val: Any) -> str:
     return ""
 
 
+def _is_garbage(t: str) -> bool:
+    """Détecte un texte poubelle (ex. 'Array,Array,Array...' mal sérialisé)."""
+    return bool(re.fullmatch(r"(array[\s,]*)+", t, re.IGNORECASE))
+
+
 def _flatten_instructions(val: Any) -> list[str]:
     """recipeInstructions : str | [str] | [HowToStep{text}] | [HowToSection{itemListElement}]."""
     steps: list[str] = []
@@ -67,20 +72,24 @@ def _flatten_instructions(val: Any) -> list[str]:
         # parfois un seul bloc avec sauts de ligne
         for part in re.split(r"\n+|(?<=[.!?])\s{2,}", val):
             t = _clean_text(part)
-            if t:
+            if t and not _is_garbage(t):
                 steps.append(t)
     elif isinstance(val, list):
         for item in val:
             if isinstance(item, str):
                 t = _clean_text(item)
-                if t:
+                if t and not _is_garbage(t):
                     steps.append(t)
             elif isinstance(item, dict):
                 if item.get("@type") == "HowToSection" and "itemListElement" in item:
                     steps.extend(_flatten_instructions(item["itemListElement"]))
                 else:
-                    t = _clean_text(item.get("text") or item.get("name") or "")
-                    if t:
+                    # 'text' d'abord ; 'name' seulement s'il n'est pas du garbage
+                    t = _clean_text(item.get("text") or "")
+                    if not t:
+                        nm = _clean_text(item.get("name") or "")
+                        t = nm if nm and not _is_garbage(nm) else ""
+                    if t and not _is_garbage(t):
                         steps.append(t)
     return steps
 
@@ -284,6 +293,11 @@ def _extract_nutrition(node: dict) -> dict:
         v = _num(n.get(src))
         if v is not None:
             out[dst] = round(v) if dst == "calories" else round(v, 1)
+    # On ne garde la nutrition de la source que si elle est COMPLÈTE (calories +
+    # 3 macros). Sinon (souvent juste calories, parfois fausses) on laissera
+    # l'estimation calculée prendre le relais.
+    if not {"calories", "proteines", "glucides", "lipides"} <= out.keys():
+        return {}
     return out
 
 
@@ -344,15 +358,19 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
                     ingredients = deduped
                     if b_instr:
                         instructions = b_instr
-            # Repli : ingrédients dans la description (recette ou vidéo associée).
-            if not ingredients:
-                ingredients = _ingredients_from_text(node.get("description", ""))
-            if not ingredients:
-                for v in (node.get("video") or []):
-                    if isinstance(v, dict):
-                        ingredients = _ingredients_from_text(v.get("description", ""))
-                        if ingredients:
-                            break
+            # Complément via la description (recette/vidéo) : ces sites y mettent
+            # souvent la liste COMPLÈTE + la préparation, alors que
+            # recipeIngredient est partiel et recipeInstructions vide/garbage.
+            # On préfère le blob s'il a PLUS d'ingrédients, et on remplit les
+            # instructions si elles manquent.
+            blobs = [node.get("description", "")]
+            blobs += [v.get("description", "") for v in (node.get("video") or []) if isinstance(v, dict)]
+            for b in blobs:
+                b_ings, b_instr = _split_blob(b)
+                if len(b_ings) > len(ingredients):
+                    ingredients = b_ings
+                if not instructions and b_instr:
+                    instructions = b_instr
             kw = node.get("keywords", "")
             keywords = [k.strip() for k in kw.split(",")] if isinstance(kw, str) else [
                 _clean_text(k) for k in (kw or [])
@@ -578,6 +596,17 @@ class LLMClient:
 
     # ── Génération planning ──────────────────────────────────────
 
+    @staticmethod
+    def _is_side(r: dict[str, Any]) -> bool:
+        """Recette utilisable comme accompagnement (légume / garniture)."""
+        return r.get("repas") in ("Légume", "Accompagnement")
+
+    @classmethod
+    def _needs_side(cls, r: dict[str, Any]) -> bool:
+        """On propose un accompagnement par défaut à tout plat principal
+        (l'utilisateur peut le vider/changer). Un accompagnement n'en reçoit pas."""
+        return not cls._is_side(r)
+
     async def generate_planning(
         self,
         recettes: list[dict[str, Any]],
@@ -593,9 +622,17 @@ class LLMClient:
         # Liste compacte (1 ligne/recette) plutôt que du JSON indenté :
         # beaucoup moins de tokens, lisible par le modèle.
         # Format : Nom | type | moment | tags
+        # Le LLM choisit des PLATS principaux ; les accompagnements (légumes /
+        # garnitures) sont appariés ensuite par le code aux plats qui en ont
+        # besoin (viande/poisson nature). On ne propose donc au LLM que les plats.
+        sides = [r for r in recettes if self._is_side(r)]
+        meta = {r["nom"].lower().strip(): r for r in recettes}
+
         lignes = []
         for r in recettes:
-            if r["repas"] not in ("Plat", "Entrée", "Légume", "Accompagnement", ""):
+            if self._is_side(r):
+                continue
+            if r["repas"] not in ("Plat", "Entrée", ""):
                 continue
             parts = [r["nom"]]
             if r["repas"]:
@@ -649,11 +686,13 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
                 valid.append(canon)
         if len(valid) < n_needed:
             for r in recettes:
+                if self._is_side(r):
+                    continue
                 if r["nom"] not in valid and r["nom"] not in recettes_exclues:
                     valid.append(r["nom"])
                     if len(valid) >= n_needed:
                         break
-        return self._assign_slots(valid[:n_needed], groups, unique_groups)
+        return self._assign_slots(valid[:n_needed], groups, unique_groups, meta, sides)
 
     def _parse_recipe_names(self, raw: str) -> list[str]:
         """Extrait une liste de noms de recettes d'une réponse LLM (liste numérotée)."""
@@ -679,9 +718,11 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
 
     def _assign_slots(
         self, names: list[str], groups: list[int], unique_groups: list[int],
+        meta: dict[str, Any] | None = None, sides: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Construit les 14 créneaux : midis groupés = même plat, soirs tous
-        différents (et différents des midis tant qu'il y a assez de recettes)."""
+        différents (et différents des midis tant qu'il y a assez de recettes).
+        Les plats « protéine nature » reçoivent un accompagnement (légume)."""
         if not names:
             return []
         n_groups = len(unique_groups)
@@ -695,7 +736,30 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
             idx = day - 1
             nom = soirs[idx] if idx < len(soirs) else names[(n_groups + idx) % len(names)]
             plats.append(self._make_plat(day, "soir", nom))
+
+        self._attach_sides(plats, meta or {}, sides or [])
         return plats
+
+    def _attach_sides(
+        self, plats: list[dict[str, Any]],
+        meta: dict[str, Any], sides: list[dict[str, Any]],
+    ) -> None:
+        """Apparie un légume/accompagnement aux plats viande/poisson nature.
+        Tourne dans la liste des accompagnements pour varier sur la semaine."""
+        if not sides:
+            return
+        k = 0
+        for plat in plats:
+            m = meta.get(plat["nom_recette"].lower().strip())
+            if m and self._needs_side(m):
+                s = sides[k % len(sides)]
+                k += 1
+                plat["accompagnement"] = {
+                    "nom_recette": s["nom"],
+                    "notion_id": s.get("id", ""),
+                    "url": s.get("url", ""),
+                    "notion_url": s.get("notion_url", ""),
+                }
 
     def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
         """Parse la réponse du LLM (liste numérotée, markdown ou JSON)."""
@@ -791,6 +855,7 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
             "notion_id": "",
             "url": "",
             "notion_url": "",
+            "accompagnement": None,
         }
 
     # ── Extraction ingrédients ───────────────────────────────────
@@ -1080,12 +1145,16 @@ Réponds UNIQUEMENT ce JSON :
         # Les ingrédients scrapés du HTML sont plus fiables que ceux du LLM.
         if scraped:
             ingredients = scraped
+        # Le LLM renvoie parfois instructions en liste : on garde le contrat string.
+        instructions = data.get("instructions", "")
+        if isinstance(instructions, list):
+            instructions = "\n".join(str(s).strip() for s in instructions if str(s).strip())
         return {
             "nom": clean_recipe_title(data.get("nom", "")),
             "type_repas": type_repas,
             "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
             "ingredients": [str(i) for i in ingredients],
-            "instructions": data.get("instructions", ""),
+            "instructions": instructions,
             "image_url": og_image,
             "source": "llm",
         }
