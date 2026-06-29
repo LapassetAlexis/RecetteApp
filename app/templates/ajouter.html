@@ -72,9 +72,17 @@
         <button type="button" id="add-step" class="btn btn-ghost btn-sm" style="margin-top:6px;">+ Ajouter une étape</button>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg">💾 Ajouter la recette</button>
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-add">💾 Ajouter la recette</button>
     <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Analyser une autre URL</button>
 </form>
+
+<div id="add-loading" class="loading-overlay">
+    <div class="loading-box">
+        <div class="spinner-big"></div>
+        <h2>💾 Ajout en cours...</h2>
+        <p>Écriture dans Notion.</p>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -170,6 +178,13 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '🔍 Analyser';
     }
+});
+
+// Retour visuel pendant l'ajout (le POST écrit dans Notion)
+document.getElementById('step2')?.addEventListener('submit', () => {
+    const b = document.getElementById('btn-add');
+    if (b) { b.disabled = true; b.textContent = '⏳ Ajout...'; }
+    document.getElementById('add-loading')?.classList.add('show');
 });
 
 document.getElementById('btn-back')?.addEventListener('click', function() {
