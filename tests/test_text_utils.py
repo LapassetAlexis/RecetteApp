@@ -25,6 +25,9 @@ def test_parse_ingredient_line():
     assert parse_ingredient_line("1/2 cuillère à café de fond de volaille") == {
         "nom": "cuillère à café de fond de volaille", "quantite": "1/2", "unite": ""}
     assert parse_ingredient_line("4 œufs") == {"nom": "œufs", "quantite": "4", "unite": ""}
+    # nombre collé à l'unité ("200g")
+    assert parse_ingredient_line("200g de pâtes courtes") == {"nom": "g de pâtes courtes", "quantite": "200", "unite": ""}
+    assert parse_ingredient_line("80g de roquette") == {"nom": "g de roquette", "quantite": "80", "unite": ""}
     assert parse_ingredient_line("Sel, poivre") == {"nom": "Sel, poivre", "quantite": "", "unite": ""}
     assert parse_ingredient_line("farine : 200 g") == {"nom": "farine", "quantite": "200", "unite": "g"}
     assert parse_ingredient_line("   ") is None

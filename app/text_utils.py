@@ -60,9 +60,10 @@ def parse_ingredient_line(line: str) -> dict | None:
         if m:
             return {"nom": nom.strip(), "quantite": m.group(1).replace(",", "."), "unite": m.group(2).strip()}
         return {"nom": nom.strip(), "quantite": "", "unite": ""}
-    # Format source "quantité <libellé>" : on garde le libellé intact
-    m = re.match(r"^([\d.,/]+)\s+(.*)$", s)
-    if m:
+    # Format source "quantité <libellé>" : on garde le libellé intact.
+    # \s* (et non \s+) pour gérer le nombre collé à l'unité ("200g de pâtes").
+    m = re.match(r"^([\d]+(?:[.,/]\d+)?)\s*(.*)$", s)
+    if m and m.group(2).strip():
         return {"nom": m.group(2).strip(), "quantite": m.group(1).replace(",", "."), "unite": ""}
     return {"nom": s, "quantite": "", "unite": ""}
 
