@@ -139,7 +139,10 @@ a.meal-name:hover { text-decoration:underline; }
 .shop-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
 .shop-h h2 { margin:0; font-size:1.1rem; }
 .shop-n { font-size:0.8rem; color:var(--t2); background:var(--bg); padding:3px 10px; border-radius:12px; font-weight:500; }
-.shop-g { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:4px; }
+.shop-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:4px; }
+.shop-rayon { margin-bottom:14px; }
+.rayon-h { display:flex; align-items:center; gap:6px; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--pr); margin:0 0 6px; padding-bottom:3px; border-bottom:2px solid var(--bo); }
+.rayon-n { font-size:0.68rem; font-weight:700; background:var(--bg); color:var(--t2); border-radius:8px; padding:0 6px; }
 .shop-i { display:flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid var(--bo); border-radius:6px; cursor:pointer; font-size:0.85rem; }
 .shop-i:hover { border-color:var(--pr); }
 .shop-i:has(.shop-c:checked) { background:#f0faf0; border-color:var(--sc); text-decoration:line-through; opacity:0.6; }
@@ -198,7 +201,7 @@ a.meal-name:hover { text-decoration:underline; }
 @media (max-width:768px) {
     .week-grid { min-width:540px; grid-template-columns:40px repeat(7, minmax(70px, 1fr)); }
     .meal-name { font-size:0.7rem; }
-    .shop-g { grid-template-columns:1fr; }
+    .shop-grid { grid-template-columns:1fr; }
     .form-r { flex-direction:column; gap:0; }
     .nav-inner { flex-direction:column; gap:6px; }
     .recettes-grid { grid-template-columns:1fr 1fr; }
@@ -214,7 +217,7 @@ a.meal-name:hover { text-decoration:underline; }
     .recettes-grid { grid-template-columns:1fr; }
 }
 @media (min-width:1024px) {
-    .shop-g { grid-template-columns:repeat(3,1fr); }
+    .shop-grid { grid-template-columns:repeat(3,1fr); }
 }
 
 /* ── Classes utilitaires (auparavant référencées sans définition) ─ */
@@ -331,7 +334,7 @@ a.meal-name:hover { text-decoration:underline; }
     #btn-shop, .shop-h .btn, #shop-status { display:none !important; }
     body { background:#fff; }
     .card { box-shadow:none; border:none; padding:0; }
-    .shop-g { grid-template-columns:repeat(2,1fr) !important; }
+    .shop-grid { grid-template-columns:repeat(2,1fr) !important; }
     .shop-i { border:none; padding:3px 0; break-inside:avoid; }
     .shop-i:has(.shop-c:checked) { display:none; } /* ne pas imprimer ce qui est déjà pris */
 }

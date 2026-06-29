@@ -21,6 +21,7 @@ from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
+from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.nutrition import estimate_nutrition
 from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
 
@@ -199,6 +200,7 @@ async def voir_planning(request: Request, planning_id: int):
     if len(per_day) != 7:
         per_day = [planning.get("nb_personnes", 4)] * 7
 
+    liste_courses = data.get("liste_courses", [])
     return templates.TemplateResponse(
         "planning.html",
         {
@@ -206,7 +208,9 @@ async def voir_planning(request: Request, planning_id: int):
             "planning": planning,
             "plats": data.get("plats", []),
             "week_rows": _group_week(data.get("plats", [])),
-            "liste_courses": data.get("liste_courses", []),
+            "liste_courses": liste_courses,
+            "courses_par_rayon": group_by_rayon(liste_courses),
+            "rayon_order": RAYON_ORDER,
             "per_day": per_day,
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
@@ -638,6 +642,10 @@ async def generate_shopping(planning_id: int, request: Request):
                 if f.lower() not in {i["nom"].lower() for i in liste_courses}:
                     liste_courses.append({"nom": f, "quantite": "", "unite": ""})
 
+        # Rayon de magasin pour chaque ingrédient (pour le groupement à l'affichage)
+        for it in liste_courses:
+            it["rayon"] = categorize(it.get("nom", ""))
+
         # Sauvegarder la liste de courses dans le planning.
         # NB : on n'écrit PAS cette liste dans Notion par recette — c'est une
         # liste agrégée/dédupliquée de la semaine, pas les ingrédients d'une
@@ -987,6 +995,8 @@ async def api_update_meal(
 
         # Fusion déterministe (dédup + addition par nom+unité)
         liste_courses = merge_ingredients(collected)
+        for it in liste_courses:
+            it["rayon"] = categorize(it.get("nom", ""))
         planning_data["liste_courses"] = liste_courses
 
         # Mettre à jour le planning existant (ne pas en créer un nouveau)
