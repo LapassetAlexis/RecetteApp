@@ -2,6 +2,7 @@
 
 import httpx
 import logging
+import time
 from typing import Any
 
 from app.config import settings
@@ -9,6 +10,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 NOTION_VERSION = "2022-06-28"
 BASE_URL = "https://api.notion.com/v1"
+CACHE_TTL = 60  # secondes : durée de vie du cache de la liste des recettes
 
 
 class NotionClient:
@@ -22,10 +24,56 @@ class NotionClient:
             "Notion-Version": NOTION_VERSION,
             "Content-Type": "application/json",
         }
+        self._cache: list[dict[str, Any]] | None = None
+        self._cache_ts: float = 0.0
+
+    def invalidate_cache(self) -> None:
+        """Force le prochain get_all_recipes à refetch (après une écriture)."""
+        self._cache = None
 
     # ── Récupération des recettes ──────────────────────────────────
 
-    async def get_all_recipes(self) -> list[dict[str, Any]]:
+    async def get_all_recipes(self, force: bool = False) -> list[dict[str, Any]]:
+        """Liste des recettes, avec cache mémoire court (TTL) pour éviter de
+        re-paginer Notion à chaque page vue / génération."""
+        if not force and self._cache is not None and (time.monotonic() - self._cache_ts) < CACHE_TTL:
+            return self._cache
+        recipes = await self._fetch_all_recipes()
+        self._cache = recipes
+        self._cache_ts = time.monotonic()
+        return recipes
+
+    async def get_recipe(self, page_id: str) -> dict[str, Any] | None:
+        """Récupère UNE recette par son id (1 appel, pas toute la base)."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{BASE_URL}/pages/{page_id}", headers=self._headers, timeout=30
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            recipe = self._parse_page(resp.json())
+            return recipe if recipe["nom"] else None
+
+    async def get_recipe_instructions(self, page_id: str) -> list[str]:
+        """Récupère les étapes de cuisson depuis les blocks de la page."""
+        steps: list[str] = []
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
+                headers=self._headers, timeout=30,
+            )
+            if resp.status_code >= 400:
+                return steps
+            for block in resp.json().get("results", []):
+                if block.get("type") == "numbered_list_item":
+                    rt = block["numbered_list_item"].get("rich_text", [])
+                    txt = "".join(t.get("plain_text", "") for t in rt).strip()
+                    if txt:
+                        steps.append(txt)
+        return steps
+
+    async def _fetch_all_recipes(self) -> list[dict[str, Any]]:
         """Parcourt toutes les pages de la base et retourne les recettes."""
         recipes: list[dict[str, Any]] = []
         start_cursor: str | None = None
@@ -100,6 +148,12 @@ class NotionClient:
         if sel:
             moment = sel.get("name", "")
 
+        # Image = couverture de la page (external ou fichier uploadé)
+        image = ""
+        cover = page.get("cover")
+        if cover:
+            image = cover.get("external", {}).get("url", "") or cover.get("file", {}).get("url", "")
+
         return {
             "id": page["id"],
             "nom": nom,
@@ -110,6 +164,7 @@ class NotionClient:
             "note": note,
             "etat": etat,
             "moment": moment,
+            "image": image,
         }
 
     # ── Création d'une fiche ──────────────────────────────────────
@@ -152,6 +207,7 @@ class NotionClient:
                 timeout=30,
             )
             resp.raise_for_status()
+            self.invalidate_cache()  # la nouvelle recette doit apparaître
             return resp.json()
 
     # ── Mise à jour avec ingrédients ─────────────────────────────
@@ -316,6 +372,54 @@ class NotionClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def rewrite_recipe_body(self, page_id: str, instructions_text: str) -> dict[str, Any]:
+        """Nettoie le corps de la page (anciennes sections recette accumulées :
+        Ingrédients / Préparation / Instructions, titres + listes/paragraphes)
+        puis ré-écrit les instructions à jour. Évite les doublons et résidus."""
+        keywords = ("ingrédient", "ingredient", "préparation", "preparation", "instruction")
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
+                headers=self._headers, timeout=30,
+            )
+            to_delete: list[str] = []
+            if resp.status_code < 400:
+                in_section = False
+                for b in resp.json().get("results", []):
+                    t = b.get("type", "")
+                    if t.startswith("heading_"):
+                        txt = "".join(
+                            x.get("plain_text", "") for x in b.get(t, {}).get("rich_text", [])
+                        ).lower()
+                        in_section = any(k in txt for k in keywords)
+                        if in_section:
+                            to_delete.append(b["id"])
+                    elif in_section and t in ("bulleted_list_item", "numbered_list_item", "paragraph"):
+                        to_delete.append(b["id"])
+            for bid in to_delete:
+                await client.delete(f"{BASE_URL}/blocks/{bid}", headers=self._headers, timeout=30)
+        return await self.append_instructions(page_id, instructions_text)
+
+    async def update_recipe_meta(
+        self, page_id: str, repas: str = "", tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Met à jour le type (Repas) et les tags d'une recette existante."""
+        properties: dict[str, Any] = {}
+        if repas:
+            properties["Repas"] = {"select": {"name": repas}}
+        if tags is not None:
+            properties["Tag"] = {"multi_select": [{"name": t} for t in tags]}
+        if not properties:
+            return {}
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers, json={"properties": properties}, timeout=30,
+            )
+            resp.raise_for_status()
+            self.invalidate_cache()
+            return resp.json()
+
 
     # ── Mise à jour de la note ──────────────────────────────────
 
@@ -338,4 +442,5 @@ class NotionClient:
                 timeout=30,
             )
             resp.raise_for_status()
+            self.invalidate_cache()  # note à jour dans la liste
             return resp.json()

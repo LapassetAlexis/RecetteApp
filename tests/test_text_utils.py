@@ -1,11 +1,46 @@
 """Tests du nettoyage des titres de recettes."""
 
-from app.text_utils import clean_recipe_title, merge_ingredients
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
+
+
+def test_split_instructions_multiline():
+    assert split_instructions("Étape 1\nÉtape 2\nÉtape 3") == ["Étape 1", "Étape 2", "Étape 3"]
+
+
+def test_split_instructions_single_block_into_sentences():
+    txt = "Lavez les épinards. Dans une poêle chauffez l'huile. Enfournez 25 minutes."
+    steps = split_instructions(txt)
+    assert len(steps) == 3
+    assert steps[0] == "Lavez les épinards."
+    assert steps[2] == "Enfournez 25 minutes."
+
+
+def test_split_instructions_empty():
+    assert split_instructions("") == []
+
+
+def test_parse_ingredient_line():
+    # On extrait seulement la quantité de tête ; le libellé source reste intact.
+    assert parse_ingredient_line("700 g d'épinards") == {"nom": "g d'épinards", "quantite": "700", "unite": ""}
+    assert parse_ingredient_line("1/2 cuillère à café de fond de volaille") == {
+        "nom": "cuillère à café de fond de volaille", "quantite": "1/2", "unite": ""}
+    assert parse_ingredient_line("4 œufs") == {"nom": "œufs", "quantite": "4", "unite": ""}
+    # nombre collé à l'unité ("200g")
+    assert parse_ingredient_line("200g de pâtes courtes") == {"nom": "g de pâtes courtes", "quantite": "200", "unite": ""}
+    assert parse_ingredient_line("80g de roquette") == {"nom": "g de roquette", "quantite": "80", "unite": ""}
+    assert parse_ingredient_line("Sel, poivre") == {"nom": "Sel, poivre", "quantite": "", "unite": ""}
+    assert parse_ingredient_line("farine : 200 g") == {"nom": "farine", "quantite": "200", "unite": "g"}
+    assert parse_ingredient_line("   ") is None
 
 
 def test_strip_site_suffix_dash():
     assert clean_recipe_title("Flans aux poireaux et chorizo - Amandine Cooking") == "Flans aux poireaux et chorizo"
     assert clean_recipe_title("Wok de boeuf aux légumes - Recettes légères") == "Wok de boeuf aux légumes"
+
+
+def test_strip_plat_et_recette():
+    assert clean_recipe_title("Tiramisu Léger aux Framboises - Plat et Recette") == "Tiramisu Léger aux Framboises"
+    assert clean_recipe_title("Wok de Poulet aux légumes et Nouilles - Plat et Recette") == "Wok de Poulet aux légumes et Nouilles"
 
 
 def test_strip_pipe_suffix():

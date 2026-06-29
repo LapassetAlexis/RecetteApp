@@ -6,6 +6,7 @@ import json
 import logging
 import random
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -17,11 +18,10 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
-from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
-from app.text_utils import clean_recipe_title, merge_ingredients
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
 
 VERSION = "1.1.0"
 
@@ -95,6 +95,9 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Version dans tous les templates
 templates.env.globals["version"] = VERSION
+# Identifiant d'asset (change à chaque démarrage) → casse le cache CSS/SW au
+# redéploiement sans dépendre du SW pour rafraîchir.
+templates.env.globals["asset_version"] = str(int(time.time()))
 # Filtre de nettoyage des titres de recettes (retire les suffixes de site)
 templates.env.filters["clean_title"] = clean_recipe_title
 
@@ -189,12 +192,17 @@ async def liste_recettes(request: Request):
         logger.error(f"Erreur Notion: {e}")
         recettes = []
 
-    # Stats
+    # Stats pour les filtres (type / état / tag)
     total = len(recettes)
     par_type: dict[str, int] = {}
+    par_etat: dict[str, int] = {}
+    par_tag: dict[str, int] = {}
     for r in recettes:
-        t = r["repas"] or "Non classé"
-        par_type[t] = par_type.get(t, 0) + 1
+        par_type[r["repas"] or "Non classé"] = par_type.get(r["repas"] or "Non classé", 0) + 1
+        if r["etat"]:
+            par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1
+        for t in r["tags"]:
+            par_tag[t] = par_tag.get(t, 0) + 1
 
     return templates.TemplateResponse(
         "recettes.html",
@@ -203,54 +211,143 @@ async def liste_recettes(request: Request):
             "recettes": recettes,
             "total": total,
             "par_type": sorted(par_type.items()),
+            "par_etat": sorted(par_etat.items()),
+            "par_tag": sorted(par_tag.items(), key=lambda kv: -kv[1]),  # tags par fréquence
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
         },
     )
 
 
+BASE_SERVINGS = 4  # base d'extraction des ingrédients (cf. extract_ingredients)
+
+
 @app.get("/recette/{page_id}", response_class=HTMLResponse)
 async def detail_recette(request: Request, page_id: str):
-    """Page détail d'une recette avec rendu Cooklang."""
+    """Fiche détail : ingrédients (Cooklang, portions ajustables) + instructions."""
     try:
-        recettes = await notion.get_all_recipes()
-        recette = next((r for r in recettes if r["id"] == page_id), None)
+        recette = await notion.get_recipe(page_id)  # 1 appel, pas toute la base
         if not recette:
             return HTMLResponse("Recette non trouvée", status_code=404)
 
-        # Chercher les ingrédients dans le cache
+        # Ingrédients structurés depuis le cache local
+        ingredients: list[dict] = []
         cached = await db.get_enriched(page_id)
-        cook_content = f">> Serves: 4\n>> Source: {recette.get('url', '')}\n\n"
         if cached and cached.get("ingredients"):
             try:
-                ings = json.loads(cached["ingredients"])
-                for i in ings:
-                    q = i.get("quantite", "")
-                    u = i.get("unite", "")
-                    if q and u:
-                        cook_content += f"@{i['nom']}{{{q}%{u}}}\n"
-                    elif q:
-                        cook_content += f"@{i['nom']}{{{q}}}\n"
-                    else:
-                        cook_content += f"@{i['nom']}\n"
-            except Exception: pass
-        cook_content += "\n"
+                ingredients = [
+                    {"nom": i.get("nom", ""), "quantite": str(i.get("quantite", "") or ""),
+                     "unite": i.get("unite", "")}
+                    for i in json.loads(cached["ingredients"]) if i.get("nom")
+                ]
+            except (json.JSONDecodeError, TypeError):
+                ingredients = []
 
-        recipe_obj = parse_cook(cook_content)
-        html_content = cook_to_html(recipe_obj)
+        # Instructions depuis les blocks Notion (best-effort)
+        try:
+            instructions = await notion.get_recipe_instructions(page_id)
+        except Exception as e:
+            logger.warning(f"Instructions illisibles pour {page_id}: {e}")
+            instructions = []
 
         return templates.TemplateResponse(
             "recette_detail.html",
             {
                 "request": request,
                 "recette": recette,
-                "cook_html": html_content,
-                "cook_raw": cook_content,
+                "ingredients": ingredients,
+                "base_servings": BASE_SERVINGS,
+                "instructions": instructions,
             },
         )
     except Exception:
         logger.exception("Erreur détail recette")
         return HTMLResponse("Erreur interne lors du chargement de la recette.", status_code=500)
+
+
+@app.get("/recette/{page_id}/enrichir", response_class=HTMLResponse)
+async def enrichir_page(request: Request, page_id: str):
+    """Étape 1 : re-fetch la source et pré-remplit un formulaire éditable
+    (ingrédients structurés + instructions nettoyées) à valider."""
+    recette = await notion.get_recipe(page_id)
+    if not recette:
+        return HTMLResponse("Recette non trouvée", status_code=404)
+
+    ingredients: list[dict] = []
+    instructions_text = ""
+    image_url = ""
+
+    # « Enrichir » = re-fetch la SOURCE en priorité (données d'origine), pas le
+    # cache qui peut contenir d'anciennes extractions inexactes.
+    if recette.get("url"):
+        try:
+            info = await llm.extract_recipe_from_url(recette["url"])
+            ingredients = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", [])) if i and i["nom"]]
+            instructions_text = info.get("instructions", "")
+            image_url = info.get("image_url", "")
+        except Exception as e:
+            logger.warning(f"Re-extraction enrichir {page_id}: {e}")
+
+    # Repli sur le cache / les blocks Notion si la source n'a rien donné
+    if not ingredients:
+        cached = await db.get_enriched(page_id)
+        if cached and cached.get("ingredients"):
+            try:
+                ingredients = json.loads(cached["ingredients"])
+            except (json.JSONDecodeError, TypeError):
+                ingredients = []
+    if not instructions_text:
+        try:
+            instructions_text = "\n".join(await notion.get_recipe_instructions(page_id))
+        except Exception:
+            instructions_text = ""
+
+    return templates.TemplateResponse(
+        "enrichir.html",
+        {
+            "request": request,
+            "recette": recette,
+            "ingredients": ingredients,
+            "steps": split_instructions(instructions_text),
+            "image_url": image_url,
+            "repas_options": REPAS_OPTIONS,
+            "tag_options": TAG_OPTIONS,
+        },
+    )
+
+
+@app.post("/recette/{page_id}/enrichir")
+async def enrichir_submit(
+    request: Request,
+    page_id: str,
+    repas: str = Form(""),
+    tags: list[str] = Form([]),
+    ingredients_text: str = Form(""),
+    steps: list[str] = Form([]),
+    image_url: str = Form(""),
+):
+    """Étape 2 : applique les changements validés à la recette Notion + cache."""
+    recette = await notion.get_recipe(page_id)
+    if not recette:
+        return RedirectResponse(url="/recettes", status_code=303)
+
+    structured = [
+        i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
+    ]
+    instructions_text = "\n".join(s.strip() for s in steps if s.strip())
+    try:
+        if structured:
+            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured))
+            await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+        if instructions_text:
+            await notion.rewrite_recipe_body(page_id, instructions_text)
+        if image_url:
+            await notion.update_image(page_id, image_url)
+        await notion.update_recipe_meta(page_id, repas=repas, tags=tags or None)
+    except Exception:
+        logger.exception("Erreur validation enrichissement")
+
+    return RedirectResponse(url=f"/recette/{page_id}", status_code=303)
 
 
 @app.get("/ajouter", response_class=HTMLResponse)
@@ -523,6 +620,38 @@ async def api_analyze_url(request: Request):
 
     except Exception as e:
         logger.exception("Erreur analyse URL")
+        return {"error": str(e)}
+
+
+def _ingredients_to_text(ings: list[dict]) -> str:
+    """Formate les ingrédients en lignes propres « - 700 g d'épinards »."""
+    out = []
+    for i in ings:
+        nom = (i.get("nom") or "").strip()
+        if not nom:
+            continue
+        parts = [str(i.get("quantite", "")).strip(), str(i.get("unite", "")).strip(), nom]
+        out.append("- " + " ".join(p for p in parts if p))
+    return "\n".join(out)
+
+
+@app.post("/api/enrich/{page_id}")
+async def api_enrich_one(page_id: str):
+    """Enrichit UNE recette : extrait ses ingrédients (depuis sa page) et les
+    écrit dans Notion + le cache."""
+    try:
+        recette = await notion.get_recipe(page_id)
+        if not recette:
+            return {"error": "Recette introuvable"}
+        d = await llm.extract_ingredients(recette["nom"], recette.get("url", ""))
+        ings = d.get("ingredients", [])
+        if not ings:
+            return {"error": "Aucun ingrédient extrait (pas d'URL exploitable ?)"}
+        await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(ings))
+        await notion.update_ingredients(page_id, _ingredients_to_text(ings))
+        return {"success": True, "count": len(ings)}
+    except Exception as e:
+        logger.exception("Erreur enrichissement unitaire")
         return {"error": str(e)}
 
 

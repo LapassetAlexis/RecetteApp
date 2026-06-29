@@ -1,8 +1,29 @@
-"""Tests du parsing des pages Notion (_parse_page), sans réseau."""
+"""Tests du parsing des pages Notion (_parse_page) + cache, sans réseau."""
+
+import asyncio
 
 from app.notion_client import NotionClient
 
 notion = NotionClient()
+
+
+def test_get_all_recipes_uses_cache(monkeypatch):
+    n = NotionClient()
+    calls = {"c": 0}
+
+    async def _fetch():
+        calls["c"] += 1
+        return [{"nom": "X"}]
+
+    monkeypatch.setattr(n, "_fetch_all_recipes", _fetch)
+    asyncio.run(n.get_all_recipes())
+    asyncio.run(n.get_all_recipes())   # servi par le cache
+    assert calls["c"] == 1
+    n.invalidate_cache()
+    asyncio.run(n.get_all_recipes())   # refetch après invalidation
+    assert calls["c"] == 2
+    asyncio.run(n.get_all_recipes(force=True))
+    assert calls["c"] == 3
 
 
 def _page(props):
@@ -35,6 +56,16 @@ def test_parse_missing_columns_does_not_crash():
     assert r["nom"] == "X"
     assert r["url"] == "" and r["repas"] == "" and r["tags"] == []
     assert r["note"] == "" and r["etat"] == "" and r["moment"] == ""
+
+
+def test_parse_cover_image():
+    page = _page({"Nom": {"type": "title", "title": [{"plain_text": "X"}]}})
+    page["cover"] = {"type": "external", "external": {"url": "http://img.jpg"}}
+    assert notion._parse_page(page)["image"] == "http://img.jpg"
+    page["cover"] = {"type": "file", "file": {"url": "http://up.jpg"}}
+    assert notion._parse_page(page)["image"] == "http://up.jpg"
+    del page["cover"]
+    assert notion._parse_page(page)["image"] == ""
 
 
 def test_parse_empty_selects():

@@ -15,18 +15,51 @@
     <input type="search" id="recipe-search" class="inp" placeholder="🔍 Rechercher une recette...">
 </div>
 
-<!-- Filtres par type (cliquables) -->
-<div class="stats-bar">
-    <span class="stat-chip active" data-type="">Tous : {{ total }}</span>
-    {% for type, count in par_type %}
-    <span class="stat-chip" data-type="{{ type }}">{{ type }} : {{ count }}</span>
-    {% endfor %}
+<!-- Filtres cliquables (type / état / tag) -->
+<div class="filters">
+    <div class="filter-row">
+        <span class="filter-label">Type</span>
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="type" data-value="">Tous ({{ total }})</span>
+            {% for type, count in par_type %}
+            <span class="stat-chip" data-filter="type" data-value="{{ type }}">{{ type }} ({{ count }})</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% if par_etat %}
+    <div class="filter-row">
+        <span class="filter-label">État</span>
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="etat" data-value="">Tous</span>
+            {% for e, count in par_etat %}
+            <span class="stat-chip" data-filter="etat" data-value="{{ e }}">{{ e }} ({{ count }})</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    {% if par_tag %}
+    <div class="filter-row">
+        <span class="filter-label">Tag</span>
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="tag" data-value="">Tous</span>
+            {% for t, count in par_tag %}
+            <span class="stat-chip" data-filter="tag" data-value="{{ t }}">{{ t }} ({{ count }})</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 
+{% set type_colors = {
+    'Plat': '#e67e22', 'Dessert': '#8e44ad', 'Entrée': '#27ae60', 'Apéro': '#c0392b',
+    'Goûter': '#e84393', 'Accompagnement': '#2980b9', 'Boisson': '#16a085',
+    'Légume': '#16a085', 'Petit dej': '#f39c12'
+} %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|lower }}" data-type="{{ recette.repas or 'Non classé' }}">
-        <h3>{{ recette.nom }}</h3>
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-type="{{ recette.repas or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
+        {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
+        <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
             {% if recette.repas %}
             <span class="chip chip-repas">{{ recette.repas }}</span>
@@ -52,10 +85,7 @@
             {% endfor %}
             <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
         </div>
-        {% if recette.url %}
-        <a href="{{ recette.url }}" target="_blank" class="recipe-link">🔗 Lien</a>
-        {% endif %}
-        <a href="/recette/{{ recette.id }}" class="recipe-link" style="margin-left:6px;">📖 Détail</a>
+        <a class="enrich-btn" href="/recette/{{ recette.id }}/enrichir" title="Compléter / nettoyer depuis la source">✨ Enrichir</a>
     </div>
     {% endfor %}
     <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
@@ -64,15 +94,28 @@
 
 {% block scripts %}
 <script>
-// ── Recherche + filtre par type ─────────────────────
-let activeType = '';
+// ── Carte entière cliquable → fiche détail (sauf zones interactives) ──
+document.querySelectorAll('.recipe-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+        if (e.target.closest('.recipe-stars') || e.target.closest('.enrich-btn')) return;
+        const href = card.dataset.href;
+        if (href) window.location.href = href;
+    });
+});
+
+// (le bouton « Enrichir » est un lien vers la page d'enrichissement en 2 temps)
+
+// ── Recherche + filtres combinés (type / état / tag) ─
+const active = {type: '', etat: '', tag: ''};
 function applyFilters() {
     const q = document.getElementById('recipe-search').value.trim().toLowerCase();
     let visible = 0;
     document.querySelectorAll('.recipe-card').forEach(card => {
         const okName = !q || card.dataset.name.includes(q);
-        const okType = !activeType || card.dataset.type === activeType;
-        const show = okName && okType;
+        const okType = !active.type || card.dataset.type === active.type;
+        const okEtat = !active.etat || card.dataset.etat === active.etat;
+        const okTag = !active.tag || (card.dataset.tags || '').split('|').includes(active.tag.toLowerCase());
+        const show = okName && okType && okEtat && okTag;
         card.classList.toggle('hidden', !show);
         if (show) visible++;
     });
@@ -81,9 +124,10 @@ function applyFilters() {
 document.getElementById('recipe-search').addEventListener('input', applyFilters);
 document.querySelectorAll('.stat-chip').forEach(chip => {
     chip.addEventListener('click', function() {
-        document.querySelectorAll('.stat-chip').forEach(c => c.classList.remove('active'));
+        const group = this.dataset.filter;  // type | etat | tag
+        document.querySelectorAll(`.stat-chip[data-filter="${group}"]`).forEach(c => c.classList.remove('active'));
         this.classList.add('active');
-        activeType = this.dataset.type;
+        active[group] = this.dataset.value;
         applyFilters();
     });
 });

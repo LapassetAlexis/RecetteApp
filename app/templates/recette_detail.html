@@ -1,57 +1,110 @@
 {% extends "base.html" %}
-{% block title %}{{ recette.nom }}{% endblock %}
+{% block title %}{{ recette.nom | clean_title }}{% endblock %}
 {% block content %}
-<div style="max-width:800px;margin:0 auto;">
-    <div class="hero" style="padding-bottom:12px;">
-        <h1 style="font-size:1.5rem;">{{ recette.nom }}</h1>
-        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px;">
+<div class="detail">
+    {% if recette.image %}<img class="detail-img" src="{{ recette.image }}" alt="{{ recette.nom | clean_title }}">{% endif %}
+    <div class="hero" style="padding-bottom:10px;">
+        <h1 style="font-size:1.5rem;">{{ recette.nom | clean_title }}</h1>
+        <div class="detail-chips">
             {% if recette.repas %}<span class="chip chip-repas">{{ recette.repas }}</span>{% endif %}
             {% if recette.etat %}<span class="chip chip-etat">{{ recette.etat }}</span>{% endif %}
             {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
-            {% if recette.tags %}
-                {% for t in recette.tags %}
-                <span class="tag">{{ t }}</span>
-                {% endfor %}
-            {% endif %}
+            {% for t in recette.tags %}<span class="tag">{{ t }}</span>{% endfor %}
         </div>
-        <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;">
-            {% if recette.url %}
-            <a href="{{ recette.url }}" target="_blank" class="btn btn-ghost btn-sm">🔗 Voir l'original</a>
-            {% endif %}
-            <a href="{{ recette.notion_url }}" target="_blank" class="btn btn-ghost btn-sm">📄 Ouvrir dans Notion</a>
+        <div class="detail-links">
+            {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
+            {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
+            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">✨ Enrichir</a>
         </div>
     </div>
 
+    {% if ingredients %}
     <div class="card">
-        <h2 style="font-size:1rem;margin-bottom:12px;">🥦 Ingrédients</h2>
-        {% if cook_html %}
-        <div class="cook-render">{{ cook_html|safe }}</div>
-        {% else %}
-        <p class="empty">Aucun ingrédient pour cette recette.</p>
-        <p style="text-align:center;color:var(--t2);font-size:0.85rem;">
-            Utilise le bouton <strong>🔄 Enrichir toutes les recettes</strong> depuis la page Recettes,
-            ou génère un planning pour extraire les ingrédients automatiquement.
-        </p>
-        {% endif %}
-    </div>
-
-    {% if cook_raw %}
-    <div class="card">
-        <details>
-            <summary style="cursor:pointer;font-weight:600;font-size:0.9rem;">📝 Format Cooklang <small style="font-weight:400;color:var(--t2);">(clique pour voir/modifier)</small></summary>
-            <div style="margin-top:10px;">
-                <p style="font-size:0.8rem;color:var(--t2);margin-bottom:6px;">
-                    Le format <a href="https://cooklang.org" target="_blank" style="color:var(--pr);">Cooklang</a> permet de structurer les recettes.
-                    Les ingrédients sont marqués avec <code>@nom{quantité%unité}</code>, les ustensiles avec <code>#nom</code>.
-                </p>
-                <pre style="font-size:0.8rem;background:var(--bg);padding:14px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;font-family:monospace;line-height:1.6;border:1px solid var(--bo);">{{ cook_raw }}</pre>
+        <div class="ing-head">
+            <h2>🥦 Ingrédients</h2>
+            <div class="serv" role="group" aria-label="Nombre de personnes">
+                <button type="button" class="serv-btn" id="srv-minus" aria-label="Moins">−</button>
+                <span class="serv-n"><span id="srv-n">{{ base_servings }}</span> 👤</span>
+                <button type="button" class="serv-btn" id="srv-plus" aria-label="Plus">+</button>
             </div>
+        </div>
+        <ul class="ing-list">
+            {% for i in ingredients %}
+            <li class="ing" data-qty="{{ i.quantite }}" data-unit="{{ i.unite }}">
+                <span class="ing-q"></span><span class="ing-n">{{ i.nom }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        <details class="cook-raw-box">
+            <summary>📝 Format Cooklang</summary>
+            <pre id="cook-raw" class="cook-raw"></pre>
         </details>
+    </div>
+    {% else %}
+    <div class="card empty">
+        <p>Aucun ingrédient enregistré pour cette recette.</p>
+        <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-primary">✨ Enrichir cette recette</a>
     </div>
     {% endif %}
 
-    <div style="text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center;">
-        <a href="/recettes" class="btn btn-ghost">← Retour aux recettes</a>
+    {% if instructions %}
+    <div class="card">
+        <h2>👨‍🍳 Instructions</h2>
+        <ol class="instr-list">
+            {% for step in instructions %}<li>{{ step }}</li>{% endfor %}
+        </ol>
     </div>
+    {% endif %}
+
+    <div class="act"><a href="/recettes" class="btn btn-ghost">← Retour aux recettes</a></div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE_SERVINGS = {{ base_servings }};
+let servings = BASE_SERVINGS;
+
+// Parse une quantité : décimales (1,5) et fractions (1/2). null si non numérique.
+function parseQty(s) {
+    s = (s || '').toString().trim().replace(',', '.');
+    if (!s) return null;
+    const frac = s.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+    if (frac) { const d = parseFloat(frac[2]); return d ? parseFloat(frac[1]) / d : null; }
+    if (/^\d+(?:\.\d+)?$/.test(s)) return parseFloat(s);
+    return null;
+}
+function fmtQty(n) {
+    if (Number.isInteger(n)) return String(n);
+    return String(Math.round(n * 100) / 100);
+}
+
+function render() {
+    const ratio = servings / BASE_SERVINGS;
+    const cookLines = [`>> Serves: ${servings}`, ''];
+    document.querySelectorAll('.ing').forEach(li => {
+        const raw = li.dataset.qty, unit = li.dataset.unit || '';
+        const n = parseQty(raw);
+        const scaled = n !== null ? fmtQty(n * ratio) : raw;
+        const qEl = li.querySelector('.ing-q');
+        qEl.textContent = scaled ? (unit ? `${scaled} ${unit}` : `${scaled}`) : '';
+        // ligne Cooklang
+        const nom = li.querySelector('.ing-n').textContent;
+        if (scaled && unit) cookLines.push(`@${nom}{${scaled}%${unit}}`);
+        else if (scaled) cookLines.push(`@${nom}{${scaled}}`);
+        else cookLines.push(`@${nom}`);
+    });
+    document.getElementById('srv-n').textContent = servings;
+    const raw = document.getElementById('cook-raw');
+    if (raw) raw.textContent = cookLines.join('\n');
+}
+
+document.getElementById('srv-minus')?.addEventListener('click', () => {
+    servings = Math.max(1, servings - 1); render();
+});
+document.getElementById('srv-plus')?.addEventListener('click', () => {
+    servings = Math.min(50, servings + 1); render();
+});
+render();
+</script>
 {% endblock %}

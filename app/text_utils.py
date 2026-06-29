@@ -4,7 +4,7 @@ import re
 
 # Marqueurs typiques d'un suffixe « source » à retirer du titre d'une recette.
 _SOURCE_MARKERS = (
-    "cooking", "recettes", "recette ", "cuisine", "marmiton", "750g",
+    "cooking", "recette", "cuisine", "marmiton", "750g",
     "ricardo", "ptitchef", "journaldesfemmes", "blog", ".com", ".fr",
     "minceur", "weight watchers",
 )
@@ -35,6 +35,53 @@ def clean_recipe_title(name: str) -> str:
     # Suffixe " WW" (Weight Watchers)
     s = re.sub(r"\s+WW$", "", s)
     return s.strip()
+
+
+def parse_ingredient_line(line: str) -> dict | None:
+    """Transforme une ligne en {quantite, nom} en PRÉSERVANT le libellé source.
+
+    On extrait seulement le nombre de tête (pour pouvoir scaler les portions) et
+    on garde TOUT le reste tel quel comme libellé — pas de découpe d'unité (qui
+    cassait « cuillère à café », « d'épinards »...). `unite` reste vide.
+
+    "700 g d'épinards"                 -> {quantite:"700", nom:"g d'épinards", unite:""}
+    "1/2 cuillère à café de fond ..."  -> {quantite:"1/2", nom:"cuillère à café de fond ...", unite:""}
+    "4 œufs"                           -> {quantite:"4", nom:"œufs", unite:""}
+    "Sel, poivre"                      -> {quantite:"", nom:"Sel, poivre", unite:""}
+    "farine : 200 g" (legacy)          -> {quantite:"200", nom:"farine", unite:"g"}
+    """
+    s = line.strip().lstrip("-•*–").strip()
+    if not s:
+        return None
+    # Ancien format interne "nom : quantité unité"
+    if " : " in s:
+        nom, _, rest = s.partition(" : ")
+        m = re.match(r"^([\d.,/]+)\s*(.*)$", rest.strip())
+        if m:
+            return {"nom": nom.strip(), "quantite": m.group(1).replace(",", "."), "unite": m.group(2).strip()}
+        return {"nom": nom.strip(), "quantite": "", "unite": ""}
+    # Format source "quantité <libellé>" : on garde le libellé intact.
+    # \s* (et non \s+) pour gérer le nombre collé à l'unité ("200g de pâtes").
+    m = re.match(r"^([\d]+(?:[.,/]\d+)?)\s*(.*)$", s)
+    if m and m.group(2).strip():
+        return {"nom": m.group(2).strip(), "quantite": m.group(1).replace(",", "."), "unite": ""}
+    return {"nom": s, "quantite": "", "unite": ""}
+
+
+def split_instructions(text: str) -> list[str]:
+    """Découpe des instructions en étapes.
+
+    - plusieurs lignes -> une étape par ligne ;
+    - un seul bloc -> découpage par phrases (. ! ?) suivies d'une majuscule/chiffre.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    if len(lines) > 1:
+        return lines
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÀ-ÝÉÈ0-9])", text)
+    return [s.strip() for s in sentences if s.strip()]
 
 
 def _parse_qty(value) -> float | None:

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Enrichir — {{ recette.nom | clean_title }}{% endblock %}
+{% block content %}
+<div class="detail">
+    <div class="hero" style="padding-bottom:6px;">
+        <h1 style="font-size:1.4rem;">✨ Enrichir la recette</h1>
+        <p class="hero-sub">{{ recette.nom | clean_title }}</p>
+    </div>
+
+    <form method="POST" action="/recette/{{ recette.id }}/enrichir" class="card" id="enrich-form">
+        <div class="form-r">
+            <div class="form-g">
+                <label for="repas">🍽️ Type</label>
+                <select id="repas" name="repas">
+                    <option value="">— Aucun —</option>
+                    {% for opt in repas_options %}
+                    <option value="{{ opt }}" {% if recette.repas == opt %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-g">
+            <label>🏷️ Tags</label>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                {% for tag in tag_options %}
+                <label class="tgl"><input type="checkbox" name="tags" value="{{ tag }}" {% if tag in recette.tags %}checked{% endif %}><span>{{ tag }}</span></label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="form-g">
+            <label for="ingredients_text">🥦 Ingrédients <small class="muted-sm">(une ligne par ingrédient : « 200 g farine »)</small></label>
+            <textarea id="ingredients_text" name="ingredients_text" rows="9" class="inp">{% for i in ingredients %}{{ [i.quantite, i.unite, i.nom]|select|join(' ') }}
+{% endfor %}</textarea>
+        </div>
+
+        <div class="form-g">
+            <label>👨‍🍳 Instructions <small class="muted-sm">(une étape par bloc)</small></label>
+            <div id="steps">
+                {% for step in steps %}
+                <div class="step-row">
+                    <span class="step-num"></span>
+                    <textarea name="steps" rows="2" class="inp">{{ step }}</textarea>
+                    <button type="button" class="step-del" title="Supprimer l'étape">✕</button>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" id="add-step" class="btn btn-ghost btn-sm" style="margin-top:6px;">+ Ajouter une étape</button>
+        </div>
+
+        <div class="form-g">
+            <label for="image_url">🖼️ Image (URL)</label>
+            <input type="url" id="image_url" name="image_url" class="inp" value="{{ image_url }}" placeholder="https://...">
+            {% if image_url %}<img src="{{ image_url }}" alt="" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-top:6px;">{% endif %}
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg" id="enrich-submit">💾 Valider et enregistrer dans Notion</button>
+        <a href="/recette/{{ recette.id }}" class="btn btn-ghost btn-lg" style="margin-top:6px;">Annuler</a>
+    </form>
+</div>
+
+<div id="enrich-loading" class="loading-overlay">
+    <div class="loading-box">
+        <div class="spinner-big"></div>
+        <h2>💾 Enregistrement...</h2>
+        <p>Écriture dans Notion en cours.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function renumberSteps() {
+    document.querySelectorAll('#steps .step-num').forEach((el, i) => { el.textContent = (i + 1) + '.'; });
+}
+function bindDel(btn) {
+    btn.addEventListener('click', () => { btn.closest('.step-row').remove(); renumberSteps(); });
+}
+document.querySelectorAll('.step-del').forEach(bindDel);
+document.getElementById('add-step')?.addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'step-row';
+    row.innerHTML = '<span class="step-num"></span><textarea name="steps" rows="2" class="inp"></textarea>'
+        + '<button type="button" class="step-del" title="Supprimer l\'étape">✕</button>';
+    document.getElementById('steps').appendChild(row);
+    bindDel(row.querySelector('.step-del'));
+    renumberSteps();
+    row.querySelector('textarea').focus();
+});
+renumberSteps();
+
+// Retour visuel pendant l'enregistrement (le POST fait plusieurs appels Notion)
+document.getElementById('enrich-form')?.addEventListener('submit', () => {
+    const b = document.getElementById('enrich-submit');
+    if (b) { b.disabled = true; b.textContent = '⏳ Enregistrement...'; }
+    document.getElementById('enrich-loading')?.classList.add('show');
+});
+</script>
+{% endblock %}
