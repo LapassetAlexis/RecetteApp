@@ -26,12 +26,15 @@
 {% set labels = {'midi':'☀️ Midi','soir':'🌙 Soir'} %}
 <div class="week-wrapper">
     <div class="week-grid">
+        <div class="corner" style="grid-column:1;grid-row:1;"></div>
         {% for jour in range(1, 8) %}
-        <div class="day-head" style="grid-column:{{ jour }};grid-row:1;">
+        <div class="day-head" style="grid-column:{{ jour + 1 }};grid-row:1;">
             <span>{{ jours[jour-1][:3] }}</span>
             {% if per_day %}<span class="day-pers" title="Personnes ce jour">👤 {{ per_day[jour-1] }}</span>{% endif %}
         </div>
         {% endfor %}
+        <div class="row-label midi" style="grid-column:1;grid-row:2;"><span>☀️</span><span>Midi</span></div>
+        <div class="row-label soir" style="grid-column:1;grid-row:3;"><span>🌙</span><span>Soir</span></div>
         {% for moment in ['midi','soir'] %}
         {% set row = 2 if moment == 'midi' else 3 %}
         {% for run in week_rows[moment] %}
@@ -39,9 +42,9 @@
         {% set last = run.start + run.span - 1 %}
         {% set jcsv = run.jours | join(',') %}
         <div class="meal {{ moment }}{{ ' merged' if run.span > 1 else '' }}" data-jours="{{ jcsv }}" data-moment="{{ moment }}"
-             style="grid-column:{{ run.start }} / span {{ run.span }};grid-row:{{ row }};">
+             style="grid-column:{{ run.start + 1 }} / span {{ run.span }};grid-row:{{ row }};">
             <div class="meal-head">
-                <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ jcsv }}" data-moment="{{ moment }}"> <span class="meal-tag">{{ labels[moment] }}{% if run.span > 1 %} · {{ jours[run.start-1][:3] }}–{{ jours[last-1][:3] }}{% endif %}</span></label>
+                <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ jcsv }}" data-moment="{{ moment }}"> <span class="meal-tag">{% if run.span > 1 %}{{ jours[run.start-1][:3] }}–{{ jours[last-1][:3] }}{% endif %}</span></label>
                 <button class="meal-ch" data-jours="{{ jcsv }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
             </div>
             {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}

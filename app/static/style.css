@@ -69,7 +69,12 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 
 /* ── Planning 7j ─────────────────────────────── */
 .week-wrapper { overflow-x:auto; margin-bottom:16px; -webkit-overflow-scrolling:touch; }
-.week-grid { display:grid; grid-template-columns:repeat(7, minmax(88px, 1fr)); gap:6px; min-width:630px; align-items:stretch; }
+.week-grid { display:grid; grid-template-columns:46px repeat(7, minmax(88px, 1fr)); gap:6px; min-width:676px; align-items:stretch; }
+.corner { position:sticky; left:0; z-index:2; background:var(--bg); }
+.row-label { position:sticky; left:0; z-index:2; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-weight:700; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.5px; color:#fff; border-radius:var(--r); box-shadow:var(--sh); }
+.row-label span:first-child { font-size:1rem; }
+.row-label.midi { background:linear-gradient(135deg,var(--pr),var(--prd)); }
+.row-label.soir { background:linear-gradient(135deg,var(--ac),#7a5cc0); }
 .day-head { display:flex; align-items:center; justify-content:center; gap:6px; font-weight:700; padding:8px 4px; background:linear-gradient(135deg,var(--pr),var(--prd)); color:#fff; font-size:0.8rem; text-transform:uppercase; letter-spacing:1px; border-radius:var(--r); box-shadow:var(--sh); }
 .day-pers { font-size:0.65rem; font-weight:600; background:rgba(255,255,255,0.22); padding:1px 6px; border-radius:10px; letter-spacing:0; text-transform:none; }
 /* hauteur fixe = tous les midis alignés entre eux, idem pour les soirs */
@@ -191,7 +196,7 @@ a.meal-name:hover { text-decoration:underline; }
 
 /* ── Responsive ──────────────────────────────── */
 @media (max-width:768px) {
-    .week-grid { min-width:500px; grid-template-columns:repeat(7, minmax(70px, 1fr)); }
+    .week-grid { min-width:540px; grid-template-columns:40px repeat(7, minmax(70px, 1fr)); }
     .meal-name { font-size:0.7rem; }
     .shop-g { grid-template-columns:1fr; }
     .form-r { flex-direction:column; gap:0; }
@@ -200,8 +205,9 @@ a.meal-name:hover { text-decoration:underline; }
     .hero h1 { font-size:1.2rem; }
 }
 @media (max-width:480px) {
-    .week-grid { gap:5px; min-width:430px; grid-template-columns:repeat(7, minmax(58px, 1fr)); }
+    .week-grid { gap:5px; min-width:466px; grid-template-columns:34px repeat(7, minmax(58px, 1fr)); }
     .meal { padding:5px; }
+    .row-label { font-size:0.6rem; }
     .meal-name { font-size:0.72rem; }
     .ck { width:16px; height:16px; }
     .day-head { font-size:0.72rem; padding:6px 2px; }
