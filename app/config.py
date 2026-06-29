@@ -34,6 +34,16 @@ class Settings:
     groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
     groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"))
 
+    # Auth HTTP Basic optionnelle. Si AUTH_USER et AUTH_PASSWORD sont tous
+    # deux renseignés, toutes les routes (sauf /health et /static) exigent ces
+    # identifiants. Sinon, aucune authentification (comportement par défaut).
+    auth_user: str = field(default_factory=lambda: os.getenv("AUTH_USER", ""))
+    auth_password: str = field(default_factory=lambda: os.getenv("AUTH_PASSWORD", ""))
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.auth_user and self.auth_password)
+
     # App
     app_title: str = field(default_factory=lambda: os.getenv("APP_TITLE", "Menu Planner"))
     # Si SECRET_KEY absent : on génère une clé aléatoire au démarrage plutôt

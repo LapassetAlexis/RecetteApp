@@ -1,15 +1,18 @@
 """App FastAPI — Menu Planner avec génération IA."""
 
+import base64
+import binascii
 import json
 import logging
 import random
+import secrets
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
 import aiosqlite
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -44,6 +47,41 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_title, version=VERSION, lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+
+# Auth HTTP Basic optionnelle, activée seulement si AUTH_USER + AUTH_PASSWORD
+# sont définis. /health et /static restent publics (sondes, assets).
+if settings.auth_enabled:
+    _PUBLIC_PREFIXES = ("/health", "/static")
+
+    @app.middleware("http")
+    async def basic_auth(request: Request, call_next):
+        if request.url.path.startswith(_PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        unauthorized = Response(
+            "Authentification requise",
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Menu Planner"'},
+        )
+
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Basic "):
+            return unauthorized
+        try:
+            decoded = base64.b64decode(header[6:]).decode("utf-8")
+            user, _, password = decoded.partition(":")
+        except (binascii.Error, UnicodeDecodeError):
+            return unauthorized
+
+        # compare_digest : comparaison à temps constant (anti timing attack)
+        ok_user = secrets.compare_digest(user, settings.auth_user)
+        ok_pass = secrets.compare_digest(password, settings.auth_password)
+        if not (ok_user and ok_pass):
+            return unauthorized
+
+        return await call_next(request)
+
+    logger.info("🔒 Auth HTTP Basic activée")
 
 # Static files & templates
 BASE_DIR = Path(__file__).parent

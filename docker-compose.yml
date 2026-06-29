@@ -20,7 +20,10 @@ services:
       GROQ_MODEL: "${GROQ_MODEL:-llama-3.1-8b-instant}"
       # App
       APP_TITLE: "Menu Planner Tristabeau"
-      SECRET_KEY: "${SECRET_KEY:-change-me}"
+      SECRET_KEY: "${SECRET_KEY:-}"
+      # Auth HTTP Basic optionnelle (laisser vide pour désactiver)
+      AUTH_USER: "${AUTH_USER:-}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
     volumes:
       - menu-planner-data:/data
     depends_on:
