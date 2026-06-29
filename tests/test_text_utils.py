@@ -108,6 +108,30 @@ def test_merge_fills_missing_quantity():
     assert r[0]["quantite"] == "2"
 
 
+def test_merge_singular_plural_and_accents():
+    r = merge_ingredients([
+        {"nom": "Oignon", "quantite": "1", "unite": "pièce"},
+        {"nom": "oignons", "quantite": "2", "unite": "pièces"},   # pluriel + unité pluriel
+        {"nom": "Pâtes", "quantite": "100", "unite": "g"},
+        {"nom": "pates", "quantite": "150", "unite": "g"},        # sans accent
+    ])
+    q = {i["nom"].lower(): i["quantite"] for i in r}
+    assert len(r) == 2
+    assert q["oignon"] == "3"   # oignon + oignons fusionnés
+    assert q["pâtes"] == "250"  # accents repliés
+
+
+def test_merge_keeps_real_variants_separate():
+    r = merge_ingredients([
+        {"nom": "oignon rouge", "quantite": "1", "unite": ""},
+        {"nom": "oignon jaune", "quantite": "1", "unite": ""},
+        {"nom": "tomate", "quantite": "2", "unite": ""},
+        {"nom": "tomate cerise", "quantite": "10", "unite": ""},
+    ])
+    noms = {i["nom"] for i in r}
+    assert noms == {"oignon rouge", "oignon jaune", "tomate", "tomate cerise"}
+
+
 def test_merge_skips_empty_names_and_sorts():
     r = merge_ingredients([
         {"nom": "Tomate", "quantite": "2", "unite": ""},
