@@ -179,24 +179,29 @@ document.querySelectorAll('.recipe-stars').forEach(container => {
     });
 });
 
-// ── Enrichissement de masse (avec confirmation) ─────
-async function enrichAll() {
+// ── Enrichissement de masse (SSE, progression en direct) ─────
+function enrichAll() {
     if (!confirm("Enrichir toutes les recettes ? Cela lance des appels au LLM et écrit dans Notion pour chaque recette sans ingrédients.")) return;
     const btn = document.getElementById('btn-enrich');
     const st = document.getElementById('enrich-status');
-    btn.disabled = true; st.textContent = '⏳ Enrichissement en cours...';
-    try {
-        const r = await fetch('/api/enrich-all', {method:'POST'});
-        const d = await r.json();
-        if (d.success) {
-            st.textContent = `✅ ${d.enriched}/${d.total} enrichies (${d.skipped} ignorées, ${d.errors} erreurs)`;
-            toast(`${d.enriched} recettes enrichies`, 'success');
-        } else {
-            st.textContent = '❌ ' + (d.error || 'Erreur');
-            toast(d.error || 'Erreur', 'error');
-        }
-    } catch(e) { st.textContent = '❌ Erreur réseau'; toast('Erreur réseau', 'error'); }
-    btn.disabled = false;
+    btn.disabled = true; st.textContent = '⏳ Démarrage...';
+    const es = new EventSource('/api/enrich-all/stream');
+    es.onmessage = (ev) => {
+        const d = JSON.parse(ev.data);
+        if (d.done === 0) { st.textContent = `⏳ 0/${d.total}...`; return; }
+        st.textContent = `⏳ ${d.done}/${d.total} — ${d.enriched} enrichies, ${d.skipped} ignorées, ${d.errors} err.`;
+    };
+    es.addEventListener('done', (ev) => {
+        const d = JSON.parse(ev.data);
+        st.textContent = `✅ ${d.enriched}/${d.total} enrichies (${d.skipped} ignorées, ${d.errors} erreurs)`;
+        toast(`${d.enriched} recettes enrichies`, 'success');
+        es.close(); btn.disabled = false;
+    });
+    es.addEventListener('error', (ev) => {
+        st.textContent = '❌ Erreur (connexion interrompue)';
+        toast('Erreur lors de l\'enrichissement', 'error');
+        es.close(); btn.disabled = false;
+    });
 }
 </script>
 {% endblock %}

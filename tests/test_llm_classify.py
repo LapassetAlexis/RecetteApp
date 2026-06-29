@@ -28,13 +28,13 @@ def test_classify_invalid_type_dropped(monkeypatch):
         return '{"type_repas": "PasUnType", "tags": []}'
     monkeypatch.setattr(client, "_chat", _fake_chat)
     type_repas, tags = asyncio.run(client._classify_type_tags("X", [], []))
-    assert type_repas == "" and tags == []
+    assert type_repas == "Plat" and tags == []  # type invalide -> repli heuristique
 
 
 def test_classify_fallback_on_error(monkeypatch):
     async def _boom(system, user, **kw):
         raise RuntimeError("LLM down")
     monkeypatch.setattr(client, "_chat", _boom)
-    # repli sans LLM : tags par correspondance avec les mots-clés
+    # repli sans LLM : type deviné (défaut Plat) + tags par mots-clés
     type_repas, tags = asyncio.run(client._classify_type_tags("X", [], ["Viande", "truc"]))
-    assert type_repas == "" and "Viande" in tags
+    assert type_repas == "Plat" and "Viande" in tags

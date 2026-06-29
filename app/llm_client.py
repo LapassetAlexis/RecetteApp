@@ -3,9 +3,11 @@
 import asyncio
 import html
 import httpx
+import ipaddress
 import json
 import logging
 import re
+import socket
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -13,6 +15,57 @@ from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.text_utils import clean_recipe_title
 
 logger = logging.getLogger(__name__)
+
+# Garde anti-SSRF : on ne fetch que du http(s) public, jamais une IP interne.
+_MAX_FETCH_BYTES = 5 * 1024 * 1024  # 5 Mo : refus des réponses trop grosses
+_FETCH_TIMEOUT = 8.0
+
+
+async def _is_public_http_url(url: str) -> bool:
+    """Vrai si l'URL est http(s) et que TOUTES ses IP résolues sont publiques
+    (bloque localhost, 169.254.x, 10/172.16/192.168, etc.)."""
+    p = urlparse(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        return False
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, p.hostname, None)
+    except (socket.gaierror, UnicodeError, OSError):
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
+async def _safe_fetch_html(url: str) -> str:
+    """Télécharge le HTML d'une URL publique, avec cap de taille et timeout.
+    Retourne "" si l'URL est interne/illégitime ou en cas d'erreur."""
+    if not await _is_public_http_url(url):
+        logger.warning(f"URL rejetée (non publique / schéma invalide) : {url}")
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT, follow_redirects=True) as client:
+            async with client.stream("GET", url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_FETCH_BYTES:
+                        logger.warning(f"Réponse trop grosse (> {_MAX_FETCH_BYTES} o), tronquée : {url}")
+                        break
+                    chunks.append(chunk)
+                return b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+    except Exception as e:
+        logger.warning(f"Impossible de récupérer la page {url}: {e}")
+        return ""
 
 SYSTEM_PROMPT_PLANNING = """Tu es un chef. Tu SÉLECTIONNES des recettes variées pour une semaine.
 
@@ -987,14 +1040,51 @@ Répond UNIQUEMENT ce JSON :
             return []
 
     # ── Classification type + tags ───────────────────────────────
+    # Indices lexicaux pour corriger/compléter la classification LLM.
+    _SAVORY_WORDS = {
+        "salé", "salée", "saumon", "thon", "jambon", "lardon", "poulet", "boeuf",
+        "bœuf", "porc", "veau", "crevette", "poireau", "courgette", "épinard",
+        "parmesan", "chèvre", "feta", "quiche", "gratin", "curry", "lentille",
+    }
+    _SWEET_WORDS = {
+        "sucre", "chocolat", "vanille", "framboise", "fraise", "caramel", "miel",
+        "gâteau", "gateau", "biscuit", "compote", "confiture", "tiramisu", "crêpe",
+    }
+
+    def _keyword_guess(
+        self, nom: str, ingredients: list[str], keywords: list[str],
+    ) -> tuple[str, list[str], bool, bool]:
+        """Heuristique sans LLM : (type_repas deviné, tags par mots-clés,
+        savory?, sweet?). Sert de repli ET de garde-fou contre le LLM."""
+        text = (nom + " " + " ".join(ingredients[:15]) + " " + " ".join(keywords)).lower()
+        savory = any(w in text for w in self._SAVORY_WORDS)
+        sweet = any(w in text for w in self._SWEET_WORDS)
+        if "apér" in text or "apéro" in text:
+            t = "Apéro"
+        elif any(w in text for w in ("boisson", "cocktail", "smoothie", "jus de")):
+            t = "Boisson"
+        elif "goûter" in text or "gouter" in text:
+            t = "Goûter"
+        elif "petit déj" in text or "petit-déj" in text or "petit dej" in text:
+            t = "Petit dej"
+        elif sweet and not savory:
+            t = "Dessert"
+        else:
+            t = "Plat"
+        kw_lower = {k.lower() for k in keywords}
+        tags = [tag for tag in TAG_OPTIONS if tag.lower() in kw_lower]
+        return t, tags, savory, sweet
+
     async def _classify_type_tags(
         self, nom: str, ingredients: list[str], keywords: list[str],
     ) -> tuple[str, list[str]]:
         """Choisit type_repas + tags parmi les valeurs Notion autorisées.
 
         Petit appel LLM (cheap) : ne touche PAS au contenu (nom/ingrédients/
-        instructions restent ceux de la page), juste le classement.
-        """
+        instructions restent ceux de la page), juste le classement. Un garde-fou
+        lexical corrige les erreurs flagrantes (ex. cheesecake salé → pas Dessert)
+        et complète les tags manquants."""
+        guess_type, kw_tags, savory, sweet = self._keyword_guess(nom, ingredients, keywords)
         ing_sample = ", ".join(ingredients[:12])
         prompt = f"""Recette : "{nom}"
 Ingrédients : {ing_sample or "inconnus"}
@@ -1014,14 +1104,21 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
             type_repas = data.get("type_repas", "")
             if type_repas not in REPAS_OPTIONS:
                 type_repas = ""
+            # Garde-fou : un plat clairement salé ne peut pas être un Dessert.
+            if type_repas == "Dessert" and savory and not sweet:
+                logger.info(f"Classification corrigée : '{nom}' Dessert → {guess_type} (salé)")
+                type_repas = guess_type
+            if not type_repas:
+                type_repas = guess_type
+            # Union tags LLM + tags mots-clés (sans doublon, max 4).
             tags = [t for t in data.get("tags", []) if t in TAG_OPTIONS]
-            return type_repas, tags
+            for t in kw_tags:
+                if t not in tags:
+                    tags.append(t)
+            return type_repas, tags[:4]
         except Exception as e:
             logger.warning(f"Classification échouée ({e}), repli sur mots-clés")
-            # Repli sans LLM : tags par correspondance avec les mots-clés
-            kw_lower = {k.lower() for k in keywords}
-            tags = [t for t in TAG_OPTIONS if t.lower() in kw_lower]
-            return "", tags[:4]
+            return guess_type, kw_tags[:4]
 
     @staticmethod
     def _parse_json(raw: str) -> dict[str, Any]:
@@ -1045,24 +1142,15 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
         """Extrait une recette d'une URL : titre, type, tags, ingrédients,
         instructions, image. Tente d'abord le JSON-LD schema.org (exact, sans
         LLM), puis repli sur une extraction LLM si la page n'en contient pas."""
-        html_text = ""
         og_image = ""
-
-        try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                resp = await client.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                })
-                resp.raise_for_status()
-                html_text = resp.text
-                og_match = re.search(
-                    r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
-                    html_text, re.IGNORECASE,
-                )
-                if og_match:
-                    og_image = og_match.group(1)
-        except Exception as e:
-            logger.warning(f"Impossible de récupérer la page {url}: {e}")
+        html_text = await _safe_fetch_html(url)
+        if html_text:
+            og_match = re.search(
+                r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
+                html_text, re.IGNORECASE,
+            )
+            if og_match:
+                og_image = og_match.group(1)
 
         # Liste d'ingrédients scrapée du HTML (exact). Sert quand le JSON-LD
         # n'expose pas recipeIngredient.

@@ -10,9 +10,12 @@ Ajouter @oignons{2} émincés et cuire @temps{5%minutes}.
 """
 
 import html
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,7 +71,8 @@ def parse(raw: str) -> CookRecipe:
             if key == "serves":
                 try:
                     recipe.serves = int(val)
-                except Exception: pass
+                except ValueError:
+                    logger.debug(f"Cooklang : 'serves' non numérique ({val!r})")
             elif key == "time":
                 recipe.time = val
             elif key == "source":
