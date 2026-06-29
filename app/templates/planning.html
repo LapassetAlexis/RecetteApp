@@ -12,24 +12,43 @@
     </p>
 </div>
 
+{% if not valide %}
+<div class="card validate-bar">
+    <span>📝 <strong>Brouillon</strong> — pas encore enregistré dans l'historique. Ajuste si besoin, puis valide.</span>
+    <button class="btn btn-primary" id="btn-valider" onclick="validerSemaine()">✅ Valider la semaine</button>
+</div>
+{% else %}
+<div class="validated-badge">✅ Semaine validée — enregistrée dans l'historique</div>
+{% endif %}
+
 <!-- Planning 7 jours -->
 <div class="week-wrapper">
     <div class="week-scroll">
         {% set jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
         {% for jour in range(1, 8) %}
         <div class="day-col">
-            <div class="day-head">{{ jours[jour-1][:3] }}</div>
+            <div class="day-head">
+                <span>{{ jours[jour-1][:3] }}</span>
+                {% if per_day %}<span class="day-pers" title="Personnes ce jour">👤 {{ per_day[jour-1] }}</span>{% endif %}
+            </div>
             {% for plat in plats if plat.jour == jour %}
             <div class="meal {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
                 <div class="meal-head">
-                    <label class="meal-cb"><input type="checkbox" class="ck" data-jour="{{ jour }}" data-moment="{{ plat.moment }}"> <span>{{ plat.moment == 'midi' and '☀️' or '🌙' }}</span></label>
-                    <button class="meal-ch" data-jour="{{ jour }}" data-moment="{{ plat.moment }}" title="Changer">↻</button>
+                    <label class="meal-cb"><input type="checkbox" class="ck" data-jour="{{ jour }}" data-moment="{{ plat.moment }}"> <span class="meal-tag">{{ '☀️ Midi' if plat.moment == 'midi' else '🌙 Soir' }}</span></label>
+                    <button class="meal-ch" data-jour="{{ jour }}" data-moment="{{ plat.moment }}" title="Changer la recette">↻</button>
                 </div>
-                <div class="meal-name">{{ plat.nom_recette }}</div>
-                <div class="meal-links">
-                    {% if plat.notion_url %}<a href="{{ plat.notion_url }}" target="_blank" class="meal-lk">📄</a>{% endif %}
-                    {% if plat.url and not plat.notion_url %}<a href="{{ plat.url }}" target="_blank" class="meal-lk">🔗</a>{% endif %}
+                {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
+                {% if link %}
+                <a class="meal-name" href="{{ link }}"{% if not plat.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ plat.nom_recette | clean_title }}</a>
+                {% else %}
+                <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
+                {% endif %}
+                {% if plat.repas or plat.tags %}
+                <div class="meal-chips">
+                    {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
+                    {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -103,6 +122,17 @@
 <script>
 const pid = {{ planning.id }};
 let bul = [];
+
+async function validerSemaine() {
+    const b = document.getElementById('btn-valider');
+    if (b) { b.disabled = true; b.textContent = '⏳ Validation...'; }
+    try {
+        const r = await fetch(`/planning/${pid}/valider`, {method: 'POST'});
+        const d = await r.json();
+        if (d.success) { toast('Semaine validée ✓', 'success'); setTimeout(() => location.reload(), 700); }
+        else { toast(d.error || 'Erreur', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
+    } catch (e) { toast('Erreur réseau', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
+}
 const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
 // ── Persistance des cases cochées (par planning) ────

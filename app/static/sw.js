@@ -6,7 +6,7 @@
 //    sans réseau (la dernière page planning visitée est en cache).
 //  - le reste (API POST, Notion, LLM) : réseau direct, jamais caché.
 
-const CACHE = 'menu-planner-v1';
+const CACHE = 'menu-planner-v2';
 const PRECACHE = [
   '/',
   '/static/style.css',
@@ -37,14 +37,19 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Assets statiques : cache-first.
+  // Assets statiques : stale-while-revalidate.
+  // On sert le cache immédiatement (rapide, offline OK) MAIS on refetch en
+  // arrière-plan et on met le cache à jour → le rechargement suivant a la
+  // dernière version. Évite de servir indéfiniment un vieux CSS/JS.
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
-      caches.match(req).then((hit) =>
-        hit || fetch(req).then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-          return res;
+      caches.open(CACHE).then((cache) =>
+        cache.match(req).then((hit) => {
+          const fetching = fetch(req).then((res) => {
+            cache.put(req, res.clone());
+            return res;
+          }).catch(() => hit);
+          return hit || fetching;
         })
       )
     );

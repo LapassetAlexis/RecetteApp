@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
-import aiosqlite
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +21,7 @@ from app.cooklang import parse as parse_cook, to_html as cook_to_html
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
+from app.text_utils import clean_recipe_title, merge_ingredients
 
 VERSION = "1.1.0"
 
@@ -95,6 +95,8 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Version dans tous les templates
 templates.env.globals["version"] = VERSION
+# Filtre de nettoyage des titres de recettes (retire les suffixes de site)
+templates.env.filters["clean_title"] = clean_recipe_title
 
 # ── Pages ──────────────────────────────────────────────────────────
 
@@ -145,6 +147,15 @@ async def voir_planning(request: Request, planning_id: int):
 
     data = json.loads(planning["data_json"])
 
+    # Personnes par jour (anciens plannings : repli sur nb_personnes pour tous)
+    per_day_raw = data.get("per_day", "")
+    try:
+        per_day = [int(x) for x in per_day_raw.split(",")] if per_day_raw else []
+    except (ValueError, AttributeError):
+        per_day = []
+    if len(per_day) != 7:
+        per_day = [planning.get("nb_personnes", 4)] * 7
+
     return templates.TemplateResponse(
         "planning.html",
         {
@@ -152,9 +163,21 @@ async def voir_planning(request: Request, planning_id: int):
             "planning": planning,
             "plats": data.get("plats", []),
             "liste_courses": data.get("liste_courses", []),
+            "per_day": per_day,
+            "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
         },
     )
+
+
+@app.post("/planning/{planning_id}/valider")
+async def valider_planning(planning_id: int):
+    """Valide un brouillon de planning : il rejoint l'historique."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return {"error": "Planning introuvable"}
+    await db.mark_planning_valid(planning_id)
+    return {"success": True}
 
 
 @app.get("/recettes", response_class=HTMLResponse)
@@ -363,12 +386,18 @@ async def generer(
                     plat["notion_id"] = r["id"]
                     plat["url"] = r.get("url", "")
                     plat["notion_url"] = r.get("notion_url", "")
+                    plat["repas"] = r.get("repas", "")
+                    plat["tags"] = r.get("tags", [])
                     break
 
-        # 5. Sauvegarder le planning (sans liste de courses pour l'instant)
+        # 5. Sauvegarder en BROUILLON (valide=0). Le planning n'apparaît dans
+        #    l'historique qu'après validation explicite par l'utilisateur.
+        #    On purge d'abord l'éventuel brouillon précédent non validé.
+        await db.delete_draft_plannings()
         data = {
             "plats": plats,
             "liste_courses": [],
+            "per_day": per_day,
         }
         planning_id = await db.save_planning(
             week_start=week_start,
@@ -414,22 +443,17 @@ async def generate_shopping(planning_id: int, request: Request):
             liste_courses = await llm.batch_extract_ingredients(plats, planning["nb_personnes"])
         except Exception as e:
             logger.warning(f"Batch échoué ({e}), extraction individuelle...")
-            courses_map = {}
+            collected = []
             for plat in plats:
                 try:
                     d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
-                    for ing in d.get("ingredients", []):
-                        k = ing["nom"].lower().strip()
-                        if k in courses_map and courses_map[k]["unite"] == ing.get("unite", ""):
-                            try:
-                                q1 = float(str(courses_map[k]["quantite"]).replace(",", "."))
-                                q2 = float(str(ing["quantite"]).replace(",", "."))
-                                courses_map[k]["quantite"] = str(q1 + q2)
-                            except Exception: pass
-                        else:
-                            courses_map[k] = {"nom": ing["nom"], "quantite": ing.get("quantite", ""), "unite": ing.get("unite", "")}
-                except Exception: pass
-            liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
+                    collected.extend(d.get("ingredients", []))
+                except Exception:
+                    pass
+            liste_courses = collected
+        # Normalisation/fusion déterministe (dédup + addition par nom+unité),
+        # y compris pour nettoyer d'éventuels doublons de la sortie du batch LLM.
+        liste_courses = merge_ingredients(liste_courses)
 
         # Ajouter les ingrédients forcés
         force = planning.get("ingredients_force", "")
@@ -438,32 +462,12 @@ async def generate_shopping(planning_id: int, request: Request):
                 if f.lower() not in {i["nom"].lower() for i in liste_courses}:
                     liste_courses.append({"nom": f, "quantite": "", "unite": ""})
 
-        # Mettre à jour le planning
-        async with aiosqlite.connect(settings.database_path) as db_conn:
-            planning_data["liste_courses"] = liste_courses
-            await db_conn.execute(
-                "UPDATE planning_history SET data_json = ? WHERE id = ?",
-                (json.dumps(planning_data, ensure_ascii=False), planning_id),
-            )
-            await db_conn.commit()
-
-        # Sauvegarder les ingrédients dans Notion pour chaque recette
-        for plat in plats:
-            nid = plat.get("notion_id", "")
-            nom = plat.get("nom_recette", "")
-            if nid:
-                # Chercher les ingrédients de cette recette dans la liste
-                recette_ings = [i for i in liste_courses if i.get("nom")]
-                if recette_ings:
-                    nb = planning.get("nb_personnes", 4)
-                    txt = f"Pour {nb} personnes :\n" + "\n".join(
-                        f"- {i['nom']}" + (f" : {i['quantite']} {i['unite']}" if i.get('quantite') else "")
-                        for i in recette_ings
-                    )
-                    try:
-                        await notion.update_ingredients(nid, txt)
-                    except Exception as e:
-                        logger.warning(f"Impossible de sauvegarder les ingrédients pour {nom}: {e}")
+        # Sauvegarder la liste de courses dans le planning.
+        # NB : on n'écrit PAS cette liste dans Notion par recette — c'est une
+        # liste agrégée/dédupliquée de la semaine, pas les ingrédients d'une
+        # recette donnée (ceux-ci sont gérés à l'ajout / via enrich-all).
+        planning_data["liste_courses"] = liste_courses
+        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
 
         return {"success": True, "liste_courses": liste_courses}
 
@@ -737,6 +741,8 @@ async def api_update_meal(
                         plat["notion_id"] = r["id"]
                         plat["url"] = r.get("url", "")
                         plat["notion_url"] = r.get("notion_url", "")
+                        plat["repas"] = r.get("repas", "")
+                        plat["tags"] = r.get("tags", [])
                         break
                 trouve = True
                 break
@@ -747,36 +753,15 @@ async def api_update_meal(
         # Regénérer la liste de courses. On privilégie le cache local pour
         # chaque plat ; on n'appelle le LLM que pour les recettes sans cache
         # (typiquement uniquement le plat qui vient d'être remplacé).
-        courses_map: dict[str, dict] = {}
         nb_personnes = planning.get("nb_personnes", 4)
-
-        def _merge(ings: list[dict]) -> None:
-            for ing in ings:
-                if not ing.get("nom"):
-                    continue
-                nom_ing = ing["nom"].lower().strip()
-                if nom_ing in courses_map:
-                    existing = courses_map[nom_ing]
-                    if existing["unite"] == ing.get("unite", ""):
-                        try:
-                            q1 = float(str(existing["quantite"]).replace(",", "."))
-                            q2 = float(str(ing["quantite"]).replace(",", "."))
-                            existing["quantite"] = str(q1 + q2)
-                        except (ValueError, TypeError):
-                            pass
-                else:
-                    courses_map[nom_ing] = {
-                        "nom": ing["nom"],
-                        "quantite": ing.get("quantite", ""),
-                        "unite": ing.get("unite", ""),
-                    }
+        collected: list[dict] = []
 
         for plat in plats:
             nid = plat.get("notion_id", "")
             cached = await db.get_enriched(nid) if nid else None
             if cached and cached.get("ingredients"):
                 try:
-                    _merge(json.loads(cached["ingredients"]))
+                    collected.extend(json.loads(cached["ingredients"]))
                     continue
                 except (json.JSONDecodeError, TypeError) as e:
                     logger.debug(f"Cache ingrédients illisible pour {nid}: {e}")
@@ -786,13 +771,14 @@ async def api_update_meal(
                     plat["nom_recette"], plat.get("url", ""), nb_personnes,
                 )
                 ings = ingredients_data.get("ingredients", [])
-                _merge(ings)
+                collected.extend(ings)
                 if nid and ings:
                     await db.save_enriched(nid, plat["nom_recette"], ingredients=json.dumps(ings))
             except Exception as e:
                 logger.warning(f"Extraction ingrédients échouée pour {plat['nom_recette']}: {e}")
 
-        liste_courses = sorted(courses_map.values(), key=lambda x: x["nom"])
+        # Fusion déterministe (dédup + addition par nom+unité)
+        liste_courses = merge_ingredients(collected)
         planning_data["liste_courses"] = liste_courses
 
         # Mettre à jour le planning existant (ne pas en créer un nouveau)

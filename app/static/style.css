@@ -66,22 +66,31 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 /* ── Planning 7j ─────────────────────────────── */
 .week-wrapper { overflow-x:auto; margin-bottom:16px; -webkit-overflow-scrolling:touch; }
 .week-scroll { display:flex; gap:6px; min-width:630px; }
-.day-col { flex:1; min-width:78px; background:var(--surface); border-radius:var(--r); overflow:hidden; box-shadow:var(--sh); }
-.day-head { text-align:center; font-weight:700; padding:8px 4px; background:linear-gradient(135deg,var(--pr),var(--prd)); color:#fff; font-size:0.8rem; text-transform:uppercase; letter-spacing:1px; }
-.meal { padding:6px; border-left:3px solid var(--bo); border-bottom:1px solid var(--bo); }
+.day-col { flex:1; min-width:88px; background:var(--surface); border-radius:var(--r); overflow:hidden; box-shadow:var(--sh); display:flex; flex-direction:column; }
+.day-head { display:flex; align-items:center; justify-content:center; gap:6px; font-weight:700; padding:8px 4px; background:linear-gradient(135deg,var(--pr),var(--prd)); color:#fff; font-size:0.8rem; text-transform:uppercase; letter-spacing:1px; }
+.day-pers { font-size:0.65rem; font-weight:600; background:rgba(255,255,255,0.22); padding:1px 6px; border-radius:10px; letter-spacing:0; text-transform:none; }
+/* hauteur fixe = tous les midis alignés entre eux, idem pour les soirs */
+.meal { padding:7px 8px; border-left:3px solid var(--bo); border-bottom:1px solid var(--bo); height:146px; display:flex; flex-direction:column; overflow:hidden; }
 .meal:last-child { border-bottom:none; }
-.meal.midi { border-left-color:var(--pr); }
-.meal.soir { border-left-color:var(--ac); }
+.meal.midi { border-left-color:var(--pr); background:#fdf4ec; }
+.meal.soir { border-left-color:var(--ac); background:#f4eff9; }
+.meal-tag { font-size:0.66rem; font-weight:700; letter-spacing:0.3px; color:var(--t2); text-transform:uppercase; }
 .meal-head { display:flex; align-items:center; justify-content:space-between; }
 .meal-cb { display:flex; align-items:center; gap:4px; cursor:pointer; font-size:0.75rem; min-height:32px; }
 .ck { width:18px; height:18px; cursor:pointer; accent-color:var(--pr); }
 .meal-ch { background:none; border:none; cursor:pointer; font-size:1rem; opacity:0.4; padding:6px 8px; border-radius:6px; min-width:32px; min-height:32px; }
 .meal:hover .meal-ch { opacity:1; }
 .meal-ch:hover { background:var(--bg); }
-.meal-name { font-weight:600; font-size:0.75rem; line-height:1.3; margin:2px 0; word-break:break-word; }
-.meal-links { display:flex; gap:2px; }
-.meal-lk { text-decoration:none; font-size:0.7rem; opacity:0.4; }
-.meal-lk:hover { opacity:1; }
+/* nom : couleur de texte normale (pas de bleu de lien), clampé à 3 lignes */
+.meal-name { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; font-weight:600; font-size:0.78rem; line-height:1.3; margin:3px 0; word-break:break-word; color:var(--text); text-decoration:none; overflow:hidden; }
+a.meal-name:hover { text-decoration:underline; }
+.meal-chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; padding-top:4px; }
+.meal-chips .chip, .meal-chips .tag { font-size:0.6rem; padding:1px 6px; }
+
+/* ── Barre de validation (brouillon) ─────────── */
+.validate-bar { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; border-left:4px solid var(--pr); }
+.validate-bar span { font-size:0.9rem; color:var(--t2); }
+.validated-badge { text-align:center; color:var(--sc); font-weight:700; font-size:0.9rem; margin-bottom:16px; }
 
 /* ── Bulk bar ────────────────────────────────── */
 .bulk { position:sticky; bottom:0; background:var(--surface); border-top:2px solid var(--pr); padding:10px 16px; display:flex; align-items:center; gap:10px; box-shadow:0 -4px 12px rgba(0,0,0,0.1); z-index:50; margin-bottom:16px; border-radius:12px 12px 0 0; font-weight:600; font-size:0.9rem; }

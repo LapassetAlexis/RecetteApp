@@ -10,21 +10,22 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
+from app.text_utils import clean_recipe_title
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_PLANNING = """Tu es un chef. Tu planifies des repas variés et équilibrés.
+SYSTEM_PROMPT_PLANNING = """Tu es un chef. Tu SÉLECTIONNES des recettes variées pour une semaine.
 
 RÈGLES :
-- Remplis EXACTEMENT 14 créneaux (Jour 1 à 7, midi + soir).
-- Ne répète jamais une recette, SAUF si la "RÉPARTITION DES MIDIS" demande le même plat sur des jours groupés (recopie alors le même nom).
-- VARIÉTÉ MAXIMALE : pioche dans TOUTE la liste fournie, pas seulement les premières. Alterne les protéines (viande / poisson / végé / œufs) et les styles (mijoté, four, poêle, cru, soupe...). Évite deux plats du même type ou de la même base deux jours de suite.
-- Utilise des recettes différentes de celles des semaines précédentes (liste "exclues").
-- Tiens compte de la saison et de la température.
-- N'invente AUCUN plat : choisis uniquement des noms présents dans la liste.
+- Choisis le nombre EXACT de recettes demandé, TOUTES DIFFÉRENTES les unes des autres.
+- Uniquement des recettes présentes dans la liste fournie. N'invente JAMAIS un plat.
+- VARIÉTÉ MAXIMALE : pioche dans toute la liste. Alterne les protéines (viande / poisson / végé / œufs) et les styles (mijoté, four, poêle, cru, soupe...).
+- N'utilise PAS les recettes de la liste "exclues". Tiens compte de la saison et de la température.
 
-Réponds UNIQUEMENT par 14 lignes au format exact, rien d'autre :
-N - Jour X - midi|soir - Nom exact de la recette"""
+L'organisation midi/soir est gérée ensuite par l'application : fournis seulement la sélection.
+
+Réponds UNIQUEMENT par une ligne par recette, au format exact, rien d'autre :
+N - Nom exact de la recette"""
 
 SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), liste les ingrédients nécessaires.
 
@@ -205,7 +206,7 @@ def _extract_jsonld_recipe(html_text: str) -> dict[str, Any] | None:
             if isinstance(cat, str) and cat:
                 keywords.append(cat)
             return {
-                "nom": _clean_text(node.get("name", "")),
+                "nom": clean_recipe_title(_clean_text(node.get("name", ""))),
                 "image_url": _first_image(node.get("image", "")),
                 "ingredients": ingredients,
                 "instructions": "\n".join(instructions),
@@ -263,7 +264,7 @@ def _handler_amandinecooking(html_text: str) -> dict[str, Any] | None:
         nom = _clean_text(m.group(1)).split(" - ")[0] if m else ""
 
     return {
-        "nom": nom,
+        "nom": clean_recipe_title(nom),
         "image_url": "",  # repli sur og:image côté extract_recipe_from_url
         "ingredients": ingredients,
         "instructions": "\n".join(instructions),
@@ -450,22 +451,19 @@ class LLMClient:
             lignes.append(" | ".join(parts))
         recettes_str = "\n".join(lignes)
 
-        # Construire la description des groupes de midis
-        jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        groups = [int(x) for x in midi_groups.split(",")]
-        by_group: dict[int, list[int]] = {}
-        for i, g in enumerate(groups):
-            by_group.setdefault(g, []).append(i)
-        midi_lines = []
-        for g in sorted(by_group):
-            idxs = by_group[g]
-            names = [jours[i] for i in idxs]
-            count = len(idxs)
-            if count == 1:
-                midi_lines.append(f"- {names[0]} midi : plat différent")
-            else:
-                midi_lines.append(f"- {' + '.join(names)} midi : même plat (cuisiné pour {count})")
-        midi_desc = "\n".join(midi_lines)
+        # Groupes de midis (ex. [1,1,2,2,2,3,4]). On en déduit le nombre de
+        # midis DISTINCTS à choisir + 7 soirs tous différents.
+        try:
+            groups = [int(x) for x in midi_groups.split(",")]
+        except (ValueError, TypeError):
+            groups = [1, 1, 2, 2, 2, 3, 4]
+        if len(groups) != 7:
+            groups = [1, 1, 2, 2, 2, 3, 4]
+        unique_groups: list[int] = []
+        for g in groups:
+            if g not in unique_groups:
+                unique_groups.append(g)
+        n_needed = len(unique_groups) + 7  # midis distincts + 7 soirs
 
         exclues_str = ', '.join(recettes_exclues) or 'aucune'
         user_prompt = f"""CONTEXTE : saison {saison}, température {temperature}, max {nb_personnes} pers.
@@ -476,19 +474,72 @@ Consignes famille : {custom_prompt or "aucune"}.
 RECETTES DISPONIBLES (Nom | type | moment | tags) :
 {recettes_str}
 
-RÉPARTITION DES MIDIS :
-{midi_desc}
-- Soirs : tous différents, légers/rapides (un soir = restes).
+Choisis EXACTEMENT {n_needed} recettes DIFFÉRENTES et variées de cette liste.
+Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
 
-Choisis des recettes VARIÉES réparties sur toute la liste ci-dessus. Donne les 14 lignes."""
-
-        # Température un peu plus haute (0.5) pour diversifier les choix d'une
-        # génération à l'autre, sans casser le format (parser tolérant).
         raw = await self._chat(
             SYSTEM_PROMPT_PLANNING, user_prompt,
             temperature=0.5, max_tokens=600, label="planning",
         )
-        return self._parse_planning(raw)
+        names = self._parse_recipe_names(raw)
+
+        # Ne garder que des noms RÉELLEMENT présents dans la base (le nom exact
+        # Notion), et compléter si le LLM en a donné trop peu.
+        lookup = {r["nom"].lower().strip(): r["nom"] for r in recettes}
+        valid: list[str] = []
+        for n in names:
+            canon = lookup.get(n.lower().strip())
+            if canon and canon not in valid:
+                valid.append(canon)
+        if len(valid) < n_needed:
+            for r in recettes:
+                if r["nom"] not in valid and r["nom"] not in recettes_exclues:
+                    valid.append(r["nom"])
+                    if len(valid) >= n_needed:
+                        break
+        return self._assign_slots(valid[:n_needed], groups, unique_groups)
+
+    def _parse_recipe_names(self, raw: str) -> list[str]:
+        """Extrait une liste de noms de recettes d'une réponse LLM (liste numérotée)."""
+        names: list[str] = []
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r"^\s*\d+\s*[\-\.\)–]\s*(.+)$", line)
+            cand = m.group(1) if m else re.sub(r"^[\-\*•]\s*", "", line)
+            cand = cand.strip().strip('"').strip()
+            cand = re.sub(r"\s*\(.*\)\s*$", "", cand).strip()  # retirer "(dessert)" etc.
+            if cand:
+                names.append(cand)
+        # dédup en gardant l'ordre
+        seen, out = set(), []
+        for n in names:
+            k = n.lower()
+            if k not in seen:
+                seen.add(k)
+                out.append(n)
+        return out
+
+    def _assign_slots(
+        self, names: list[str], groups: list[int], unique_groups: list[int],
+    ) -> list[dict[str, Any]]:
+        """Construit les 14 créneaux : midis groupés = même plat, soirs tous
+        différents (et différents des midis tant qu'il y a assez de recettes)."""
+        if not names:
+            return []
+        n_groups = len(unique_groups)
+        midi_by_group = {g: names[i % len(names)] for i, g in enumerate(unique_groups)}
+        soirs = names[n_groups:]
+
+        plats: list[dict[str, Any]] = []
+        for day in range(1, 8):
+            plats.append(self._make_plat(day, "midi", midi_by_group[groups[day - 1]]))
+        for day in range(1, 8):
+            idx = day - 1
+            nom = soirs[idx] if idx < len(soirs) else names[(n_groups + idx) % len(names)]
+            plats.append(self._make_plat(day, "soir", nom))
+        return plats
 
     def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
         """Parse la réponse du LLM (liste numérotée, markdown ou JSON)."""
@@ -844,7 +895,7 @@ Réponds UNIQUEMENT ce JSON :
         if isinstance(ingredients, str):
             ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
         return {
-            "nom": data.get("nom", ""),
+            "nom": clean_recipe_title(data.get("nom", "")),
             "type_repas": type_repas,
             "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
             "ingredients": [str(i) for i in ingredients],
