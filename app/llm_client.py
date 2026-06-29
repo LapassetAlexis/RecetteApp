@@ -94,6 +94,27 @@ _ING_HINT = re.compile(r"^\s*[\d½¼¾]|(\b(?:g|kg|mg|ml|cl|dl|l|cuill|pinc|gous
 _PREP_MARKERS = ("préparation", "preparation", "instruction", "étape", "etape", "réalisation", "realisation")
 
 
+def _join_fragments(lines: list[str]) -> list[str]:
+    """Rassemble les fragments d'une même phrase coupés par virgule.
+
+    Certains sites découpent une phrase en plusieurs « étapes » (ex.
+    « Épluchez l'oignon » / « l'ail et les carottes... »). On accumule jusqu'à
+    une ponctuation forte (. ! ? … :) → une étape = une vraie phrase."""
+    out: list[str] = []
+    buf = ""
+    for l in lines:
+        l = l.strip()
+        if not l:
+            continue
+        buf = f"{buf}, {l}" if buf else l
+        if re.search(r"[.!?…:]$", buf):
+            out.append(buf)
+            buf = ""
+    if buf:
+        out.append(buf)
+    return out
+
+
 def _split_blob(blob: str) -> tuple[list[str], list[str]]:
     """Découpe un bloc texte en (ingrédients, instructions).
 
@@ -121,7 +142,7 @@ def _split_blob(blob: str) -> tuple[list[str], list[str]]:
             ings.append(l)
         elif mode == "instr":
             instrs.append(l)
-    return ings, instrs
+    return ings, _join_fragments(instrs)
 
 
 def _ingredients_from_text(blob: str) -> list[str]:
