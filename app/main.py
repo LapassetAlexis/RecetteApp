@@ -188,12 +188,17 @@ async def liste_recettes(request: Request):
         logger.error(f"Erreur Notion: {e}")
         recettes = []
 
-    # Stats
+    # Stats pour les filtres (type / état / tag)
     total = len(recettes)
     par_type: dict[str, int] = {}
+    par_etat: dict[str, int] = {}
+    par_tag: dict[str, int] = {}
     for r in recettes:
-        t = r["repas"] or "Non classé"
-        par_type[t] = par_type.get(t, 0) + 1
+        par_type[r["repas"] or "Non classé"] = par_type.get(r["repas"] or "Non classé", 0) + 1
+        if r["etat"]:
+            par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1
+        for t in r["tags"]:
+            par_tag[t] = par_tag.get(t, 0) + 1
 
     return templates.TemplateResponse(
         "recettes.html",
@@ -202,6 +207,8 @@ async def liste_recettes(request: Request):
             "recettes": recettes,
             "total": total,
             "par_type": sorted(par_type.items()),
+            "par_etat": sorted(par_etat.items()),
+            "par_tag": sorted(par_tag.items(), key=lambda kv: -kv[1]),  # tags par fréquence
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
         },

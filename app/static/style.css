@@ -242,6 +242,9 @@ a.meal-name:hover { text-decoration:underline; }
 .stat-chip { cursor:pointer; border:1px solid transparent; transition:all 0.15s; }
 .stat-chip:hover { border-color:var(--pr); }
 .stat-chip.active { background:var(--pr); color:#fff; }
+.filters { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+.filter-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.filter-label { font-size:0.7rem; font-weight:700; text-transform:uppercase; color:var(--t2); min-width:42px; letter-spacing:0.5px; }
 .recipe-card.hidden, .hist-item.hidden { display:none; }
 .no-result { text-align:center; color:var(--t2); padding:24px; grid-column:1/-1; }
 
