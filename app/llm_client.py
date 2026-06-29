@@ -1040,14 +1040,51 @@ Répond UNIQUEMENT ce JSON :
             return []
 
     # ── Classification type + tags ───────────────────────────────
+    # Indices lexicaux pour corriger/compléter la classification LLM.
+    _SAVORY_WORDS = {
+        "salé", "salée", "saumon", "thon", "jambon", "lardon", "poulet", "boeuf",
+        "bœuf", "porc", "veau", "crevette", "poireau", "courgette", "épinard",
+        "parmesan", "chèvre", "feta", "quiche", "gratin", "curry", "lentille",
+    }
+    _SWEET_WORDS = {
+        "sucre", "chocolat", "vanille", "framboise", "fraise", "caramel", "miel",
+        "gâteau", "gateau", "biscuit", "compote", "confiture", "tiramisu", "crêpe",
+    }
+
+    def _keyword_guess(
+        self, nom: str, ingredients: list[str], keywords: list[str],
+    ) -> tuple[str, list[str], bool, bool]:
+        """Heuristique sans LLM : (type_repas deviné, tags par mots-clés,
+        savory?, sweet?). Sert de repli ET de garde-fou contre le LLM."""
+        text = (nom + " " + " ".join(ingredients[:15]) + " " + " ".join(keywords)).lower()
+        savory = any(w in text for w in self._SAVORY_WORDS)
+        sweet = any(w in text for w in self._SWEET_WORDS)
+        if "apér" in text or "apéro" in text:
+            t = "Apéro"
+        elif any(w in text for w in ("boisson", "cocktail", "smoothie", "jus de")):
+            t = "Boisson"
+        elif "goûter" in text or "gouter" in text:
+            t = "Goûter"
+        elif "petit déj" in text or "petit-déj" in text or "petit dej" in text:
+            t = "Petit dej"
+        elif sweet and not savory:
+            t = "Dessert"
+        else:
+            t = "Plat"
+        kw_lower = {k.lower() for k in keywords}
+        tags = [tag for tag in TAG_OPTIONS if tag.lower() in kw_lower]
+        return t, tags, savory, sweet
+
     async def _classify_type_tags(
         self, nom: str, ingredients: list[str], keywords: list[str],
     ) -> tuple[str, list[str]]:
         """Choisit type_repas + tags parmi les valeurs Notion autorisées.
 
         Petit appel LLM (cheap) : ne touche PAS au contenu (nom/ingrédients/
-        instructions restent ceux de la page), juste le classement.
-        """
+        instructions restent ceux de la page), juste le classement. Un garde-fou
+        lexical corrige les erreurs flagrantes (ex. cheesecake salé → pas Dessert)
+        et complète les tags manquants."""
+        guess_type, kw_tags, savory, sweet = self._keyword_guess(nom, ingredients, keywords)
         ing_sample = ", ".join(ingredients[:12])
         prompt = f"""Recette : "{nom}"
 Ingrédients : {ing_sample or "inconnus"}
@@ -1067,14 +1104,21 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
             type_repas = data.get("type_repas", "")
             if type_repas not in REPAS_OPTIONS:
                 type_repas = ""
+            # Garde-fou : un plat clairement salé ne peut pas être un Dessert.
+            if type_repas == "Dessert" and savory and not sweet:
+                logger.info(f"Classification corrigée : '{nom}' Dessert → {guess_type} (salé)")
+                type_repas = guess_type
+            if not type_repas:
+                type_repas = guess_type
+            # Union tags LLM + tags mots-clés (sans doublon, max 4).
             tags = [t for t in data.get("tags", []) if t in TAG_OPTIONS]
-            return type_repas, tags
+            for t in kw_tags:
+                if t not in tags:
+                    tags.append(t)
+            return type_repas, tags[:4]
         except Exception as e:
             logger.warning(f"Classification échouée ({e}), repli sur mots-clés")
-            # Repli sans LLM : tags par correspondance avec les mots-clés
-            kw_lower = {k.lower() for k in keywords}
-            tags = [t for t in TAG_OPTIONS if t.lower() in kw_lower]
-            return "", tags[:4]
+            return guess_type, kw_tags[:4]
 
     @staticmethod
     def _parse_json(raw: str) -> dict[str, Any]:
