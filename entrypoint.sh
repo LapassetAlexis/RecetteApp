@@ -24,5 +24,10 @@ else
     echo "ℹ️ Provider LLM = $PROVIDER (cloud), on saute l'attente d'Ollama."
 fi
 
+# Corriger les droits du volume /data (souvent root, hérité d'anciens conteneurs)
+# puis lancer l'app en tant qu'utilisateur non-root.
+mkdir -p /data
+chown -R appuser:appuser /data 2>/dev/null || true
+
 echo "🚀 Démarrage de l'application..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec gosu appuser uvicorn app.main:app --host 0.0.0.0 --port 8000

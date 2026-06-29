@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Installer les dépendances système minimales (pour aiosqlite)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    curl gosu \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
@@ -32,6 +32,6 @@ VOLUME ["/data"]
 
 EXPOSE 8000
 
-USER appuser
-
+# L'entrypoint démarre en root (pour corriger les droits du volume /data hérité
+# d'anciens conteneurs root), puis bascule sur appuser via gosu.
 ENTRYPOINT ["/app/entrypoint.sh"]
