@@ -285,12 +285,20 @@ async def liste_recettes(request: Request):
         logger.error(f"Erreur Notion: {e}")
         recettes = []
 
+    # Ingrédients en cache (pour la recherche par ingrédient) — 1 seule requête
+    try:
+        ings_by_id = await db.get_all_enriched_ingredients()
+    except Exception as e:
+        logger.warning(f"Lecture ingrédients cache échouée: {e}")
+        ings_by_id = {}
+
     # Stats pour les filtres (type / état / tag)
     total = len(recettes)
     par_type: dict[str, int] = {}
     par_etat: dict[str, int] = {}
     par_tag: dict[str, int] = {}
     for r in recettes:
+        r["ingredients_search"] = ings_by_id.get(r["id"], "")
         par_type[r["repas"] or "Non classé"] = par_type.get(r["repas"] or "Non classé", 0) + 1
         if r["etat"]:
             par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1

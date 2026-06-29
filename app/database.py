@@ -288,3 +288,19 @@ class Database:
                 (notion_id,),
             )
             return _row_to_dict(rows[0]) if rows else None
+
+    async def get_all_enriched_ingredients(self) -> dict[str, str]:
+        """{notion_id: noms d'ingrédients en minuscules} pour la recherche par
+        ingrédient (1 seule requête au lieu de N)."""
+        out: dict[str, str] = {}
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT notion_id, ingredients FROM enriched_recipes WHERE ingredients IS NOT NULL"
+            )
+        for nid, ings in rows:
+            try:
+                noms = [str(i.get("nom", "")) for i in json.loads(ings)]
+                out[nid] = " ".join(noms).lower()
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
+        return out

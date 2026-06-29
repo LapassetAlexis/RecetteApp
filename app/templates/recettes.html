@@ -12,7 +12,7 @@
 
 <!-- Recherche -->
 <div class="search-bar">
-    <input type="search" id="recipe-search" class="inp" placeholder="🔍 Rechercher une recette...">
+    <input type="search" id="recipe-search" class="inp" placeholder="🔍 Rechercher (nom ou ingrédient : « courgette thon »)...">
 </div>
 
 <!-- Filtres cliquables (type / état / tag) -->
@@ -57,7 +57,7 @@
 } %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-type="{{ recette.repas or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-type="{{ recette.repas or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
         {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
         <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
@@ -109,8 +109,11 @@ const active = {type: '', etat: '', tag: ''};
 function applyFilters() {
     const q = document.getElementById('recipe-search').value.trim().toLowerCase();
     let visible = 0;
+    // Recherche multi-termes : chaque mot doit matcher le nom OU les ingrédients
+    const terms = q.split(/\s+/).filter(Boolean);
     document.querySelectorAll('.recipe-card').forEach(card => {
-        const okName = !q || card.dataset.name.includes(q);
+        const hay = card.dataset.name + ' ' + (card.dataset.ings || '');
+        const okName = !terms.length || terms.every(t => hay.includes(t));
         const okType = !active.type || card.dataset.type === active.type;
         const okEtat = !active.etat || card.dataset.etat === active.etat;
         const okTag = !active.tag || (card.dataset.tags || '').split('|').includes(active.tag.toLowerCase());
