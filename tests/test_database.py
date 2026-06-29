@@ -89,3 +89,35 @@ def test_enriched_cache_roundtrip(tmp_path):
 def test_get_last_planning_empty(tmp_path):
     db = _db(tmp_path)
     assert asyncio.run(db.get_last_planning()) is None
+
+
+def test_prefs_roundtrip(tmp_path):
+    import asyncio, json
+    from app.database import Database
+    db = Database(); db.path = str(tmp_path / "p.db")
+
+    async def run():
+        await db.init()
+        assert await db.get_prefs() == {}
+        await db.save_prefs(json.dumps({"saison": "Hiver", "custom_prompt": "léger"}))
+        p = await db.get_prefs()
+        assert p["saison"] == "Hiver" and p["custom_prompt"] == "léger"
+        # upsert (1 seule ligne)
+        await db.save_prefs(json.dumps({"saison": "Été"}))
+        assert (await db.get_prefs())["saison"] == "Été"
+
+    asyncio.run(run())
+
+
+def test_all_enriched_ingredients(tmp_path):
+    import asyncio, json
+    from app.database import Database
+    db = Database(); db.path = str(tmp_path / "e.db")
+
+    async def run():
+        await db.init()
+        await db.save_enriched("n1", "X", ingredients=json.dumps([{"nom": "courgette"}, {"nom": "thon"}]))
+        d = await db.get_all_enriched_ingredients()
+        assert d["n1"] == "courgette thon"
+
+    asyncio.run(run())

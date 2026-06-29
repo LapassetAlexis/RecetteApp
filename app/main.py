@@ -21,6 +21,7 @@ from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
+from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.nutrition import estimate_nutrition
 from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
 
@@ -128,16 +129,36 @@ async def index(request: Request):
     dernier = await db.get_last_planning()
     planning_id = dernier["id"] if dernier else None
 
+    # Préférences mémorisées (pré-remplissage du formulaire)
+    prefs = await db.get_prefs()
+
+    def _to_ints(csv: str, n: int) -> list[int] | None:
+        try:
+            vals = [int(x) for x in csv.split(",")]
+            return vals if len(vals) == n else None
+        except (ValueError, AttributeError):
+            return None
+
+    midi_groups_value = prefs.get("midi_groups") or "1,1,2,2,2,3,4"
+    day_groups = _to_ints(midi_groups_value, 7)
+    day_pers = _to_ints(prefs.get("per_day", ""), 7)
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "week_start": week_start,
-            "saison_default": saison_default,
+            "saison_default": prefs.get("saison") or saison_default,
             "nb_personnes": 4,
             "planning_id": planning_id,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            # pré-remplissage depuis les préférences mémorisées
+            "day_groups": day_groups,
+            "day_pers": day_pers,
+            "midi_groups_value": midi_groups_value,
+            "ingredients_force": prefs.get("ingredients_force", ""),
+            "custom_prompt": prefs.get("custom_prompt", ""),
         },
     )
 
@@ -199,6 +220,7 @@ async def voir_planning(request: Request, planning_id: int):
     if len(per_day) != 7:
         per_day = [planning.get("nb_personnes", 4)] * 7
 
+    liste_courses = data.get("liste_courses", [])
     return templates.TemplateResponse(
         "planning.html",
         {
@@ -206,12 +228,42 @@ async def voir_planning(request: Request, planning_id: int):
             "planning": planning,
             "plats": data.get("plats", []),
             "week_rows": _group_week(data.get("plats", [])),
-            "liste_courses": data.get("liste_courses", []),
+            "liste_courses": liste_courses,
+            "courses_par_rayon": group_by_rayon(liste_courses),
+            "rayon_order": RAYON_ORDER,
             "per_day": per_day,
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
         },
     )
+
+
+@app.post("/planning/{planning_id}/dupliquer")
+async def dupliquer_planning(planning_id: int):
+    """Recopie un planning existant en nouveau brouillon (sans liste de courses),
+    daté de la semaine en cours. Permet de « refaire » une semaine appréciée."""
+    src = await db.get_planning_with_recipes(planning_id)
+    if not src:
+        return {"error": "Planning introuvable"}
+    data = json.loads(src["data_json"])
+    plats = data.get("plats", [])
+    today = date.today()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+
+    await db.delete_draft_plannings()
+    new_data = {"plats": plats, "liste_courses": [], "per_day": data.get("per_day", "")}
+    new_id = await db.save_planning(
+        week_start=week_start,
+        saison=src.get("saison", ""),
+        nb_personnes=src.get("nb_personnes", 4),
+        ingredients_force=src.get("ingredients_force", ""),
+        data_json=json.dumps(new_data, ensure_ascii=False),
+        recipes=[{
+            "notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"],
+            "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"],
+        } for p in plats],
+    )
+    return {"success": True, "planning_id": new_id}
 
 
 @app.post("/planning/{planning_id}/valider")
@@ -233,12 +285,20 @@ async def liste_recettes(request: Request):
         logger.error(f"Erreur Notion: {e}")
         recettes = []
 
+    # Ingrédients en cache (pour la recherche par ingrédient) — 1 seule requête
+    try:
+        ings_by_id = await db.get_all_enriched_ingredients()
+    except Exception as e:
+        logger.warning(f"Lecture ingrédients cache échouée: {e}")
+        ings_by_id = {}
+
     # Stats pour les filtres (type / état / tag)
     total = len(recettes)
     par_type: dict[str, int] = {}
     par_etat: dict[str, int] = {}
     par_tag: dict[str, int] = {}
     for r in recettes:
+        r["ingredients_search"] = ings_by_id.get(r["id"], "")
         par_type[r["repas"] or "Non classé"] = par_type.get(r["repas"] or "Non classé", 0) + 1
         if r["etat"]:
             par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1
@@ -577,6 +637,17 @@ async def generer(
             } for p in plats],
         )
 
+        # Mémoriser les préférences pour pré-remplir le prochain formulaire
+        try:
+            await db.save_prefs(json.dumps({
+                "saison": saison, "temperature": temperature,
+                "ingredients_force": ingredients_force, "custom_prompt": custom_prompt,
+                "midi_groups": midi_groups, "per_day": per_day,
+                "tags": tags, "etat": etat,
+            }, ensure_ascii=False))
+        except Exception as e:
+            logger.warning(f"Impossible de mémoriser les préférences: {e}")
+
         return RedirectResponse(url=f"/planning/{planning_id}", status_code=303)
 
     except Exception as e:
@@ -637,6 +708,10 @@ async def generate_shopping(planning_id: int, request: Request):
             for f in [i.strip() for i in force.split(",") if i.strip()]:
                 if f.lower() not in {i["nom"].lower() for i in liste_courses}:
                     liste_courses.append({"nom": f, "quantite": "", "unite": ""})
+
+        # Rayon de magasin pour chaque ingrédient (pour le groupement à l'affichage)
+        for it in liste_courses:
+            it["rayon"] = categorize(it.get("nom", ""))
 
         # Sauvegarder la liste de courses dans le planning.
         # NB : on n'écrit PAS cette liste dans Notion par recette — c'est une
@@ -987,6 +1062,8 @@ async def api_update_meal(
 
         # Fusion déterministe (dédup + addition par nom+unité)
         liste_courses = merge_ingredients(collected)
+        for it in liste_courses:
+            it["rayon"] = categorize(it.get("nom", ""))
         planning_data["liste_courses"] = liste_courses
 
         # Mettre à jour le planning existant (ne pas en créer un nouveau)

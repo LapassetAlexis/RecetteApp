@@ -327,3 +327,19 @@ def test_enrich_all_stream(client, monkeypatch):
     body = r.text
     assert "event: done" in body
     assert '"enriched": 1' in body  # Poulet enrichi, SansUrl ignoré
+
+
+def test_dupliquer_planning(client, monkeypatch):
+    # Crée un planning validé, le duplique -> nouveau brouillon avec plats copiés
+    async def _all():
+        return [_recipe("Poulet")]
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"}]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    d = client.post(f"/planning/{pid}/dupliquer").json()
+    assert d["success"] and d["planning_id"] != pid
+    # la copie est un brouillon (bandeau de validation présent)
+    assert "Valider la semaine" in client.get(f"/planning/{d['planning_id']}").text

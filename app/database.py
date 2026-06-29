@@ -1,6 +1,7 @@
 """Couche SQLite — historique des plannings & recettes enrichies."""
 
 import aiosqlite
+import json
 from datetime import date, datetime
 from typing import Any
 
@@ -57,6 +58,11 @@ class Database:
                     ON planning_recipes(recipe_name);
                 CREATE INDEX IF NOT EXISTS idx_planning_history_week
                     ON planning_history(week_start);
+
+                CREATE TABLE IF NOT EXISTS app_prefs (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    data_json TEXT NOT NULL
+                );
             """)
             # Migrations idempotentes : on ajoute les colonnes manquantes en
             # vérifiant d'abord leur présence (PRAGMA). Pas de try/except
@@ -198,6 +204,29 @@ class Database:
                 return None
             return _row_to_dict(rows[0])
 
+    # ── Préférences de génération (mémorisées entre sessions) ─────
+
+    async def save_prefs(self, data_json: str) -> None:
+        """Mémorise les derniers paramètres de génération (1 seule ligne)."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO app_prefs (id, data_json) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json",
+                (data_json,),
+            )
+            await db.commit()
+
+    async def get_prefs(self) -> dict[str, Any]:
+        """Retourne les derniers paramètres mémorisés ({} si aucun)."""
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall("SELECT data_json FROM app_prefs WHERE id = 1")
+            if not rows:
+                return {}
+            try:
+                return json.loads(rows[0][0])
+            except (json.JSONDecodeError, TypeError):
+                return {}
+
     async def get_planning_with_recipes(
         self, planning_id: int
     ) -> dict[str, Any] | None:
@@ -259,3 +288,19 @@ class Database:
                 (notion_id,),
             )
             return _row_to_dict(rows[0]) if rows else None
+
+    async def get_all_enriched_ingredients(self) -> dict[str, str]:
+        """{notion_id: noms d'ingrédients en minuscules} pour la recherche par
+        ingrédient (1 seule requête au lieu de N)."""
+        out: dict[str, str] = {}
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT notion_id, ingredients FROM enriched_recipes WHERE ingredients IS NOT NULL"
+            )
+        for nid, ings in rows:
+            try:
+                noms = [str(i.get("nom", "")) for i in json.loads(ings)]
+                out[nid] = " ".join(noms).lower()
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
+        return out

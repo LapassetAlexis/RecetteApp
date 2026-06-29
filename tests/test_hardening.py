@@ -85,3 +85,18 @@ def test_extract_recipe_from_url_jsonld(monkeypatch):
     assert r["ingredients"] == ["3 pommes", "200 g de farine"]
     assert "Éplucher." in r["instructions"]
     assert r["source"] == "jsonld"
+
+
+# ── Catégorisation des courses par rayon ─────────────────────
+def test_categorize_and_group():
+    from app.categories import categorize, group_by_rayon
+    assert categorize("tomates cerises") == "Fruits & légumes"
+    assert categorize("blanc de poulet") == "Viande & poisson"
+    assert categorize("crème fraîche") == "Crémerie & œufs"
+    assert categorize("pâtes complètes") == "Épicerie salée"
+    assert categorize("xyz inconnu") == "Autre"
+    g = group_by_rayon([{"nom": "tomate"}, {"nom": "poulet"}, {"nom": "zzz"}])
+    rayons = [x["rayon"] for x in g]
+    assert "Fruits & légumes" in rayons and "Viande & poisson" in rayons and "Autre" in rayons
+    # ordre magasin : fruits/légumes avant viande
+    assert rayons.index("Fruits & légumes") < rayons.index("Viande & poisson")

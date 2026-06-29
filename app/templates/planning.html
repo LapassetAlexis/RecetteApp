@@ -111,18 +111,26 @@
         <div style="display:flex;align-items:center;gap:8px;">
             <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
             {% if liste_courses %}
+            <button class="btn btn-ghost btn-sm" id="btn-copy" onclick="copyShop()" title="Copier la liste">📋 Copier</button>
             <button class="btn btn-ghost btn-sm" onclick="window.print()" title="Imprimer la liste">🖨️</button>
             <button class="btn btn-ghost btn-sm" id="btn-regen" onclick="genShop(true)" title="Régénérer la liste">↻</button>
             {% endif %}
         </div>
     </div>
     {% if liste_courses %}
-    <div class="shop-g" id="shop-g">
-        {% for item in liste_courses %}
-        <label class="shop-i" data-item="{{ item.nom|lower }}">
-            <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
-            {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
-        </label>
+    <div id="shop-g">
+        {% for grp in courses_par_rayon %}
+        <div class="shop-rayon" data-rayon="{{ grp.rayon }}">
+            <h3 class="rayon-h">{{ grp.rayon }} <span class="rayon-n">{{ grp['items']|length }}</span></h3>
+            <div class="shop-grid">
+                {% for item in grp['items'] %}
+                <label class="shop-i" data-item="{{ item.nom|lower }}">
+                    <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
+                    {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
         {% endfor %}
     </div>
     {% else %}
@@ -156,6 +164,7 @@ async function validerSemaine() {
     } catch (e) { toast('Erreur réseau', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
 }
 const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const RAYON_ORDER = {{ rayon_order | tojson }};
 
 // ── Persistance des cases cochées (par planning) ────
 const SHOP_KEY = 'shop_checked_' + pid;
@@ -253,13 +262,33 @@ async function rpl(n) {
     }
     if(ok) window.location.reload();
 }
+const cap = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
 function usl(items) {
     const g=document.getElementById('shop-g');
     document.getElementById('shop-n').textContent=items?.length||0;
     if(!g) return;
     if(!items||!items.length){g.innerHTML='<p class="empty">Aucun.</p>';return;}
-    g.innerHTML=items.map(i=>`<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${i.nom.charAt(0).toUpperCase()+i.nom.slice(1)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('');
+    // Grouper par rayon (ordre magasin)
+    const buckets={};
+    items.forEach(i=>{ const r=i.rayon||'Autre'; (buckets[r]=buckets[r]||[]).push(i); });
+    const order=[...RAYON_ORDER.filter(r=>buckets[r]), ...Object.keys(buckets).filter(r=>!RAYON_ORDER.includes(r))];
+    g.innerHTML=order.map(r=>`<div class="shop-rayon" data-rayon="${r}"><h3 class="rayon-h">${r} <span class="rayon-n">${buckets[r].length}</span></h3><div class="shop-grid">`+
+        buckets[r].map(i=>`<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${cap(i.nom)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('')+
+        `</div></div>`).join('');
     bindShopItems();
+}
+function copyShop() {
+    const lines=[];
+    document.querySelectorAll('.shop-rayon').forEach(sec=>{
+        const r=sec.dataset.rayon; lines.push(`\n— ${r} —`);
+        sec.querySelectorAll('.shop-i').forEach(l=>{
+            const nom=l.querySelector('span').textContent.trim();
+            const q=l.querySelector('small')?.textContent.trim();
+            lines.push(`- ${nom}${q?` (${q})`:''}`);
+        });
+    });
+    const txt=lines.join('\n').trim();
+    navigator.clipboard.writeText(txt).then(()=>toast('Liste copiée ✓','success'),()=>toast('Copie impossible','error'));
 }
 async function genShop(regen) {
     const btn=document.getElementById('btn-shop') || document.getElementById('btn-regen');
