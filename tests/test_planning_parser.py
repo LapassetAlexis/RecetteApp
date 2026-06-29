@@ -48,3 +48,34 @@ def test_limite_a_14():
 def test_reponse_vide_leve_valueerror():
     with pytest.raises(ValueError):
         client._parse_planning("blabla sans aucun plat reconnaissable")
+
+
+# ── Nouvelle logique : sélection de noms + assignation des créneaux ──
+
+def test_parse_recipe_names():
+    raw = "1 - Tarte\n2. Soupe\n3) Curry (plat principal)\n- Gratin\nTarte"
+    assert client._parse_recipe_names(raw) == ["Tarte", "Soupe", "Curry", "Gratin"]
+
+
+def test_assign_slots_respects_midi_groups_and_no_dup_same_day():
+    groups = [1, 1, 2, 2, 2, 3, 4]  # Lun+Mar, Mer+Jeu+Ven, Sam, Dim
+    unique = [1, 2, 3, 4]
+    names = ["A", "B", "C", "D", "S1", "S2", "S3", "S4", "S5", "S6", "S7"]  # 4 midis + 7 soirs
+    plats = client._assign_slots(names, groups, unique)
+    midi = {p["jour"]: p["nom_recette"] for p in plats if p["moment"] == "midi"}
+    soir = {p["jour"]: p["nom_recette"] for p in plats if p["moment"] == "soir"}
+
+    assert len(plats) == 14
+    # midis groupés = même plat
+    assert midi[1] == midi[2]            # Lun = Mar
+    assert midi[3] == midi[4] == midi[5]  # Mer = Jeu = Ven
+    assert midi[6] != midi[3] and midi[7] != midi[6]
+    # jamais midi == soir le même jour
+    for j in range(1, 8):
+        assert midi[j] != soir[j]
+    # soirs tous différents
+    assert len(set(soir.values())) == 7
+
+
+def test_assign_slots_empty():
+    assert client._assign_slots([], [1, 1, 2, 2, 2, 3, 4], [1, 2, 3, 4]) == []

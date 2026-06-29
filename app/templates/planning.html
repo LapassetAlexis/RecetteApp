@@ -22,7 +22,7 @@
             {% for plat in plats if plat.jour == jour %}
             <div class="meal {{ plat.moment }}" data-jour="{{ jour }}" data-moment="{{ plat.moment }}">
                 <div class="meal-head">
-                    <label class="meal-cb"><input type="checkbox" class="ck" data-jour="{{ jour }}" data-moment="{{ plat.moment }}"> <span>{{ plat.moment == 'midi' and '☀️' or '🌙' }}</span></label>
+                    <label class="meal-cb"><input type="checkbox" class="ck" data-jour="{{ jour }}" data-moment="{{ plat.moment }}"> <span class="meal-tag">{{ '☀️ Midi' if plat.moment == 'midi' else '🌙 Soir' }}</span></label>
                     <button class="meal-ch" data-jour="{{ jour }}" data-moment="{{ plat.moment }}" title="Changer">↻</button>
                 </div>
                 <div class="meal-name">{{ plat.nom_recette }}</div>
