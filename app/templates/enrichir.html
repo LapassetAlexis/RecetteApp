@@ -55,9 +55,17 @@
             {% if image_url %}<img src="{{ image_url }}" alt="" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-top:6px;">{% endif %}
         </div>
 
-        <button type="submit" class="btn btn-primary btn-lg">💾 Valider et enregistrer dans Notion</button>
+        <button type="submit" class="btn btn-primary btn-lg" id="enrich-submit">💾 Valider et enregistrer dans Notion</button>
         <a href="/recette/{{ recette.id }}" class="btn btn-ghost btn-lg" style="margin-top:6px;">Annuler</a>
     </form>
+</div>
+
+<div id="enrich-loading" class="loading-overlay">
+    <div class="loading-box">
+        <div class="spinner-big"></div>
+        <h2>💾 Enregistrement...</h2>
+        <p>Écriture dans Notion en cours.</p>
+    </div>
 </div>
 {% endblock %}
 
@@ -81,5 +89,12 @@ document.getElementById('add-step')?.addEventListener('click', () => {
     row.querySelector('textarea').focus();
 });
 renumberSteps();
+
+// Retour visuel pendant l'enregistrement (le POST fait plusieurs appels Notion)
+document.getElementById('enrich-form')?.addEventListener('submit', () => {
+    const b = document.getElementById('enrich-submit');
+    if (b) { b.disabled = true; b.textContent = '⏳ Enregistrement...'; }
+    document.getElementById('enrich-loading')?.classList.add('show');
+});
 </script>
 {% endblock %}
