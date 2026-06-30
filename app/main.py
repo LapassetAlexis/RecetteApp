@@ -23,7 +23,7 @@ from app.llm_client import LLMClient
 from app.notion_client import NotionClient
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.nutrition import estimate_nutrition
-from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
+from app.text_utils import clean_recipe_title, merge_ingredients, normalize_title_case, parse_ingredient_line, split_instructions
 
 VERSION = "1.1.0"
 
@@ -578,6 +578,9 @@ async def enrichir_submit(
     if not recette:
         return RedirectResponse(url="/recettes", status_code=303)
 
+    # Normalise un titre crié en MAJUSCULES (ex. import) en casse de phrase.
+    nom_norm = normalize_title_case(recette["nom"])
+
     structured = [
         i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
     ]
@@ -590,8 +593,10 @@ async def enrichir_submit(
     except (json.JSONDecodeError, TypeError):
         nutrition = ""
     try:
+        if nom_norm != recette["nom"]:
+            await notion.update_recipe_title(page_id, nom_norm)
         if structured:
-            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured),
+            await db.save_enriched(page_id, nom_norm, ingredients=json.dumps(structured),
                                    cuisson_minutes=duree_minutes or 0, nutrition=nutrition)
             await notion.update_ingredients(page_id, _ingredients_to_text(structured))
         if instructions_text:
@@ -947,6 +952,14 @@ async def _enrich_one(r: dict) -> str:
     nid, nom = r.get("id"), r.get("nom")
     if not nid or not nom:
         return "skipped"
+    # Normalise un titre tout en MAJUSCULES (best-effort, n'empêche pas l'enrichissement)
+    nom_norm = normalize_title_case(nom)
+    if nom_norm != nom:
+        try:
+            await notion.update_recipe_title(nid, nom_norm)
+            nom = nom_norm
+        except Exception as e:
+            logger.warning(f"Normalisation titre échouée pour {nom}: {e}")
     ingredients_txt = ""
     cached = await db.get_enriched(nid)
     if cached and cached.get("ingredients"):
