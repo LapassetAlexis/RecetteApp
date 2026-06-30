@@ -94,6 +94,18 @@ TAG_OPTIONS = [
     "Été",
     "Automne",
     "Hiver",
+    # Moment de repas (oriente l'attribution midi/soir)
+    "Midi",
+    "Soir",
+    # Légèreté (léger plutôt le soir, copieux plutôt le midi)
+    "Léger",
+    "Copieux",
+    # Effort/temps (rapide en semaine, mijoté le week-end)
+    "Rapide",
+    "Mijoté",
+    # Météo du plat (croise avec la température)
+    "Plat chaud",
+    "Plat froid",
 ]
 
 # Tags de saison (sous-ensemble de TAG_OPTIONS). Une recette sans aucun de ces
@@ -107,5 +119,9 @@ TAG_GROUPS = [
     {"label": "🍽️ Type de plat", "tags": ["Soupe", "Salade", "Quiche/tarte", "Tartines"]},
     {"label": "🥗 Régime", "tags": ["Diet", "Végétarien proténiné"]},
     {"label": "👥 Occasion", "tags": ["Fun", "Invités", "Sur le pouce", "1 personne"]},
+    {"label": "🕑 Moment", "tags": ["Midi", "Soir"]},
+    {"label": "⚖️ Légèreté", "tags": ["Léger", "Copieux"]},
+    {"label": "⏱️ Effort", "tags": ["Rapide", "Mijoté"]},
+    {"label": "🌡️ Météo du plat", "tags": ["Plat chaud", "Plat froid"]},
     {"label": "🗓️ Saison", "tags": SAISON_TAGS},
 ]

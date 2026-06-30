@@ -716,6 +716,39 @@ class LLMClient:
             return 1
         return 0 if saison_n in secs else 2
 
+    @classmethod
+    def _tagset(cls, r: dict[str, Any]) -> set[str]:
+        """Tags + moment d'une recette, normalisés (sans accents, minuscule)."""
+        t = {cls._norm(x) for x in (r.get("tags") or [])}
+        m = cls._norm(r.get("moment"))
+        if m:
+            t.add(m)
+        return t
+
+    @staticmethod
+    def _weather(temperature: str) -> str:
+        """Catégorise la météo : 'froid', 'chaud' ou '' (neutre/doux)."""
+        t = (temperature or "").lower()
+        if "froid" in t or "frais" in t:
+            return "froid"
+        if "chaud" in t or "canicul" in t:
+            return "chaud"
+        return ""
+
+    @classmethod
+    def _meteo_rank(cls, r: dict[str, Any], weather: str) -> int:
+        """Pondération météo (souple) : 0 = plat adapté, 1 = neutre, 2 = à éviter.
+        Temps froid → plat chaud ; temps chaud → plat froid."""
+        if not weather:
+            return 1
+        t = cls._tagset(r)
+        has_chaud, has_froid = "plat chaud" in t, "plat froid" in t
+        if not (has_chaud or has_froid):
+            return 1
+        if weather == "froid":
+            return 0 if has_chaud else 2
+        return 0 if has_froid else 2  # weather == "chaud"
+
     async def generate_planning(
         self,
         recettes: list[dict[str, Any]],
@@ -742,11 +775,13 @@ class LLMClient:
         # demandée (rank 0), puis les « toutes saisons » (rank 1). Les recettes
         # sans tag de saison restent toujours éligibles.
         saison_n = self._norm(saison)
+        weather = self._weather(temperature)
         mains = [r for r in recettes
                  if not self._is_side(r) and r["repas"] in ("Plat", "Entrée", "")]
+        # Saison = filtre dur (autre saison écartée) ; météo = tri souple.
         eligibles = sorted(
             (r for r in mains if self._season_rank(r, saison_n) < 2),
-            key=lambda r: self._season_rank(r, saison_n),
+            key=lambda r: (self._season_rank(r, saison_n), self._meteo_rank(r, weather)),
         )
 
         lignes = []
@@ -839,28 +874,74 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
                 out.append(n)
         return out
 
+    def _slot_score(self, tagset: set[str], moment: str, day: int) -> float:
+        """Score d'adéquation (plus bas = mieux) d'une recette à un créneau,
+        selon ses tags Moment / Légèreté / Effort. Le moment est quasi-bloquant."""
+        s = 0.0
+        # Moment : une recette tagée Midi/Soir ne va que sur son créneau.
+        mom = {x for x in tagset if x in ("midi", "soir")}
+        if mom:
+            s += -2 if moment in mom else 100
+        # Légèreté : léger le soir, copieux le midi.
+        if "leger" in tagset:
+            s += -1 if moment == "soir" else 1
+        if "copieux" in tagset:
+            s += -1 if moment == "midi" else 1
+        # Effort : rapide en semaine, mijoté le week-end (jours 6-7).
+        weekend = day >= 6
+        if "rapide" in tagset:
+            s += 0 if weekend else -1
+        if "mijote" in tagset:
+            s += -1 if weekend else 1
+        return s
+
     def _assign_slots(
         self, names: list[str], groups: list[int], unique_groups: list[int],
         meta: dict[str, Any] | None = None, sides: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Construit les 14 créneaux : midis groupés = même plat, soirs tous
-        différents (et différents des midis tant qu'il y a assez de recettes).
+        différents (et différents du midi du jour tant qu'il y a assez de
+        recettes). L'attribution respecte les tags Moment/Légèreté/Effort :
+        chaque créneau reçoit la recette inutilisée la mieux adaptée.
         Les plats « protéine nature » reçoivent un accompagnement (légume)."""
         if not names:
             return []
-        n_groups = len(unique_groups)
-        midi_by_group = {g: names[i % len(names)] for i, g in enumerate(unique_groups)}
-        soirs = names[n_groups:]
+        meta = meta or {}
+        order = {n: i for i, n in enumerate(names)}  # ordre LLM/saison/météo
+
+        group_days: dict[int, list[int]] = {}
+        for day, g in enumerate(groups, start=1):
+            group_days.setdefault(g, []).append(day)
+
+        def tagset(nom: str) -> set[str]:
+            return self._tagset(meta.get(nom.lower().strip(), {}))
+
+        used: set[str] = set()
+
+        def pick(moment: str, day: int, exclude: set[str] = frozenset()) -> str:
+            cands = [n for n in names if n not in used and n not in exclude]
+            if not cands:  # plus rien de libre : on autorise la réutilisation
+                cands = [n for n in names if n not in exclude] or names
+            return min(cands, key=lambda n: (self._slot_score(tagset(n), moment, day), order[n]))
+
+        # Midis : un plat par groupe (jour représentatif = premier du groupe).
+        midi_by_group: dict[int, str] = {}
+        for g in unique_groups:
+            nom = pick("midi", min(group_days.get(g, [1])))
+            midi_by_group[g] = nom
+            used.add(nom)
 
         plats: list[dict[str, Any]] = []
         for day in range(1, 8):
             plats.append(self._make_plat(day, "midi", midi_by_group[groups[day - 1]]))
-        for day in range(1, 8):
-            idx = day - 1
-            nom = soirs[idx] if idx < len(soirs) else names[(n_groups + idx) % len(names)]
-            plats.append(self._make_plat(day, "soir", nom))
 
-        self._attach_sides(plats, meta or {}, sides or [])
+        # Soirs : tous différents, et différent du midi du même jour.
+        for day in range(1, 8):
+            nom = pick("soir", day, exclude={midi_by_group[groups[day - 1]]})
+            plats.append(self._make_plat(day, "soir", nom))
+            used.add(nom)
+
+        self._attach_sides(plats, meta, sides or [])
         return plats
 
     def _attach_sides(

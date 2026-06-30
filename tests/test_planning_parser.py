@@ -72,6 +72,46 @@ def test_season_rank_and_recipe_seasons():
     assert client._recipe_seasons({"tags": ["Soupe"]}) == set()
 
 
+def test_weather_and_meteo_rank():
+    assert client._weather("Froid (< 10°C)") == "froid"
+    assert client._weather("Frais (10-18°C)") == "froid"
+    assert client._weather("Chaud (> 25°C)") == "chaud"
+    assert client._weather("Canicule (> 35°C)") == "chaud"
+    assert client._weather("Doux (18-25°C)") == ""
+    # froid -> plat chaud privilégié, plat froid évité
+    assert client._meteo_rank({"tags": ["Plat chaud"]}, "froid") == 0
+    assert client._meteo_rank({"tags": ["Plat froid"]}, "froid") == 2
+    assert client._meteo_rank({"tags": ["Soupe"]}, "froid") == 1  # neutre
+    assert client._meteo_rank({"tags": ["Plat froid"]}, "") == 1   # météo neutre
+
+
+def test_slot_score_moment_quasi_bloquant():
+    soir_only = {"soir"}
+    # une recette « Soir » est lourdement pénalisée sur un créneau midi
+    assert client._slot_score(soir_only, "midi", 1) > 50
+    assert client._slot_score(soir_only, "soir", 1) < 0
+    # léger mieux noté le soir ; copieux mieux le midi
+    assert client._slot_score({"leger"}, "soir", 1) < client._slot_score({"leger"}, "midi", 1)
+    assert client._slot_score({"copieux"}, "midi", 1) < client._slot_score({"copieux"}, "soir", 1)
+    # mijoté favorisé le week-end (jour 6) vs semaine (jour 2)
+    assert client._slot_score({"mijote"}, "soir", 6) < client._slot_score({"mijote"}, "soir", 2)
+
+
+def test_assign_slots_respects_moment_tag():
+    # « Soir uniquement » ne doit pas atterrir en midi si d'autres choix existent
+    meta = {
+        "poulet soir": {"nom": "Poulet soir", "tags": ["Soir"], "repas": "Plat"},
+        "midi a": {"nom": "Midi A", "tags": [], "repas": "Plat"},
+        "midi b": {"nom": "Midi B", "tags": [], "repas": "Plat"},
+    }
+    names = ["Poulet soir", "Midi A", "Midi B"]
+    plats = client._assign_slots(names, [1, 1, 1, 1, 1, 1, 1], [1], meta)
+    midis = {p["nom_recette"] for p in plats if p["moment"] == "midi"}
+    soirs = {p["nom_recette"] for p in plats if p["moment"] == "soir"}
+    assert "Poulet soir" not in midis
+    assert "Poulet soir" in soirs
+
+
 def test_liste_numerotee():
     raw = "\n".join(
         f"{i+1} - Jour {i//2+1} - {'midi' if i%2==0 else 'soir'} - Recette {i+1}"
