@@ -9,8 +9,10 @@ client = LLMClient()
 
 
 def test_needs_side_and_is_side():
-    # Accompagnement proposé par défaut à tout plat principal.
-    assert client._needs_side({"repas": "Plat", "tags": ["Viande"]})
+    # Plat complet (type « Plat » ou tag « plat ») : se suffit, pas d'accompagnement.
+    assert not client._needs_side({"repas": "Plat", "tags": ["Viande"]})
+    assert not client._needs_side({"repas": "", "tags": ["Plat"]})
+    # Plat principal non complet : accompagnement par défaut.
     assert client._needs_side({"repas": "", "tags": []})
     assert client._needs_side({"repas": "Entrée", "tags": []})
     # Un accompagnement n'en reçoit pas lui-même.
@@ -18,21 +20,47 @@ def test_needs_side_and_is_side():
     assert client._is_side({"repas": "Légume", "tags": []})
     assert client._is_side({"repas": "Accompagnement", "tags": []})
     assert not client._is_side({"repas": "Plat", "tags": ["Viande"]})
+    assert client._is_complete({"repas": "Plat", "tags": []})
+    assert client._is_complete({"repas": "", "tags": ["plat"]})
 
 
-def test_attach_sides_default_for_all_mains():
+def test_attach_sides_skips_complete_plat():
     meta = {
         "lasagnes": {"nom": "Lasagnes", "repas": "Plat", "tags": ["Viande"]},
+        "poulet": {"nom": "Poulet", "repas": "", "tags": []},  # non complet -> côté
         "riz pilaf": {"nom": "Riz pilaf", "repas": "Accompagnement", "tags": []},
     }
     sides = [{"nom": "Haricots verts", "repas": "Légume", "tags": []}]
     plats = [
         client._make_plat(1, "midi", "Lasagnes"),
-        client._make_plat(1, "soir", "Riz pilaf"),
+        client._make_plat(1, "soir", "Poulet"),
+        client._make_plat(2, "soir", "Riz pilaf"),
     ]
     client._attach_sides(plats, meta, sides)
-    assert plats[0]["accompagnement"]["nom_recette"] == "Haricots verts"  # plat -> côté
-    assert plats[1]["accompagnement"] is None  # un accompagnement n'en reçoit pas
+    assert plats[0]["accompagnement"] is None  # plat complet -> aucun
+    assert plats[1]["accompagnement"]["nom_recette"] == "Haricots verts"  # nature -> côté
+    assert plats[2]["accompagnement"] is None  # accompagnement -> aucun
+
+
+def test_attach_sides_same_plat_same_side():
+    """Un même plat sur jours consécutifs garde le même accompagnement
+    (préserve la fusion des cases du planning)."""
+    meta = {
+        "poulet": {"nom": "Poulet", "repas": "", "tags": []},
+        "poisson": {"nom": "Poisson", "repas": "", "tags": []},
+    }
+    sides = [
+        {"nom": "Haricots", "repas": "Légume", "tags": []},
+        {"nom": "Riz", "repas": "Accompagnement", "tags": []},
+    ]
+    plats = [
+        client._make_plat(1, "midi", "Poulet"),
+        client._make_plat(2, "midi", "Poulet"),
+        client._make_plat(3, "midi", "Poisson"),
+    ]
+    client._attach_sides(plats, meta, sides)
+    assert plats[0]["accompagnement"]["nom_recette"] == plats[1]["accompagnement"]["nom_recette"]
+    assert plats[2]["accompagnement"]["nom_recette"] != plats[0]["accompagnement"]["nom_recette"]
 
 
 def test_liste_numerotee():
