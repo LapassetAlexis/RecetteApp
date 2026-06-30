@@ -358,15 +358,21 @@ a.meal-warn:hover { background:#f9e0c4; }
 .nutri-days { margin-top:12px; }
 .nutri-days > summary { cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--prd); padding:4px 0; user-select:none; }
 .nutri-days-scroll { overflow-x:auto; margin-top:8px; }
-.nutri-table { width:100%; border-collapse:collapse; font-size:0.82rem; min-width:340px; }
-.nutri-table th { text-align:right; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; color:var(--t2); padding:4px 8px; border-bottom:1px solid var(--bd); }
+.nutri-table { width:100%; max-width:600px; border-collapse:collapse; font-size:0.85rem; min-width:340px; }
+.nutri-table th { text-align:right; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; color:var(--t2); padding:6px 10px; border-bottom:2px solid var(--bo); }
 .nutri-table th:first-child, .nutri-table th:nth-child(2) { text-align:left; }
-.nutri-table td { text-align:right; padding:4px 8px; }
-.nutri-table td.nd-day { text-align:left; font-weight:700; }
+.nutri-table td { text-align:right; padding:5px 10px; font-variant-numeric:tabular-nums; }
+.nutri-table td small { font-size:0.72em; color:var(--t2); margin-left:1px; }
+.nutri-table td.nd-day { text-align:left; font-weight:700; vertical-align:middle; border-right:1px solid var(--bo); }
 .nutri-table td.nd-meal { text-align:left; color:var(--t2); }
-.nutri-table tr.day-first td { border-top:1px solid var(--bd); }
+/* zébrage par jour pour distinguer les blocs */
+.nutri-table tr.nd-odd td { background:#faf7f3; }
+.nutri-table tr.nd-even td { background:var(--surface); }
+.nutri-table tr.day-first td { border-top:1px solid var(--bo); }
+.nutri-table tr.nd-empty td.nd-meal { font-style:italic; }
 .nutri-table tr.nd-total td { font-weight:700; color:var(--prd); }
-.nutri-table tr.nd-total td.nd-meal { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.3px; }
+.nutri-table tr.nd-total td small { color:var(--prd); }
+.nutri-table tr.nd-total td.nd-meal { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; }
 
 /* ── Éditeur d'étapes (enrichir) ─────────────── */
 .step-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }

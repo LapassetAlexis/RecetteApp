@@ -164,23 +164,29 @@
                     {% set rows = [] %}
                     {% if d.midi %}{% set _ = rows.append(('☀️ Midi', d.midi)) %}{% endif %}
                     {% if d.soir %}{% set _ = rows.append(('🌙 Soir', d.soir)) %}{% endif %}
+                    {# total affiché seulement si 2 repas (sinon identique à l'unique repas) #}
+                    {% set show_total = d.total and rows|length > 1 %}
+                    {% set nrows = (rows|length + (1 if show_total else 0)) if rows else 1 %}
+                    {% set zebra = 'nd-odd' if loop.index is odd else 'nd-even' %}
                     {% if rows %}
                         {% for label, n in rows %}
-                        <tr class="{{ 'day-first' if loop.first else '' }}">
-                            <td class="nd-day">{% if loop.first %}{{ d.nom }}{% endif %}</td>
+                        <tr class="nd-row {{ zebra }}{{ ' day-first' if loop.first else '' }}">
+                            {% if loop.first %}<td class="nd-day" rowspan="{{ nrows }}">{{ d.nom }}</td>{% endif %}
                             <td class="nd-meal">{{ label }}</td>
-                            <td>{{ n.calories }}</td><td>{{ n.proteines }}g</td><td>{{ n.glucides }}g</td><td>{{ n.lipides }}g</td>
+                            <td>{{ n.calories }}</td><td>{{ n.proteines }}<small>g</small></td><td>{{ n.glucides }}<small>g</small></td><td>{{ n.lipides }}<small>g</small></td>
                         </tr>
                         {% endfor %}
-                        {% if d.total %}
-                        <tr class="nd-total">
-                            <td class="nd-day"></td>
-                            <td class="nd-meal">Total jour</td>
-                            <td>{{ d.total.calories }}</td><td>{{ d.total.proteines }}g</td><td>{{ d.total.glucides }}g</td><td>{{ d.total.lipides }}g</td>
+                        {% if show_total %}
+                        <tr class="nd-row nd-total {{ zebra }}">
+                            <td class="nd-meal">Total</td>
+                            <td>{{ d.total.calories }}</td><td>{{ d.total.proteines }}<small>g</small></td><td>{{ d.total.glucides }}<small>g</small></td><td>{{ d.total.lipides }}<small>g</small></td>
                         </tr>
                         {% endif %}
                     {% else %}
-                        <tr class="day-first"><td class="nd-day">{{ d.nom }}</td><td class="nd-meal muted-sm" colspan="5">non estimé</td></tr>
+                        <tr class="nd-row nd-empty {{ zebra }} day-first">
+                            <td class="nd-day">{{ d.nom }}</td>
+                            <td class="nd-meal muted-sm" colspan="5">— non estimé</td>
+                        </tr>
                     {% endif %}
                     {% endfor %}
                 </tbody>
