@@ -220,33 +220,67 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
     if not per_recipe:
         return None
 
-    tot = {"calories": 0.0, "proteines": 0.0, "glucides": 0.0, "lipides": 0.0}
-    seen: set[tuple] = set()
-    meals_total = meals_est = 0
-    days: set[int] = set()
-    for p in plats:
-        days.add(p["jour"])
-        key = (p["jour"], p["moment"])
-        if key in seen:
-            continue
-        seen.add(key)
-        meals_total += 1
+    _KEYS = ("calories", "proteines", "glucides", "lipides")
+
+    def _meal_nut(p: dict) -> dict | None:
+        """Somme nutrition d'un repas (plat + accompagnement) ou None si non estimable."""
         recs = [p.get("notion_id")]
         acc = p.get("accompagnement") or {}
         if acc.get("notion_id"):
             recs.append(acc["notion_id"])
-        meal = [per_recipe[n] for n in recs if n in per_recipe]
-        if not meal:
+        parts = [per_recipe[n] for n in recs if n in per_recipe]
+        if not parts:
+            return None
+        return {k: sum((n.get(k, 0) or 0) for n in parts) for k in _KEYS}
+
+    tot = {k: 0.0 for k in _KEYS}
+    seen: set[tuple] = set()
+    meals_total = meals_est = 0
+    days: set[int] = set()
+    # Détail par jour : {jour: {"midi": nut|None, "soir": nut|None}}
+    by_day: dict[int, dict[str, dict | None]] = {}
+    for p in plats:
+        jour = p["jour"]
+        days.add(jour)
+        key = (jour, p["moment"])
+        if key in seen:
+            continue
+        seen.add(key)
+        meals_total += 1
+        nut = _meal_nut(p)
+        by_day.setdefault(jour, {})[p["moment"]] = nut
+        if not nut:
             continue
         meals_est += 1
-        for n in meal:
-            for k in tot:
-                tot[k] += n.get(k, 0) or 0
+        for k in tot:
+            tot[k] += nut[k]
 
     if not meals_est:
         return None
     ndays = len(days) or 1
     cov = meals_est / meals_total if meals_total else 0
+
+    JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+
+    def _round(n: dict | None) -> dict | None:
+        return {k: round(n[k]) for k in _KEYS} if n else None
+
+    par_jour = []
+    for jour in sorted(days):
+        midi = by_day.get(jour, {}).get("midi")
+        soir = by_day.get(jour, {}).get("soir")
+        day_total = None
+        present = [m for m in (midi, soir) if m]
+        if present:
+            day_total = {k: sum(m[k] for m in present) for k in _KEYS}
+        par_jour.append({
+            "jour": jour,
+            "nom": JOURS[jour - 1] if 1 <= jour <= 7 else f"Jour {jour}",
+            "midi": _round(midi),
+            "soir": _round(soir),
+            "total": _round(day_total),
+        })
+
     return {
         "calories": round(tot["calories"] / ndays),
         "proteines": round(tot["proteines"] / ndays),
@@ -254,6 +288,7 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
         "lipides": round(tot["lipides"] / ndays),
         "meals_estimes": meals_est, "meals_total": meals_total,
         "confiance": "Bonne" if cov >= 0.7 else ("Moyenne" if cov >= 0.4 else "Mauvaise"),
+        "par_jour": par_jour,
     }
 
 

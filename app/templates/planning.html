@@ -28,6 +28,41 @@
 <!-- Planning 7 jours (cases fusionnées si même repas sur jours consécutifs) -->
 {% set jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
 {% set labels = {'midi':'☀️ Midi','soir':'🌙 Soir'} %}
+
+{# Contenu d'une case repas, partagé entre la grille (desktop) et la liste (mobile). #}
+{% macro meal_inner(run, moment, plat, daylabel) %}
+    <div class="meal-head">
+        <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}"> <span class="meal-tag">{{ daylabel }}</span></label>
+        <button class="meal-ch" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
+    </div>
+    {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
+    {% if link %}
+    <a class="meal-name" href="{{ link }}"{% if not plat.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ plat.nom_recette | clean_title }}</a>
+    {% else %}
+    <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
+    {% endif %}
+    <div class="meal-side" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}">
+    {% if plat.accompagnement %}
+        {% set acc = plat.accompagnement %}
+        {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
+        <span class="side-txt">+
+        {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
+        {% else %}{{ acc.nom_recette | clean_title }}{% endif %}</span>
+        <button class="side-ch" title="Changer l'accompagnement">↻</button>
+        <button class="side-rm" title="Retirer l'accompagnement">✕</button>
+    {% else %}
+        <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
+    {% endif %}
+    </div>
+    {% if plat.repas or plat.tags %}
+    <div class="meal-chips">
+        {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
+        {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
+    </div>
+    {% endif %}
+{% endmacro %}
+
+<!-- Grille (desktop / tablette) -->
 <div class="week-wrapper">
     <div class="week-grid">
         <div class="corner" style="grid-column:1;grid-row:1;"></div>
@@ -42,44 +77,30 @@
         {% for moment in ['midi','soir'] %}
         {% set row = 2 if moment == 'midi' else 3 %}
         {% for run in week_rows[moment] %}
-        {% set plat = run.plat %}
         {% set last = run.start + run.span - 1 %}
-        {% set jcsv = run.jours | join(',') %}
-        <div class="meal {{ moment }}{{ ' merged' if run.span > 1 else '' }}" data-jours="{{ jcsv }}" data-moment="{{ moment }}"
+        <div class="meal {{ moment }}{{ ' merged' if run.span > 1 else '' }}" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}"
              style="grid-column:{{ run.start + 1 }} / span {{ run.span }};grid-row:{{ row }};">
-            <div class="meal-head">
-                <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ jcsv }}" data-moment="{{ moment }}"> <span class="meal-tag">{% if run.span > 1 %}{{ jours[run.start-1][:3] }}–{{ jours[last-1][:3] }}{% endif %}</span></label>
-                <button class="meal-ch" data-jours="{{ jcsv }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
-            </div>
-            {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
-            {% if link %}
-            <a class="meal-name" href="{{ link }}"{% if not plat.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ plat.nom_recette | clean_title }}</a>
-            {% else %}
-            <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
-            {% endif %}
-            <div class="meal-side" data-jours="{{ jcsv }}" data-moment="{{ moment }}">
-            {% if plat.accompagnement %}
-                {% set acc = plat.accompagnement %}
-                {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
-                <span class="side-txt">+
-                {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
-                {% else %}{{ acc.nom_recette | clean_title }}{% endif %}</span>
-                <button class="side-ch" title="Changer l'accompagnement">↻</button>
-                <button class="side-rm" title="Retirer l'accompagnement">✕</button>
-            {% else %}
-                <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
-            {% endif %}
-            </div>
-            {% if plat.repas or plat.tags %}
-            <div class="meal-chips">
-                {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
-                {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
-            </div>
-            {% endif %}
+            {{ meal_inner(run, moment, run.plat, jours[run.start-1][:3] ~ '–' ~ jours[last-1][:3] if run.span > 1 else '') }}
         </div>
         {% endfor %}
         {% endfor %}
     </div>
+</div>
+
+<!-- Liste empilée (mobile) : sections Midi / Soir, une carte par repas -->
+<div class="week-list">
+    {% for moment in ['midi','soir'] %}
+    <div class="wl-section {{ moment }}">
+        <h3 class="wl-h">{{ labels[moment] }}</h3>
+        {% for run in week_rows[moment] %}
+        {% set last = run.start + run.span - 1 %}
+        {% set daylabel = (jours[run.start-1][:3] ~ '–' ~ jours[last-1][:3]) if run.span > 1 else jours[run.start-1] %}
+        <div class="meal {{ moment }}" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}">
+            {{ meal_inner(run, moment, run.plat, daylabel) }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
 </div>
 
 <!-- Barre action groupée -->
@@ -120,7 +141,44 @@
         <div class="nutri-item"><span class="nv">{{ week_nutrition.glucides }}<small>g</small></span><span class="nl">glucides</span></div>
         <div class="nutri-item"><span class="nv">{{ week_nutrition.lipides }}<small>g</small></span><span class="nl">lipides</span></div>
     </div>
-    <small class="muted-sm">Moyenne estimée ({{ week_nutrition.meals_estimes }}/{{ week_nutrition.meals_total }} repas couverts) — enrichis les recettes pour affiner.</small>
+    <small class="muted-sm">Moyenne / jour estimée ({{ week_nutrition.meals_estimes }}/{{ week_nutrition.meals_total }} repas couverts) — enrichis les recettes pour affiner.</small>
+    {% if week_nutrition.par_jour %}
+    <details class="nutri-days">
+        <summary>📅 Détail par jour</summary>
+        <div class="nutri-days-scroll">
+            <table class="nutri-table">
+                <thead>
+                    <tr><th>Jour</th><th>Repas</th><th>kcal</th><th>Prot.</th><th>Gluc.</th><th>Lip.</th></tr>
+                </thead>
+                <tbody>
+                    {% for d in week_nutrition.par_jour %}
+                    {% set rows = [] %}
+                    {% if d.midi %}{% set _ = rows.append(('☀️ Midi', d.midi)) %}{% endif %}
+                    {% if d.soir %}{% set _ = rows.append(('🌙 Soir', d.soir)) %}{% endif %}
+                    {% if rows %}
+                        {% for label, n in rows %}
+                        <tr class="{{ 'day-first' if loop.first else '' }}">
+                            <td class="nd-day">{% if loop.first %}{{ d.nom }}{% endif %}</td>
+                            <td class="nd-meal">{{ label }}</td>
+                            <td>{{ n.calories }}</td><td>{{ n.proteines }}g</td><td>{{ n.glucides }}g</td><td>{{ n.lipides }}g</td>
+                        </tr>
+                        {% endfor %}
+                        {% if d.total %}
+                        <tr class="nd-total">
+                            <td class="nd-day"></td>
+                            <td class="nd-meal">Total jour</td>
+                            <td>{{ d.total.calories }}</td><td>{{ d.total.proteines }}g</td><td>{{ d.total.glucides }}g</td><td>{{ d.total.lipides }}g</td>
+                        </tr>
+                        {% endif %}
+                    {% else %}
+                        <tr class="day-first"><td class="nd-day">{{ d.nom }}</td><td class="nd-meal muted-sm" colspan="5">non estimé</td></tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+    {% endif %}
 </div>
 {% endif %}
 
