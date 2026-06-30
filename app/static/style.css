@@ -106,6 +106,10 @@ a.meal-name:hover { text-decoration:underline; }
 .side-add { width:100%; padding:2px 6px; border-style:dashed; }
 .meal-chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; padding-top:4px; }
 .meal-chips .chip, .meal-chips .tag { font-size:0.6rem; padding:1px 6px; }
+.meal-warn { display:inline-block; align-self:flex-start; font-size:0.62rem; font-weight:700; color:#a0531c; background:#fdeede; border:1px solid #f2c89a; border-radius:8px; padding:1px 7px; margin:2px 0 3px; text-decoration:none; }
+a.meal-warn:hover { background:#f9e0c4; }
+.meal.merged .meal-warn { align-self:center; }
+.side-warn { color:#a0531c; cursor:help; }
 
 /* ── Barre de validation (brouillon) ─────────── */
 .validate-bar { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; border-left:4px solid var(--pr); }
@@ -262,6 +266,10 @@ a.meal-name:hover { text-decoration:underline; }
 }
 .tgl input:checked + span { background:var(--pr); color:#fff; border-color:var(--pr); }
 .tgl span:hover { border-color:var(--pr); }
+/* Tags groupés par catégorie */
+.tag-groups { display:flex; flex-direction:column; gap:12px; }
+.tag-group-h { display:block; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--t2); margin-bottom:5px; }
+.tag-group-chips { display:flex; flex-wrap:wrap; gap:5px; }
 
 /* ── Générer : organisation des midis ────────── */
 .row-between { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
@@ -348,18 +356,27 @@ a.meal-name:hover { text-decoration:underline; }
 .nutri-item .nv small { font-size:0.7rem; font-weight:700; margin-left:1px; }
 .nutri-item .nl { display:block; font-size:0.68rem; color:var(--t2); text-transform:uppercase; letter-spacing:0.3px; margin-top:5px; }
 @media (max-width:480px) { .nutri-grid { grid-template-columns:repeat(2,1fr); } }
+.nutri-empty { text-align:center; padding:14px 8px; }
+.nutri-empty p { font-size:0.95rem; margin-bottom:6px; }
+.nutri-empty a { color:var(--prd); font-weight:600; }
 .nutri-days { margin-top:12px; }
 .nutri-days > summary { cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--prd); padding:4px 0; user-select:none; }
 .nutri-days-scroll { overflow-x:auto; margin-top:8px; }
-.nutri-table { width:100%; border-collapse:collapse; font-size:0.82rem; min-width:340px; }
-.nutri-table th { text-align:right; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; color:var(--t2); padding:4px 8px; border-bottom:1px solid var(--bd); }
+.nutri-table { width:100%; max-width:600px; border-collapse:collapse; font-size:0.85rem; min-width:340px; }
+.nutri-table th { text-align:right; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; color:var(--t2); padding:6px 10px; border-bottom:2px solid var(--bo); }
 .nutri-table th:first-child, .nutri-table th:nth-child(2) { text-align:left; }
-.nutri-table td { text-align:right; padding:4px 8px; }
-.nutri-table td.nd-day { text-align:left; font-weight:700; }
+.nutri-table td { text-align:right; padding:5px 10px; font-variant-numeric:tabular-nums; }
+.nutri-table td small { font-size:0.72em; color:var(--t2); margin-left:1px; }
+.nutri-table td.nd-day { text-align:left; font-weight:700; vertical-align:middle; border-right:1px solid var(--bo); }
 .nutri-table td.nd-meal { text-align:left; color:var(--t2); }
-.nutri-table tr.day-first td { border-top:1px solid var(--bd); }
+/* zébrage par jour pour distinguer les blocs */
+.nutri-table tr.nd-odd td { background:#faf7f3; }
+.nutri-table tr.nd-even td { background:var(--surface); }
+.nutri-table tr.day-first td { border-top:1px solid var(--bo); }
+.nutri-table tr.nd-empty td.nd-meal { font-style:italic; }
 .nutri-table tr.nd-total td { font-weight:700; color:var(--prd); }
-.nutri-table tr.nd-total td.nd-meal { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.3px; }
+.nutri-table tr.nd-total td small { color:var(--prd); }
+.nutri-table tr.nd-total td.nd-meal { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; }
 
 /* ── Éditeur d'étapes (enrichir) ─────────────── */
 .step-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }

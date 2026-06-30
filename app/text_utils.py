@@ -11,14 +11,37 @@ _SOURCE_MARKERS = (
 )
 
 
+def normalize_title_case(s: str) -> str:
+    """Normalise la casse d'un titre crié en MAJUSCULES en casse de phrase.
+
+    Ne touche qu'aux titres SANS aucune minuscule (ex. titres importés tout en
+    capitales). Les titres déjà en casse mixte sont laissés intacts pour
+    préserver les noms propres.
+
+      "WRAP D'ÉPINARDS FROMAGE FOUETTÉ ET JAMBON" -> "Wrap d'épinards fromage fouetté et jambon"
+      "Steak haché, ratatouille et semoule"       -> inchangé
+    """
+    if not s:
+        return s
+    letters = [c for c in s if c.isalpha()]
+    if not letters or any(c.islower() for c in letters):
+        return s
+    s = s.lower()
+    for i, c in enumerate(s):
+        if c.isalpha():
+            return s[:i] + c.upper() + s[i + 1:]
+    return s
+
+
 def clean_recipe_title(name: str) -> str:
-    """Retire les suffixes de site/source d'un titre de recette.
+    """Retire les suffixes de site/source d'un titre de recette et normalise la casse.
 
     Exemples :
       "Flans ... - Amandine Cooking"      -> "Flans ..."
       "Wrap ... | Recette Minceur"        -> "Wrap ..."
       "Wok ... - Recettes légères"        -> "Wok ..."
       "Pâtes ... WW"                      -> "Pâtes ..."
+      "WRAP D'ÉPINARDS ET JAMBON"         -> "Wrap d'épinards et jambon"
     Ne touche pas aux titres dont le segment après " - " n'est pas une source
     (ex. "Boeuf - carottes" reste inchangé).
     """
@@ -35,7 +58,7 @@ def clean_recipe_title(name: str) -> str:
             s = left.strip()
     # Suffixe " WW" (Weight Watchers)
     s = re.sub(r"\s+WW$", "", s)
-    return s.strip()
+    return normalize_title_case(s.strip())
 
 
 def parse_ingredient_line(line: str) -> dict | None:

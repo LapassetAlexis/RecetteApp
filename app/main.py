@@ -17,13 +17,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
+from app.config import REPAS_OPTIONS, TAG_GROUPS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.nutrition import estimate_nutrition
-from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
+from app.text_utils import clean_recipe_title, merge_ingredients, normalize_title_case, parse_ingredient_line, split_instructions
 
 VERSION = "1.1.0"
 
@@ -102,6 +102,8 @@ templates.env.globals["version"] = VERSION
 templates.env.globals["asset_version"] = str(int(time.time()))
 # Filtre de nettoyage des titres de recettes (retire les suffixes de site)
 templates.env.filters["clean_title"] = clean_recipe_title
+# Tags groupés par catégorie (affichage des formulaires)
+templates.env.globals["tag_groups"] = TAG_GROUPS
 
 # ── Pages ──────────────────────────────────────────────────────────
 
@@ -336,6 +338,18 @@ async def voir_planning(request: Request, planning_id: int):
 
     liste_courses = data.get("liste_courses", [])
     plats = data.get("plats", [])
+
+    # Marque les repas dont la recette n'a pas d'ingrédients en cache
+    # (« recette pas terminée ») pour afficher un avertissement dans le planning.
+    enriched_ids = set(await db.get_all_enriched_ingredients())
+    for p in plats:
+        nid = p.get("notion_id")
+        p["non_enrichi"] = not (nid and nid in enriched_ids)
+        acc = p.get("accompagnement")
+        if acc:
+            aid = acc.get("notion_id")
+            acc["non_enrichi"] = not (aid and aid in enriched_ids)
+
     return templates.TemplateResponse(
         "planning.html",
         {
@@ -578,6 +592,9 @@ async def enrichir_submit(
     if not recette:
         return RedirectResponse(url="/recettes", status_code=303)
 
+    # Normalise un titre crié en MAJUSCULES (ex. import) en casse de phrase.
+    nom_norm = normalize_title_case(recette["nom"])
+
     structured = [
         i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
     ]
@@ -590,8 +607,10 @@ async def enrichir_submit(
     except (json.JSONDecodeError, TypeError):
         nutrition = ""
     try:
+        if nom_norm != recette["nom"]:
+            await notion.update_recipe_title(page_id, nom_norm)
         if structured:
-            await db.save_enriched(page_id, recette["nom"], ingredients=json.dumps(structured),
+            await db.save_enriched(page_id, nom_norm, ingredients=json.dumps(structured),
                                    cuisson_minutes=duree_minutes or 0, nutrition=nutrition)
             await notion.update_ingredients(page_id, _ingredients_to_text(structured))
         if instructions_text:
@@ -947,6 +966,14 @@ async def _enrich_one(r: dict) -> str:
     nid, nom = r.get("id"), r.get("nom")
     if not nid or not nom:
         return "skipped"
+    # Normalise un titre tout en MAJUSCULES (best-effort, n'empêche pas l'enrichissement)
+    nom_norm = normalize_title_case(nom)
+    if nom_norm != nom:
+        try:
+            await notion.update_recipe_title(nid, nom_norm)
+            nom = nom_norm
+        except Exception as e:
+            logger.warning(f"Normalisation titre échouée pour {nom}: {e}")
     ingredients_txt = ""
     cached = await db.get_enriched(nid)
     if cached and cached.get("ingredients"):

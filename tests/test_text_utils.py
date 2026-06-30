@@ -1,6 +1,28 @@
 """Tests du nettoyage des titres de recettes."""
 
-from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line, split_instructions
+from app.text_utils import (
+    clean_recipe_title, merge_ingredients, normalize_title_case,
+    parse_ingredient_line, split_instructions,
+)
+
+
+def test_normalize_title_case_shouting():
+    assert normalize_title_case("WRAP D'ÉPINARDS FROMAGE FOUETTÉ ET JAMBON") == \
+        "Wrap d'épinards fromage fouetté et jambon"
+    assert normalize_title_case("BRUSCHETTAS PARMA") == "Bruschettas parma"
+
+
+def test_normalize_title_case_leaves_mixed():
+    # Casse mixte conservée (préserve noms propres)
+    assert normalize_title_case("Steak haché, ratatouille et semoule") == \
+        "Steak haché, ratatouille et semoule"
+    assert normalize_title_case("Bruschettas Parma") == "Bruschettas Parma"
+    assert normalize_title_case("") == ""
+    assert normalize_title_case("123") == "123"
+
+
+def test_clean_recipe_title_normalizes_case():
+    assert clean_recipe_title("WRAP D'ÉPINARDS ET JAMBON") == "Wrap d'épinards et jambon"
 
 
 def test_split_instructions_multiline():
