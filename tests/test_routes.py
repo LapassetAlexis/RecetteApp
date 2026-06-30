@@ -345,6 +345,26 @@ def test_dupliquer_planning(client, monkeypatch):
     assert "Valider la semaine" in client.get(f"/planning/{d['planning_id']}").text
 
 
+def test_planning_warns_non_enrichi(client, monkeypatch):
+    import json
+    async def _all():
+        return [_recipe("Poulet", id="n1")]
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet",
+                 "notion_id": "n1", "accompagnement": None}]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    # recette non enrichie -> avertissement présent
+    assert "À compléter" in client.get(f"/planning/{pid}").text
+    # après enrichissement (ingrédients en cache) -> plus d'avertissement
+    import asyncio
+    asyncio.run(main.db.save_enriched("n1", "Poulet", ingredients=json.dumps(
+        [{"nom": "g de poulet", "quantite": "200", "unite": ""}])))
+    assert "À compléter" not in client.get(f"/planning/{pid}").text
+
+
 def test_week_nutrition(client):
     import asyncio, json
     async def run():

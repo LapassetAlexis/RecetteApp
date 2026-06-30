@@ -336,6 +336,18 @@ async def voir_planning(request: Request, planning_id: int):
 
     liste_courses = data.get("liste_courses", [])
     plats = data.get("plats", [])
+
+    # Marque les repas dont la recette n'a pas d'ingrédients en cache
+    # (« recette pas terminée ») pour afficher un avertissement dans le planning.
+    enriched_ids = set(await db.get_all_enriched_ingredients())
+    for p in plats:
+        nid = p.get("notion_id")
+        p["non_enrichi"] = not (nid and nid in enriched_ids)
+        acc = p.get("accompagnement")
+        if acc:
+            aid = acc.get("notion_id")
+            acc["non_enrichi"] = not (aid and aid in enriched_ids)
+
     return templates.TemplateResponse(
         "planning.html",
         {
