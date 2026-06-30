@@ -106,6 +106,10 @@ a.meal-name:hover { text-decoration:underline; }
 .side-add { width:100%; padding:2px 6px; border-style:dashed; }
 .meal-chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:auto; padding-top:4px; }
 .meal-chips .chip, .meal-chips .tag { font-size:0.6rem; padding:1px 6px; }
+.meal-warn { display:inline-block; align-self:flex-start; font-size:0.62rem; font-weight:700; color:#a0531c; background:#fdeede; border:1px solid #f2c89a; border-radius:8px; padding:1px 7px; margin:2px 0 3px; text-decoration:none; }
+a.meal-warn:hover { background:#f9e0c4; }
+.meal.merged .meal-warn { align-self:center; }
+.side-warn { color:#a0531c; cursor:help; }
 
 /* ── Barre de validation (brouillon) ─────────── */
 .validate-bar { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; border-left:4px solid var(--pr); }

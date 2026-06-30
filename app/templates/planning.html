@@ -41,13 +41,17 @@
     {% else %}
     <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
     {% endif %}
+    {% if plat.non_enrichi %}
+    {% if plat.notion_id %}<a class="meal-warn" href="/recette/{{ plat.notion_id }}/enrichir" title="Recette pas terminée : aucun ingrédient enregistré. Clique pour l'enrichir.">⚠ À compléter</a>
+    {% else %}<span class="meal-warn" title="Recette pas terminée : aucun ingrédient enregistré.">⚠ À compléter</span>{% endif %}
+    {% endif %}
     <div class="meal-side" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}">
     {% if plat.accompagnement %}
         {% set acc = plat.accompagnement %}
         {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
         <span class="side-txt">+
         {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
-        {% else %}{{ acc.nom_recette | clean_title }}{% endif %}</span>
+        {% else %}{{ acc.nom_recette | clean_title }}{% endif %}{% if acc.non_enrichi %} <span class="side-warn" title="Accompagnement pas terminé : aucun ingrédient enregistré.">⚠</span>{% endif %}</span>
         <button class="side-ch" title="Changer l'accompagnement">↻</button>
         <button class="side-rm" title="Retirer l'accompagnement">✕</button>
     {% else %}
