@@ -129,12 +129,17 @@
     </div>
 </div>
 
-{% if week_nutrition %}
 <div class="card nutri">
     <div class="nutri-head">
         <h2>📊 Nutrition <small class="muted-sm">/ jour · personne</small></h2>
-        <span class="nutri-tag conf-{{ week_nutrition.confiance|lower }}">Confiance : {{ week_nutrition.confiance }}</span>
+        {% if week_nutrition %}<span class="nutri-tag conf-{{ week_nutrition.confiance|lower }}">Confiance : {{ week_nutrition.confiance }}</span>{% endif %}
     </div>
+    {% if not week_nutrition %}
+    <div class="nutri-empty">
+        <p>🍃 Pas encore de données nutritionnelles pour cette semaine.</p>
+        <small class="muted-sm">Enrichis tes recettes (page <a href="/recettes">Recettes</a> → « 🔄 Enrichir toutes les recettes ») puis régénère un planning pour voir l'estimation par jour.</small>
+    </div>
+    {% else %}
     <div class="nutri-grid">
         <div class="nutri-item"><span class="nv">{{ week_nutrition.calories }}</span><span class="nl">kcal</span></div>
         <div class="nutri-item"><span class="nv">{{ week_nutrition.proteines }}<small>g</small></span><span class="nl">protéines</span></div>
@@ -179,8 +184,8 @@
         </div>
     </details>
     {% endif %}
+    {% endif %}
 </div>
-{% endif %}
 
 <!-- Liste de courses -->
 <div class="card">
