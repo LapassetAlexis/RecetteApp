@@ -270,6 +270,42 @@ def test_enrichir_page_and_submit(client, monkeypatch):
     assert r.status_code == 303 and r.headers["location"] == "/recette/abc"
 
 
+def test_enrichir_demande_url_si_absente(client, monkeypatch):
+    # recette SANS url -> bannière + champ URL ; soumettre une URL la persiste
+    async def _get(pid):
+        return _recipe("Maison", id="abc", url="")
+    async def _enriched(nid):
+        return None
+    async def _instr(pid):
+        return []
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
+    page = client.get("/recette/abc/enrichir")
+    assert page.status_code == 200 and "n'a pas d'URL source" in page.text
+
+    saved = {}
+    async def _noop(*a, **k):
+        return {}
+    async def _save(*a, **k):
+        return None
+    async def _url(pid, url):
+        saved["url"] = url
+        return {}
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
+    monkeypatch.setattr(main.notion, "update_recipe_url", _url)
+    r = client.post("/recette/abc/enrichir", data={
+        "repas": "Plat", "source_url": "https://example.com/recette",
+        "ingredients_text": "200 g riz",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert saved.get("url") == "https://example.com/recette"
+
+
 def test_enrich_all(client, monkeypatch):
     async def _all():
         return [_recipe("Poulet", id="p1", url="http://r")]
