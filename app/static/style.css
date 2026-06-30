@@ -348,6 +348,9 @@ a.meal-name:hover { text-decoration:underline; }
 .nutri-item .nv small { font-size:0.7rem; font-weight:700; margin-left:1px; }
 .nutri-item .nl { display:block; font-size:0.68rem; color:var(--t2); text-transform:uppercase; letter-spacing:0.3px; margin-top:5px; }
 @media (max-width:480px) { .nutri-grid { grid-template-columns:repeat(2,1fr); } }
+.nutri-empty { text-align:center; padding:14px 8px; }
+.nutri-empty p { font-size:0.95rem; margin-bottom:6px; }
+.nutri-empty a { color:var(--prd); font-weight:600; }
 .nutri-days { margin-top:12px; }
 .nutri-days > summary { cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--prd); padding:4px 0; user-select:none; }
 .nutri-days-scroll { overflow-x:auto; margin-top:8px; }
