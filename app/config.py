@@ -99,3 +99,13 @@ TAG_OPTIONS = [
 # Tags de saison (sous-ensemble de TAG_OPTIONS). Une recette sans aucun de ces
 # tags est considérée « toutes saisons ».
 SAISON_TAGS = ["Printemps", "Été", "Automne", "Hiver"]
+
+# Regroupement des tags par catégorie pour l'affichage des formulaires.
+# Doit couvrir l'ensemble de TAG_OPTIONS.
+TAG_GROUPS = [
+    {"label": "🥩 Ingrédient principal", "tags": ["Viande", "Poisson", "Légumes"]},
+    {"label": "🍽️ Type de plat", "tags": ["Soupe", "Salade", "Quiche/tarte", "Tartines"]},
+    {"label": "🥗 Régime", "tags": ["Diet", "Végétarien proténiné"]},
+    {"label": "👥 Occasion", "tags": ["Fun", "Invités", "Sur le pouce", "1 personne"]},
+    {"label": "🗓️ Saison", "tags": SAISON_TAGS},
+]

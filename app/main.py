@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
+from app.config import REPAS_OPTIONS, TAG_GROUPS, TAG_OPTIONS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
@@ -102,6 +102,8 @@ templates.env.globals["version"] = VERSION
 templates.env.globals["asset_version"] = str(int(time.time()))
 # Filtre de nettoyage des titres de recettes (retire les suffixes de site)
 templates.env.filters["clean_title"] = clean_recipe_title
+# Tags groupés par catégorie (affichage des formulaires)
+templates.env.globals["tag_groups"] = TAG_GROUPS
 
 # ── Pages ──────────────────────────────────────────────────────────
 
