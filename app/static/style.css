@@ -53,8 +53,7 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .btn-primary.loading::after, .btn-secondary.loading::after { border-color:rgba(255,255,255,0.45); border-top-color:#fff; }
 
 /* ── Day Group Picker ────────────────────────── */
-.day-group { position:relative; cursor:pointer; padding:10px 4px 6px; border-radius:8px; font-size:0.75rem; font-weight:600; transition:all 0.15s; }
-.day-group:hover { transform:scale(1.03); }
+.day-group { position:relative; padding:10px 4px 6px; border-radius:8px; font-size:0.75rem; font-weight:600; transition:border 0.15s, background 0.15s; }
 .group-picker { position:absolute; top:100%; left:50%; transform:translateX(-50%); z-index:20; background:#fff; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.15); padding:6px; display:flex; gap:4px; margin-top:4px; white-space:nowrap; }
 .nb-input { -moz-appearance:textfield; text-align:center; padding:4px 0; border:1px solid var(--bo); border-radius:4px; font-size:0.75rem; font-weight:600; width:100%; }
 .nb-input::-webkit-outer-spin-button,
@@ -200,24 +199,47 @@ a.meal-name:hover { text-decoration:underline; }
 .hist-item .meta { font-size:0.8rem; color:var(--t2); margin:4px 0; }
 .hist-dup { margin-top:8px; width:100%; }
 
+/* ── Vue liste planning (mobile) ─────────────── */
+.week-list { display:none; }
+.wl-section { margin-bottom:18px; }
+.wl-h { font-size:0.95rem; margin-bottom:8px; padding-bottom:4px; border-bottom:2px solid var(--bo); }
+.wl-section.midi .wl-h { color:var(--prd); border-color:var(--pr); }
+.wl-section.soir .wl-h { color:var(--ac); border-color:var(--ac); }
+.week-list .meal { min-height:0; margin-bottom:8px; flex-direction:column; }
+.week-list .meal-name { -webkit-line-clamp:none; display:block; font-size:0.95rem; margin:4px 0; }
+.week-list .meal-tag { font-size:0.78rem; }
+.week-list .meal-side { font-size:0.85rem; }
+.week-list .meal-chips { margin-top:6px; }
+.week-list .meal-chips .chip, .week-list .meal-chips .tag { font-size:0.7rem; padding:2px 8px; }
+
 /* ── Responsive ──────────────────────────────── */
 @media (max-width:768px) {
     .week-grid { min-width:540px; grid-template-columns:40px repeat(7, minmax(70px, 1fr)); }
     .meal-name { font-size:0.7rem; }
     .shop-grid { grid-template-columns:1fr; }
     .form-r { flex-direction:column; gap:0; }
-    .nav-inner { flex-direction:column; gap:6px; }
     .recettes-grid { grid-template-columns:1fr 1fr; }
     .hero h1 { font-size:1.2rem; }
+    .nav-inner { padding:8px 12px; flex-wrap:wrap; gap:4px 0; }
+    .nav-brand { font-size:1rem; }
+    .nav-links { gap:2px; flex-wrap:wrap; justify-content:flex-end; }
+    .nav-links a { padding:6px 8px; font-size:0.82rem; }
+}
+/* Sous 640px : on remplace la grille (illisible) par la liste empilée */
+@media (max-width:640px) {
+    .week-wrapper { display:none; }
+    .week-list { display:block; }
+    .container { padding:12px; }
+    .card { padding:14px; }
+    .week-toolbar { flex-wrap:wrap; }
 }
 @media (max-width:480px) {
-    .week-grid { gap:5px; min-width:466px; grid-template-columns:34px repeat(7, minmax(58px, 1fr)); }
-    .meal { padding:5px; }
-    .row-label { font-size:0.6rem; }
-    .meal-name { font-size:0.72rem; }
-    .ck { width:16px; height:16px; }
-    .day-head { font-size:0.72rem; padding:6px 2px; }
     .recettes-grid { grid-template-columns:1fr; }
+    .nav-links a { padding:5px 7px; font-size:0.78rem; }
+    .hero h1 { font-size:1.1rem; }
+    .midi-grid { gap:3px; }
+    .nb-input { font-size:0.7rem; }
+    .modal-box { width:96%; }
 }
 @media (min-width:1024px) {
     .shop-grid { grid-template-columns:repeat(3,1fr); }
@@ -246,7 +268,10 @@ a.meal-name:hover { text-decoration:underline; }
 .btn-tiny { font-size:0.75rem; }
 .midi-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; text-align:center; }
 .day-name { font-size:0.7rem; color:var(--t2); margin-bottom:4px; }
-.group-label { padding:6px 0; border-radius:6px; margin-bottom:6px; font-size:0.7rem; }
+.group-label { display:block; width:100%; padding:6px 0; border-radius:6px; margin-bottom:6px; font-size:0.7rem; font-weight:700; border:none; cursor:pointer; transition:transform 0.1s; }
+.group-label:hover { transform:scale(1.06); }
+.nb-field { display:flex; align-items:center; gap:3px; justify-content:center; }
+.nb-field label { font-size:0.8rem; cursor:default; }
 .group-legend { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; font-size:0.75rem; color:var(--t2); }
 .hint { margin-top:6px; display:block; }
 .muted-sm { font-size:0.8rem; color:var(--t2); }
@@ -323,6 +348,18 @@ a.meal-name:hover { text-decoration:underline; }
 .nutri-item .nv small { font-size:0.7rem; font-weight:700; margin-left:1px; }
 .nutri-item .nl { display:block; font-size:0.68rem; color:var(--t2); text-transform:uppercase; letter-spacing:0.3px; margin-top:5px; }
 @media (max-width:480px) { .nutri-grid { grid-template-columns:repeat(2,1fr); } }
+.nutri-days { margin-top:12px; }
+.nutri-days > summary { cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--prd); padding:4px 0; user-select:none; }
+.nutri-days-scroll { overflow-x:auto; margin-top:8px; }
+.nutri-table { width:100%; border-collapse:collapse; font-size:0.82rem; min-width:340px; }
+.nutri-table th { text-align:right; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.3px; color:var(--t2); padding:4px 8px; border-bottom:1px solid var(--bd); }
+.nutri-table th:first-child, .nutri-table th:nth-child(2) { text-align:left; }
+.nutri-table td { text-align:right; padding:4px 8px; }
+.nutri-table td.nd-day { text-align:left; font-weight:700; }
+.nutri-table td.nd-meal { text-align:left; color:var(--t2); }
+.nutri-table tr.day-first td { border-top:1px solid var(--bd); }
+.nutri-table tr.nd-total td { font-weight:700; color:var(--prd); }
+.nutri-table tr.nd-total td.nd-meal { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.3px; }
 
 /* ── Éditeur d'étapes (enrichir) ─────────────── */
 .step-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }
@@ -333,7 +370,7 @@ a.meal-name:hover { text-decoration:underline; }
 
 /* ── Impression (liste de courses) ───────────── */
 @media print {
-    .nav, .footer, .bulk, .modal, .week-wrapper, .act, .toast-zone,
+    .nav, .footer, .bulk, .modal, .week-wrapper, .week-list, .act, .toast-zone,
     #btn-shop, .shop-h .btn, #shop-status { display:none !important; }
     body { background:#fff; }
     .card { box-shadow:none; border:none; padding:0; }

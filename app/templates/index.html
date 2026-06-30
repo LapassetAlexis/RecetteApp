@@ -53,14 +53,17 @@
             {% for i in range(7) %}
             <div class="day-group" data-idx="{{ i }}" data-group="{{ groups[i] }}">
                 <div class="day-name">{{ jours[i] }}</div>
-                <div class="group-label">G{{ groups[i] }}</div>
-                <input type="number" id="nb_{{ jours[i]|lower }}" name="nb_{{ jours[i]|lower }}" value="{{ pers[i] }}" min="1" max="20" class="nb-input">
+                <button type="button" class="group-label" data-idx="{{ i }}" title="Changer le groupe de plat">G{{ groups[i] }}</button>
+                <div class="nb-field">
+                    <label for="nb_{{ jours[i]|lower }}">👤</label>
+                    <input type="number" id="nb_{{ jours[i]|lower }}" name="nb_{{ jours[i]|lower }}" value="{{ pers[i] }}" min="1" max="20" class="nb-input" title="Nombre de personnes ce jour">
+                </div>
             </div>
             {% endfor %}
         </div>
         <div id="group-legend" class="group-legend"></div>
         <input type="hidden" name="midi_groups" id="midi-groups-input" value="{{ midi_groups_value or '1,1,2,2,2,3,4' }}">
-        <small class="hint">Clique sur le groupe (G1, G2...) pour changer. Modifie le nombre sous chaque jour. Même groupe = même plat cuisiné.</small>
+        <small class="hint">🎨 Clique sur le badge <strong>G1/G2…</strong> pour regrouper les midis (même couleur = même plat cuisiné). 👤 = nombre de personnes ce jour.</small>
     </div>
 
     <hr class="sep">
@@ -150,15 +153,18 @@ function renderGroups() {
     legend.innerHTML += '<span style="color:var(--t2)">· Soirs : tous différents</span>';
 }
 
-document.querySelectorAll('.day-group').forEach(el => {
-    el.addEventListener('click', function(e) {
+// Le sélecteur de groupe s'ouvre UNIQUEMENT au clic sur le badge G (pas sur
+// toute la tuile), pour ne pas gêner la saisie du nombre de personnes.
+document.querySelectorAll('.group-label').forEach(badge => {
+    badge.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const tile = this.closest('.day-group');
         const groups = getGroups();
         const idx = parseInt(this.dataset.idx);
         const maxG = Math.max(...groups);
-        // Menu contextuel léger
         const existing = document.querySelector('.group-picker');
         if (existing) existing.remove();
-        if (this.querySelector('.group-picker')) return;
+        if (tile.querySelector('.group-picker')) return;
 
         const picker = document.createElement('div');
         picker.className = 'group-picker';
@@ -175,10 +181,8 @@ document.querySelectorAll('.day-group').forEach(el => {
             });
             picker.appendChild(dot);
         }
-        // Positionner
-        this.style.position = 'relative';
-        this.appendChild(picker);
-        e.stopPropagation();
+        tile.style.position = 'relative';
+        tile.appendChild(picker);
     });
 });
 

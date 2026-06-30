@@ -354,6 +354,11 @@ def test_week_nutrition(client):
                   "accompagnement": None} for j in range(1, 8) for m in ("midi", "soir")]
         nut = await main._week_nutrition(plats)
         assert nut and nut["calories"] > 0 and nut["meals_total"] == 14
+        # détail par jour : 7 jours, chacun avec midi+soir+total estimés
+        assert len(nut["par_jour"]) == 7
+        d0 = nut["par_jour"][0]
+        assert d0["nom"] == "Lundi" and d0["midi"] and d0["soir"]
+        assert d0["total"]["calories"] == d0["midi"]["calories"] + d0["soir"]["calories"]
         # aucune recette estimable -> None
         assert await main._week_nutrition([{"jour": 1, "moment": "midi", "nom_recette": "X",
                                             "notion_id": "zzz", "accompagnement": None}]) is None
