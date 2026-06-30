@@ -400,6 +400,21 @@ class NotionClient:
                 await client.delete(f"{BASE_URL}/blocks/{bid}", headers=self._headers, timeout=30)
         return await self.append_instructions(page_id, instructions_text)
 
+    async def update_recipe_title(self, page_id: str, nom: str) -> dict[str, Any]:
+        """Met à jour le titre (Nom) d'une recette existante."""
+        if not nom:
+            return {}
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={"properties": {"Nom": {"title": [{"text": {"content": nom}}]}}},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            self.invalidate_cache()
+            return resp.json()
+
     async def update_recipe_meta(
         self, page_id: str, repas: str = "", tags: list[str] | None = None,
     ) -> dict[str, Any]:
