@@ -7,9 +7,22 @@
         <p class="hero-sub">{{ recette.nom | clean_title }}</p>
     </div>
 
+    {% if needs_url and not source_url %}
+    <div class="alert alert-warn">🔗 Cette recette n'a pas d'URL source. Colle-en une ci-dessous puis « Extraire » pour pré-remplir automatiquement (ou remplis à la main).</div>
+    {% endif %}
+
     <form method="POST" action="/recette/{{ recette.id }}/enrichir" class="card" id="enrich-form">
         <input type="hidden" name="nutrition_json" value="{{ nutrition_json }}">
         <input type="hidden" name="duree_minutes" value="{{ duree_minutes or 0 }}">
+
+        <div class="form-g">
+            <label for="source_url">🔗 URL source</label>
+            <div class="url-row">
+                <input type="url" id="source_url" name="source_url" class="inp" value="{{ source_url }}" placeholder="https://...">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-extract" title="Extraire les infos depuis cette URL">🔍 Extraire</button>
+            </div>
+        </div>
+
         <div class="form-r">
             <div class="form-g">
                 <label for="repas">🍽️ Type</label>
@@ -98,6 +111,15 @@ document.getElementById('add-step')?.addEventListener('click', () => {
     row.querySelector('textarea').focus();
 });
 renumberSteps();
+
+// « Extraire » : recharge la page d'enrichissement avec l'URL fournie pour
+// pré-remplir le formulaire depuis la source (puis on valide).
+document.getElementById('btn-extract')?.addEventListener('click', () => {
+    const u = document.getElementById('source_url').value.trim();
+    if (!u) { window.toast?.('Entre une URL d\'abord', 'error'); return; }
+    window.navStart?.();
+    window.location.href = '/recette/{{ recette.id }}/enrichir?url=' + encodeURIComponent(u);
+});
 
 // Retour visuel pendant l'enregistrement (le POST fait plusieurs appels Notion)
 document.getElementById('enrich-form')?.addEventListener('submit', () => {

@@ -519,9 +519,10 @@ async def detail_recette(request: Request, page_id: str):
 
 
 @app.get("/recette/{page_id}/enrichir", response_class=HTMLResponse)
-async def enrichir_page(request: Request, page_id: str):
+async def enrichir_page(request: Request, page_id: str, url: str = ""):
     """Étape 1 : re-fetch la source et pré-remplit un formulaire éditable
-    (ingrédients structurés + instructions nettoyées) à valider."""
+    (ingrédients structurés + instructions nettoyées) à valider.
+    Si la recette n'a pas d'URL, on peut en fournir une via ?url= pour extraire."""
     recette = await notion.get_recipe(page_id)
     if not recette:
         return HTMLResponse("Recette non trouvée", status_code=404)
@@ -532,11 +533,15 @@ async def enrichir_page(request: Request, page_id: str):
     nutrition_src: dict = {}
     duree_minutes = 0
 
+    # URL effective : celle de la recette, sinon celle fournie en paramètre.
+    source_url = recette.get("url") or url.strip()
+    needs_url = not recette.get("url")
+
     # « Enrichir » = re-fetch la SOURCE en priorité (données d'origine), pas le
     # cache qui peut contenir d'anciennes extractions inexactes.
-    if recette.get("url"):
+    if source_url:
         try:
-            info = await llm.extract_recipe_from_url(recette["url"])
+            info = await llm.extract_recipe_from_url(source_url)
             ingredients = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", [])) if i and i["nom"]]
             instructions_text = info.get("instructions", "")
             image_url = info.get("image_url", "")
@@ -571,6 +576,8 @@ async def enrichir_page(request: Request, page_id: str):
             "duree_minutes": duree_minutes,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            "source_url": source_url,
+            "needs_url": needs_url,
         },
     )
 
@@ -586,6 +593,7 @@ async def enrichir_submit(
     image_url: str = Form(""),
     nutrition_json: str = Form(""),
     duree_minutes: int = Form(0),
+    source_url: str = Form(""),
 ):
     """Étape 2 : applique les changements validés à la recette Notion + cache."""
     recette = await notion.get_recipe(page_id)
@@ -594,6 +602,9 @@ async def enrichir_submit(
 
     # Normalise un titre crié en MAJUSCULES (ex. import) en casse de phrase.
     nom_norm = normalize_title_case(recette["nom"])
+
+    # URL source : si la recette n'en avait pas (ou différente), on l'enregistre.
+    source_url = source_url.strip()
 
     structured = [
         i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n")) if i and i["nom"]
@@ -609,6 +620,8 @@ async def enrichir_submit(
     try:
         if nom_norm != recette["nom"]:
             await notion.update_recipe_title(page_id, nom_norm)
+        if source_url and source_url != (recette.get("url") or ""):
+            await notion.update_recipe_url(page_id, source_url)
         if structured:
             await db.save_enriched(page_id, nom_norm, ingredients=json.dumps(structured),
                                    cuisson_minutes=duree_minutes or 0, nutrition=nutrition)
