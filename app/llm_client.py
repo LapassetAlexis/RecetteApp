@@ -675,11 +675,22 @@ class LLMClient:
         """Recette utilisable comme accompagnement (légume / garniture)."""
         return r.get("repas") in ("Légume", "Accompagnement")
 
+    @staticmethod
+    def _is_complete(r: dict[str, Any]) -> bool:
+        """Plat complet : type « Plat » ou tag « plat ». Se suffit à lui-même,
+        donc pas d'accompagnement."""
+        if r.get("repas") == "Plat":
+            return True
+        return any(str(t).strip().lower() == "plat" for t in (r.get("tags") or []))
+
     @classmethod
     def _needs_side(cls, r: dict[str, Any]) -> bool:
-        """On propose un accompagnement par défaut à tout plat principal
-        (l'utilisateur peut le vider/changer). Un accompagnement n'en reçoit pas."""
-        return not cls._is_side(r)
+        """On propose un accompagnement par défaut aux plats principaux
+        (l'utilisateur peut le vider/changer). Pas d'accompagnement pour un
+        accompagnement lui-même, ni pour un plat complet (type/tag « plat »)."""
+        if cls._is_side(r) or cls._is_complete(r):
+            return False
+        return True
 
     async def generate_planning(
         self,
@@ -822,18 +833,26 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
         Tourne dans la liste des accompagnements pour varier sur la semaine."""
         if not sides:
             return
+        # Accompagnement attribué PAR NOM de plat : un même plat sur plusieurs
+        # jours consécutifs reçoit le même accompagnement, ce qui préserve la
+        # fusion des cases du planning (clé de fusion = nom + accompagnement).
+        assigned: dict[str, dict] = {}
         k = 0
         for plat in plats:
-            m = meta.get(plat["nom_recette"].lower().strip())
-            if m and self._needs_side(m):
+            nom_key = plat["nom_recette"].lower().strip()
+            m = meta.get(nom_key)
+            if not (m and self._needs_side(m)):
+                continue
+            if nom_key not in assigned:
                 s = sides[k % len(sides)]
                 k += 1
-                plat["accompagnement"] = {
+                assigned[nom_key] = {
                     "nom_recette": s["nom"],
                     "notion_id": s.get("id", ""),
                     "url": s.get("url", ""),
                     "notion_url": s.get("notion_url", ""),
                 }
+            plat["accompagnement"] = assigned[nom_key]
 
     def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
         """Parse la réponse du LLM (liste numérotée, markdown ou JSON)."""
