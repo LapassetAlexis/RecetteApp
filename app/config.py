@@ -90,4 +90,12 @@ TAG_OPTIONS = [
     "Sur le pouce",
     "Végétarien proténiné",
     "1 personne",
+    "Printemps",
+    "Été",
+    "Automne",
+    "Hiver",
 ]
+
+# Tags de saison (sous-ensemble de TAG_OPTIONS). Une recette sans aucun de ces
+# tags est considérée « toutes saisons ».
+SAISON_TAGS = ["Printemps", "Été", "Automne", "Hiver"]

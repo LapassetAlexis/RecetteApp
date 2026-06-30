@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import socket
+import unicodedata
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -692,6 +693,29 @@ class LLMClient:
             return False
         return True
 
+    # Tags de saison normalisés (sans accents) — dérivé de config.SAISON_TAGS.
+    _SAISONS = {"printemps", "ete", "automne", "hiver"}
+
+    @staticmethod
+    def _norm(s: Any) -> str:
+        """Minuscule sans accents (« Été » -> « ete »)."""
+        s = unicodedata.normalize("NFD", str(s or "").strip().lower())
+        return "".join(c for c in s if unicodedata.category(c) != "Mn")
+
+    @classmethod
+    def _recipe_seasons(cls, r: dict[str, Any]) -> set[str]:
+        """Tags de saison portés par une recette (vide = toutes saisons)."""
+        return {cls._norm(t) for t in (r.get("tags") or [])} & cls._SAISONS
+
+    @classmethod
+    def _season_rank(cls, r: dict[str, Any], saison_n: str) -> int:
+        """0 = saison demandée explicitement, 1 = toutes saisons (neutre),
+        2 = uniquement une AUTRE saison (à éviter)."""
+        secs = cls._recipe_seasons(r)
+        if not secs:
+            return 1
+        return 0 if saison_n in secs else 2
+
     async def generate_planning(
         self,
         recettes: list[dict[str, Any]],
@@ -713,12 +737,20 @@ class LLMClient:
         sides = [r for r in recettes if self._is_side(r)]
         meta = {r["nom"].lower().strip(): r for r in recettes}
 
+        # Filtrage/pondération par saison : on écarte les plats tagués pour une
+        # AUTRE saison (rank 2), et on présente d'abord ceux de la saison
+        # demandée (rank 0), puis les « toutes saisons » (rank 1). Les recettes
+        # sans tag de saison restent toujours éligibles.
+        saison_n = self._norm(saison)
+        mains = [r for r in recettes
+                 if not self._is_side(r) and r["repas"] in ("Plat", "Entrée", "")]
+        eligibles = sorted(
+            (r for r in mains if self._season_rank(r, saison_n) < 2),
+            key=lambda r: self._season_rank(r, saison_n),
+        )
+
         lignes = []
-        for r in recettes:
-            if self._is_side(r):
-                continue
-            if r["repas"] not in ("Plat", "Entrée", ""):
-                continue
+        for r in eligibles:
             parts = [r["nom"]]
             if r["repas"]:
                 parts.append(r["repas"])
@@ -744,12 +776,17 @@ class LLMClient:
         n_needed = len(unique_groups) + 7  # midis distincts + 7 soirs
 
         exclues_str = ', '.join(recettes_exclues) or 'aucune'
-        user_prompt = f"""CONTEXTE : saison {saison}, température {temperature}, max {nb_personnes} pers.
+        user_prompt = f"""CONTEXTE — SAISON : {saison}. TEMPÉRATURE : {temperature}. Max {nb_personnes} pers.
 Restes à écouler : {ingredients_force or "aucun"}.
 Recettes à EXCLURE (déjà vues) : {exclues_str}.
 Consignes famille : {custom_prompt or "aucune"}.
 
-RECETTES DISPONIBLES (Nom | type | moment | tags) :
+PRIORITÉ SAISON/TEMPÉRATURE :
+- Privilégie des plats cohérents avec la saison « {saison} » et une météo « {temperature} ».
+- Temps frais/froid → plats chauds, mijotés, soupes, gratins. Temps chaud → salades, plats froids, grillades légères.
+- La liste est déjà triée : les recettes en tête conviennent le mieux à la saison. Pioche en priorité dedans.
+
+RECETTES DISPONIBLES (Nom | type | moment | tags) — triées par pertinence saison :
 {recettes_str}
 
 Choisis EXACTEMENT {n_needed} recettes DIFFÉRENTES et variées de cette liste.
@@ -770,9 +807,10 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
             if canon and canon not in valid:
                 valid.append(canon)
         if len(valid) < n_needed:
-            for r in recettes:
-                if self._is_side(r):
-                    continue
+            # Complète d'abord avec les plats éligibles à la saison (déjà triés),
+            # puis, en dernier recours, avec n'importe quel autre plat.
+            others = [r for r in mains if self._season_rank(r, saison_n) >= 2]
+            for r in eligibles + others:
                 if r["nom"] not in valid and r["nom"] not in recettes_exclues:
                     valid.append(r["nom"])
                     if len(valid) >= n_needed:

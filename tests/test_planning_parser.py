@@ -63,6 +63,15 @@ def test_attach_sides_same_plat_same_side():
     assert plats[2]["accompagnement"]["nom_recette"] != plats[0]["accompagnement"]["nom_recette"]
 
 
+def test_season_rank_and_recipe_seasons():
+    ete = client._norm("Été")
+    assert client._season_rank({"tags": ["Été", "Salade"]}, ete) == 0   # saison demandée
+    assert client._season_rank({"tags": ["Salade"]}, ete) == 1          # toutes saisons
+    assert client._season_rank({"tags": ["Hiver"]}, ete) == 2           # autre saison
+    assert client._recipe_seasons({"tags": ["Hiver", "Soupe"]}) == {"hiver"}
+    assert client._recipe_seasons({"tags": ["Soupe"]}) == set()
+
+
 def test_liste_numerotee():
     raw = "\n".join(
         f"{i+1} - Jour {i//2+1} - {'midi' if i%2==0 else 'soir'} - Recette {i+1}"
