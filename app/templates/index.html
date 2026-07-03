@@ -58,12 +58,17 @@
                     <label for="nb_{{ jours[i]|lower }}">👤</label>
                     <input type="number" id="nb_{{ jours[i]|lower }}" name="nb_{{ jours[i]|lower }}" value="{{ pers[i] }}" min="1" max="20" class="nb-input" title="Nombre de personnes ce jour">
                 </div>
+                <div class="meal-toggles">
+                    <button type="button" class="mt" data-day="{{ i + 1 }}" data-moment="midi" title="Activer/désactiver le midi (absent)">☀️</button>
+                    <button type="button" class="mt" data-day="{{ i + 1 }}" data-moment="soir" title="Activer/désactiver le soir (absent)">🌙</button>
+                </div>
             </div>
             {% endfor %}
         </div>
         <div id="group-legend" class="group-legend"></div>
         <input type="hidden" name="midi_groups" id="midi-groups-input" value="{{ midi_groups_value or '1,1,2,2,2,3,4' }}">
-        <small class="hint">🎨 Clique sur le badge <strong>G1/G2…</strong> pour regrouper les midis (même couleur = même plat cuisiné). 👤 = nombre de personnes ce jour.</small>
+        <input type="hidden" name="off_meals" id="off-meals-input" value="{{ off_meals or '' }}">
+        <small class="hint">🎨 Clique sur le badge <strong>G1/G2…</strong> pour regrouper les midis (même couleur = même plat). 👤 = personnes ce jour. Clique ☀️/🌙 pour <strong>désactiver</strong> un repas (absent, pas à la maison).</small>
     </div>
 
     <hr class="sep">
@@ -195,6 +200,24 @@ document.addEventListener('click', function() {
 document.getElementById('reset-groups')?.addEventListener('click', function() {
     setGroups([1,1,2,2,2,3,4]);
 });
+
+// ── Repas désactivés (absent / pas à la maison) ─────
+const offInput = document.getElementById('off-meals-input');
+const offSet = new Set((offInput.value || '').split(',').map(s => s.trim()).filter(Boolean));
+function syncOff() {
+    offInput.value = [...offSet].sort().join(',');
+    document.querySelectorAll('.mt').forEach(b => {
+        b.classList.toggle('off', offSet.has(b.dataset.day + ':' + b.dataset.moment));
+    });
+}
+document.querySelectorAll('.mt').forEach(b => {
+    b.addEventListener('click', () => {
+        const key = b.dataset.day + ':' + b.dataset.moment;
+        if (offSet.has(key)) offSet.delete(key); else offSet.add(key);
+        syncOff();
+    });
+});
+syncOff();
 
 // ── Construction du prompt ─────────────────────────
 function buildMidiDesc(groups) {

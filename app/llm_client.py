@@ -760,6 +760,7 @@ class LLMClient:
         custom_prompt: str = "",
         midi_groups: str = "1,1,2,2,2,3,4",
         per_day: str = "2,2,2,2,2,4,4",
+        off_meals: set[tuple[int, str]] | None = None,
     ) -> list[dict[str, Any]]:
         # Liste compacte (1 ligne/recette) plutôt que du JSON indenté :
         # beaucoup moins de tokens, lisible par le modèle.
@@ -808,7 +809,17 @@ class LLMClient:
         for g in groups:
             if g not in unique_groups:
                 unique_groups.append(g)
-        n_needed = len(unique_groups) + 7  # midis distincts + 7 soirs
+
+        # Créneaux désactivés (absent/pas à la maison) : on ne les génère pas.
+        off = off_meals or set()
+        active_midi_groups = [
+            g for g in unique_groups
+            if any((d, "midi") not in off for d, gg in enumerate(groups, 1) if gg == g)
+        ]
+        n_soirs = sum(1 for d in range(1, 8) if (d, "soir") not in off)
+        n_needed = len(active_midi_groups) + n_soirs  # midis distincts actifs + soirs actifs
+        if n_needed == 0:
+            return []
 
         exclues_str = ', '.join(recettes_exclues) or 'aucune'
         user_prompt = f"""CONTEXTE — SAISON : {saison}. TEMPÉRATURE : {temperature}. Max {nb_personnes} pers.
@@ -850,7 +861,7 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
                     valid.append(r["nom"])
                     if len(valid) >= n_needed:
                         break
-        return self._assign_slots(valid[:n_needed], groups, unique_groups, meta, sides)
+        return self._assign_slots(valid[:n_needed], groups, unique_groups, meta, sides, off)
 
     def _parse_recipe_names(self, raw: str) -> list[str]:
         """Extrait une liste de noms de recettes d'une réponse LLM (liste numérotée)."""
@@ -898,20 +909,25 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
     def _assign_slots(
         self, names: list[str], groups: list[int], unique_groups: list[int],
         meta: dict[str, Any] | None = None, sides: list[dict[str, Any]] | None = None,
+        off: set[tuple[int, str]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Construit les 14 créneaux : midis groupés = même plat, soirs tous
+        """Construit les créneaux actifs : midis groupés = même plat, soirs tous
         différents (et différents du midi du jour tant qu'il y a assez de
-        recettes). L'attribution respecte les tags Moment/Légèreté/Effort :
-        chaque créneau reçoit la recette inutilisée la mieux adaptée.
+        recettes). Les créneaux désactivés (`off`, ex. absent) sont ignorés.
+        L'attribution respecte les tags Moment/Légèreté/Effort : chaque créneau
+        reçoit la recette inutilisée la mieux adaptée.
         Les plats « protéine nature » reçoivent un accompagnement (légume)."""
         if not names:
             return []
         meta = meta or {}
+        off = off or set()
         order = {n: i for i, n in enumerate(names)}  # ordre LLM/saison/météo
 
+        # Jours actifs (midi non désactivé) par groupe.
         group_days: dict[int, list[int]] = {}
         for day, g in enumerate(groups, start=1):
-            group_days.setdefault(g, []).append(day)
+            if (day, "midi") not in off:
+                group_days.setdefault(g, []).append(day)
 
         def tagset(nom: str) -> set[str]:
             return self._tagset(meta.get(nom.lower().strip(), {}))
@@ -924,20 +940,30 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
                 cands = [n for n in names if n not in exclude] or names
             return min(cands, key=lambda n: (self._slot_score(tagset(n), moment, day), order[n]))
 
-        # Midis : un plat par groupe (jour représentatif = premier du groupe).
+        # Midis : un plat par groupe ayant au moins un jour actif.
         midi_by_group: dict[int, str] = {}
         for g in unique_groups:
-            nom = pick("midi", min(group_days.get(g, [1])))
+            if not group_days.get(g):
+                continue
+            nom = pick("midi", min(group_days[g]))
             midi_by_group[g] = nom
             used.add(nom)
 
         plats: list[dict[str, Any]] = []
         for day in range(1, 8):
-            plats.append(self._make_plat(day, "midi", midi_by_group[groups[day - 1]]))
+            if (day, "midi") in off:
+                continue
+            g = groups[day - 1]
+            if g in midi_by_group:
+                plats.append(self._make_plat(day, "midi", midi_by_group[g]))
 
         # Soirs : tous différents, et différent du midi du même jour.
         for day in range(1, 8):
-            nom = pick("soir", day, exclude={midi_by_group[groups[day - 1]]})
+            if (day, "soir") in off:
+                continue
+            g = groups[day - 1]
+            exclude = {midi_by_group[g]} if g in midi_by_group else set()
+            nom = pick("soir", day, exclude=exclude)
             plats.append(self._make_plat(day, "soir", nom))
             used.add(nom)
 

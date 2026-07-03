@@ -161,6 +161,7 @@ async def index(request: Request):
             "midi_groups_value": midi_groups_value,
             "ingredients_force": prefs.get("ingredients_force", ""),
             "custom_prompt": prefs.get("custom_prompt", ""),
+            "off_meals": prefs.get("off_meals", ""),
         },
     )
 
@@ -294,6 +295,19 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
     }
 
 
+def _parse_off_meals(raw: str) -> set[tuple[int, str]]:
+    """Parse « 1:midi,6:soir » en {(1,'midi'),(6,'soir')}. Ignore le reste."""
+    out: set[tuple[int, str]] = set()
+    for tok in (raw or "").split(","):
+        tok = tok.strip()
+        if ":" not in tok:
+            continue
+        d, m = tok.split(":", 1)
+        if d.isdigit() and 1 <= int(d) <= 7 and m in ("midi", "soir"):
+            out.add((int(d), m))
+    return out
+
+
 def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
     """Regroupe les jours consécutifs partageant le même repas (plat + même
     accompagnement) en « runs » pour fusionner les cases du planning.
@@ -362,6 +376,7 @@ async def voir_planning(request: Request, planning_id: int):
             "courses_par_rayon": group_by_rayon(liste_courses),
             "rayon_order": RAYON_ORDER,
             "per_day": per_day,
+            "off_meals": data.get("off_meals", []),
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
         },
@@ -683,12 +698,16 @@ async def generer(
     etat: str = Form(""),
     custom_prompt: str = Form(""),
     midi_groups: str = Form("1,1,2,2,2,3,4"),
+    off_meals: str = Form(""),
 ):
     """Génère un planning via le LLM et sauvegarde."""
     # Calculer le nb de personnes moyen pour les ingrédients
     pers = [nb_lun, nb_mar, nb_mer, nb_jeu, nb_ven, nb_sam, nb_dim]
     nb_personnes = max(pers)  # On prend le max pour les quantités
     per_day = ",".join(str(p) for p in pers)
+
+    # Créneaux désactivés (« pas à la maison »), format « jour:moment » (1-7).
+    off_set = _parse_off_meals(off_meals)
 
     try:
         day_groups = [int(x) for x in midi_groups.split(",")]
@@ -710,6 +729,7 @@ async def generer(
             "midi_groups_value": midi_groups,
             "ingredients_force": ingredients_force,
             "custom_prompt": custom_prompt,
+            "off_meals": off_meals,
         }
 
     try:
@@ -760,6 +780,7 @@ async def generer(
             custom_prompt=custom_prompt,
             midi_groups=midi_groups,
             per_day=per_day,
+            off_meals=off_set,
         )
 
         # 4. Associer chaque plat aux infos Notion (lookup O(1))
@@ -778,6 +799,7 @@ async def generer(
             "plats": plats,
             "liste_courses": [],
             "per_day": per_day,
+            "off_meals": sorted(f"{d}:{m}" for d, m in off_set),
         }
         planning_id = await db.save_planning(
             week_start=week_start,
@@ -800,7 +822,7 @@ async def generer(
                 "saison": saison, "temperature": temperature,
                 "ingredients_force": ingredients_force, "custom_prompt": custom_prompt,
                 "midi_groups": midi_groups, "per_day": per_day,
-                "tags": tags, "etat": etat,
+                "tags": tags, "etat": etat, "off_meals": off_meals,
             }, ensure_ascii=False))
         except Exception as e:
             logger.warning(f"Impossible de mémoriser les préférences: {e}")

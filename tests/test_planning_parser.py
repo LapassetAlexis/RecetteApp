@@ -112,6 +112,21 @@ def test_assign_slots_respects_moment_tag():
     assert "Poulet soir" in soirs
 
 
+def test_assign_slots_skips_off_meals():
+    groups = [1, 1, 2, 2, 2, 3, 4]
+    unique = [1, 2, 3, 4]
+    names = ["A", "B", "C", "D", "S1", "S2", "S3", "S4", "S5", "S6", "S7"]
+    # Lundi midi + Dimanche soir désactivés
+    off = {(1, "midi"), (7, "soir")}
+    plats = client._assign_slots(names, groups, unique, {}, [], off)
+    slots = {(p["jour"], p["moment"]) for p in plats}
+    assert (1, "midi") not in slots
+    assert (7, "soir") not in slots
+    # Mardi midi (même groupe que lundi) reste présent
+    assert (2, "midi") in slots
+    assert (1, "soir") in slots
+
+
 def test_liste_numerotee():
     raw = "\n".join(
         f"{i+1} - Jour {i//2+1} - {'midi' if i%2==0 else 'soir'} - Recette {i+1}"
