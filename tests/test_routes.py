@@ -401,6 +401,35 @@ def test_planning_warns_non_enrichi(client, monkeypatch):
     assert "À compléter" not in client.get(f"/planning/{pid}").text
 
 
+def test_parse_off_meals():
+    assert main._parse_off_meals("1:midi,6:soir") == {(1, "midi"), (6, "soir")}
+    assert main._parse_off_meals("") == set()
+    # jetons invalides ignorés
+    assert main._parse_off_meals("9:midi,3:brunch,x:soir,2:soir") == {(2, "soir")}
+
+
+def test_generer_desactive_des_repas(client, monkeypatch):
+    async def _all():
+        return [_recipe("Poulet", id="p1")]
+    captured = {}
+    async def _gen(**kw):
+        captured["off"] = kw.get("off_meals")
+        # respecte les créneaux off comme le vrai code
+        off = kw.get("off_meals") or set()
+        return [{"jour": j, "moment": m, "nom_recette": "Poulet", "notion_id": "p1",
+                 "accompagnement": None}
+                for j in range(1, 8) for m in ("midi", "soir") if (j, m) not in off]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    loc = client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver",
+                                         "off_meals": "1:midi,7:soir"},
+                      follow_redirects=False).headers["location"]
+    pid = int(loc.rsplit("/", 1)[1])
+    assert captured["off"] == {(1, "midi"), (7, "soir")}
+    page = client.get(f"/planning/{pid}").text
+    assert "Absent" in page  # placeholder rendu
+
+
 def test_week_nutrition(client):
     import asyncio, json
     async def run():
