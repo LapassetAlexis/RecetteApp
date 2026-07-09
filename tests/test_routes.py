@@ -234,6 +234,68 @@ def test_alternatives_and_shopping(client, monkeypatch):
     assert set(riz["recettes"]) == {"Poulet", "Soupe"}
 
 
+def _make_shopping_planning(client, monkeypatch):
+    """Crée un planning avec une liste de courses (riz) et renvoie son id."""
+    async def _all():
+        return [_recipe("Poulet"), _recipe("Soupe")]
+    async def _gen(**kw):
+        return [
+            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
+            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
+        ]
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
+    async def _noop(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    assert client.post(f"/generate-shopping/{pid}").json().get("success")
+    return pid
+
+
+def test_shopping_check_persists_state(client, monkeypatch):
+    import asyncio
+    pid = _make_shopping_planning(client, monkeypatch)
+    # coche "riz" -> persisté dans courses_checked
+    r = client.post(f"/api/shopping-check/{pid}", json={"item": "riz", "checked": True})
+    assert r.json().get("success")
+    p = asyncio.run(main.db.get_planning_with_recipes(pid))
+    assert "riz" in json.loads(p["data_json"]).get("courses_checked", [])
+    # décoche -> retiré
+    assert client.post(f"/api/shopping-check/{pid}", json={"item": "riz", "checked": False}).json().get("success")
+    p = asyncio.run(main.db.get_planning_with_recipes(pid))
+    assert "riz" not in json.loads(p["data_json"]).get("courses_checked", [])
+    # planning introuvable
+    assert "error" in client.post("/api/shopping-check/999999", json={"item": "x", "checked": True}).json()
+
+
+def test_partager_et_courses_public(client, monkeypatch):
+    pid = _make_shopping_planning(client, monkeypatch)
+    # partager -> URL /courses/<token>
+    d = client.post(f"/planning/{pid}/partager").json()
+    assert d.get("url", "").startswith("/courses/")
+    # idempotent : même token au 2e appel
+    assert client.post(f"/planning/{pid}/partager").json()["url"] == d["url"]
+
+    # page publique : 200 et affiche le riz (non coché)
+    page = client.get(d["url"])
+    assert page.status_code == 200
+    assert "riz" in page.text.lower()
+
+    # une fois coché, l'item disparaît de la page publique
+    client.post(f"/api/shopping-check/{pid}", json={"item": "riz", "checked": True})
+    page2 = client.get(d["url"])
+    assert page2.status_code == 200
+    assert "Riz" not in page2.text
+
+    # token inconnu -> 404
+    assert client.get("/courses/inexistant").status_code == 404
+
+
 def test_enrich_one(client, monkeypatch):
     async def _get(pid):
         return _recipe("Curry", id="abc", url="http://r") if pid == "abc" else None

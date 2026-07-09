@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liste de courses — Menu Planner</title>
+    <meta name="theme-color" content="#e67e22">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Liste de courses">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
+    <style>
+        /* Page de partage : autonome, sobre, lecture seule sur mobile. */
+        .pub-wrap { max-width: 680px; margin: 0 auto; padding: 16px; }
+        .pub-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+        .pub-h h1 { font-size: 1.4rem; margin: 0; }
+        .pub-count { color: var(--t2); font-size: .95rem; }
+        .shop-i { pointer-events: none; }
+        .pub-empty { text-align: center; padding: 40px 16px; color: var(--t2); }
+        .pub-empty p:first-child { font-size: 1.4rem; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <main class="pub-wrap">
+        <div class="pub-h">
+            <h1>🛒 Liste de courses</h1>
+            {% if nb_total %}
+            <span class="pub-count">{{ nb_restants }} / {{ nb_total }} restant{{ 's' if nb_restants > 1 else '' }}</span>
+            {% endif %}
+        </div>
+
+        {% if courses_par_rayon %}
+        <div id="shop-g">
+            {% for grp in courses_par_rayon %}
+            <div class="shop-rayon" data-rayon="{{ grp.rayon }}">
+                <h3 class="rayon-h">{{ grp.rayon }} <span class="rayon-n">{{ grp['items']|length }}</span></h3>
+                <div class="shop-grid">
+                    {% for item in grp['items'] %}
+                    <label class="shop-i" data-item="{{ item.nom|lower }}">
+                        <span>{{ item.nom|capitalize }}</span>
+                        {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
+                        {% if item.recettes %}<span class="shop-src" title="{{ item.recettes | join(' · ') }}">🍽</span>{% endif %}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="pub-empty">
+            <p>✅</p>
+            <p>Tout est coché, plus rien à acheter !</p>
+        </div>
+        {% endif %}
+    </main>
+</body>
+</html>
