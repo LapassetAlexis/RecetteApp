@@ -150,12 +150,38 @@ def _normalize_form(s: str) -> str:
     return " ".join(words)
 
 
+def scale_ingredients(items: list[dict], factor: float) -> list[dict]:
+    """Met à l'échelle les quantités numériques par `factor` (nb_pers / base).
+
+    Les quantités non numériques (« une pincée », « QS ») sont laissées telles
+    quelles. Retourne de NOUVEAUX dicts (n'altère pas l'entrée).
+    """
+    out: list[dict] = []
+    for ing in items:
+        new = dict(ing)
+        n = _parse_qty(ing.get("quantite", ""))
+        if n is not None and factor and factor > 0:
+            new["quantite"] = _fmt_qty(n * factor)
+        out.append(new)
+    return out
+
+
+def _ingredient_sources(ing: dict) -> list[str]:
+    """Titres de recettes source portés par un ingrédient (`recettes` ou `recette`)."""
+    recs = ing.get("recettes")
+    if recs:
+        return [s for s in recs if s]
+    one = ing.get("recette")
+    return [one] if one else []
+
+
 def merge_ingredients(items: list[dict]) -> list[dict]:
     """Fusionne une liste d'ingrédients par (nom, unité).
 
     - additionne les quantités numériques (décimales/fractions) de même unité ;
     - une même denrée en unités différentes reste sur 2 lignes (non additionnable) ;
-    - quantités non numériques : on garde la première renseignée.
+    - quantités non numériques : on garde la première renseignée ;
+    - union des recettes source (champ `recettes`), dans l'ordre de rencontre.
     Trie par nom.
     """
     out: dict[tuple[str, str], dict] = {}
@@ -166,11 +192,15 @@ def merge_ingredients(items: list[dict]) -> list[dict]:
             continue
         unite = (ing.get("unite") or "").strip()
         qty = str(ing.get("quantite", "") or "").strip()
+        srcs = _ingredient_sources(ing)
         # clé normalisée (forme) : regroupe singulier/pluriel + casse/accents,
         # mais conserve distinctes les variantes (oignon rouge / jaune).
         key = (_normalize_form(nom), _normalize_form(unite))
         if key not in out:
-            out[key] = {"nom": nom, "quantite": qty, "unite": unite}
+            out[key] = {
+                "nom": nom, "quantite": qty, "unite": unite,
+                "recettes": list(dict.fromkeys(srcs)),
+            }
             order.append(key)
             continue
         existing = out[key]
@@ -180,4 +210,7 @@ def merge_ingredients(items: list[dict]) -> list[dict]:
         elif not existing["quantite"] and qty:
             existing["quantite"] = qty
         # sinon : non sommable → on conserve la première valeur
+        for s in srcs:
+            if s not in existing["recettes"]:
+                existing["recettes"].append(s)
     return sorted((out[k] for k in order), key=lambda x: x["nom"].lower())
