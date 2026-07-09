@@ -273,6 +273,15 @@ def test_shopping_check_persists_state(client, monkeypatch):
     assert "error" in client.post("/api/shopping-check/999999", json={"item": "x", "checked": True}).json()
 
 
+def test_enrich_week(client, monkeypatch):
+    pid = _make_shopping_planning(client, monkeypatch)
+    d = client.post(f"/api/enrich-week/{pid}").json()
+    # 2 recettes du planning (Poulet, Soupe), enrichies depuis le cache
+    assert d.get("success") and d["total"] == 2 and d["enriched"] == 2
+    # planning introuvable
+    assert "error" in client.post("/api/enrich-week/999999").json()
+
+
 def test_partager_et_courses_public(client, monkeypatch):
     pid = _make_shopping_planning(client, monkeypatch)
     # partager -> URL /courses/<token>

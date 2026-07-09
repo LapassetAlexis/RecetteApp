@@ -31,6 +31,7 @@
 
 <div class="week-toolbar">
     <button class="btn btn-ghost btn-sm" onclick="copyMenu()" title="Copier le menu de la semaine">📋 Copier le menu</button>
+    <button class="btn btn-ghost btn-sm" id="btn-enrich-week" onclick="enrichWeek()" title="Relancer l'enrichissement de toutes les recettes de la semaine">🍲 Enrichir ma semaine</button>
 </div>
 
 <!-- Planning 7 jours (cases fusionnées si même repas sur jours consécutifs) -->
@@ -450,6 +451,26 @@ function usl(items) {
 // Avertissement recettes non enrichies (posé avant reload par genShop).
 (function(){ const w=sessionStorage.getItem('shop_warn_'+pid);
     if(w){ sessionStorage.removeItem('shop_warn_'+pid); toast(w,'error'); } })();
+async function enrichWeek() {
+    const b = document.getElementById('btn-enrich-week');
+    const old = b ? b.textContent : '';
+    if (b) { b.disabled = true; b.textContent = '⏳ Enrichissement...'; }
+    toast('Enrichissement des recettes de la semaine…', 'info');
+    try {
+        const r = await fetch(`/api/enrich-week/${pid}`, {method: 'POST'});
+        const d = await r.json();
+        if (d.success) {
+            toast(`✅ ${d.enriched} enrichie(s), ${d.skipped} ignorée(s), ${d.errors} erreur(s)`, 'success');
+            setTimeout(() => location.reload(), 900);
+        } else {
+            toast('Erreur : ' + (d.error || '?'), 'error');
+            if (b) { b.disabled = false; b.textContent = old; }
+        }
+    } catch (e) {
+        toast('Erreur réseau', 'error');
+        if (b) { b.disabled = false; b.textContent = old; }
+    }
+}
 function copyMenu() {
     const days = {};  // jour -> {midi, soir}
     document.querySelectorAll('.meal').forEach(cell => {
