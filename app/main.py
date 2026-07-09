@@ -671,6 +671,7 @@ async def enrichir_page(request: Request, page_id: str, url: str = ""):
 async def enrichir_submit(
     request: Request,
     page_id: str,
+    nom: str = Form(""),
     repas: str = Form(""),
     tags: list[str] = Form([]),
     ingredients_text: str = Form(""),
@@ -685,8 +686,12 @@ async def enrichir_submit(
     if not recette:
         return RedirectResponse(url="/recettes", status_code=303)
 
-    # Normalise un titre crié en MAJUSCULES (ex. import) en casse de phrase.
-    nom_norm = normalize_title_case(recette["nom"])
+    # Renommage libre : on prend le nom soumis s'il y en a un, sinon le nom
+    # actuel. On normalise la casse d'un titre crié en MAJUSCULES (ex. import),
+    # mais on respecte une casse choisie par l'utilisateur (renommage libre).
+    nom_saisi = nom.strip()
+    nom_source = nom_saisi or recette["nom"]
+    nom_norm = normalize_title_case(nom_source) if nom_source.isupper() else nom_source
 
     # URL source : si la recette n'en avait pas (ou différente), on l'enregistre.
     source_url = source_url.strip()
@@ -720,6 +725,19 @@ async def enrichir_submit(
         logger.exception("Erreur validation enrichissement")
 
     return RedirectResponse(url=f"/recette/{page_id}", status_code=303)
+
+
+@app.post("/recette/{page_id}/supprimer")
+async def supprimer_recette(page_id: str):
+    """Supprime une recette : archive la page Notion + purge le cache local.
+    Renvoie du JSON (appelée en fetch depuis la fiche détail)."""
+    try:
+        await notion.archive_recipe(page_id)
+        await db.delete_enriched(page_id)
+    except Exception:
+        logger.exception("Erreur suppression recette")
+        return {"error": "Impossible de supprimer la recette."}
+    return {"success": True}
 
 
 @app.get("/ajouter", response_class=HTMLResponse)
