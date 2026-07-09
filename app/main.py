@@ -1347,6 +1347,38 @@ async def api_enrich_all():
         return {"error": str(e)}
 
 
+@app.post("/api/enrich-week/{planning_id}")
+async def api_enrich_week(planning_id: int):
+    """Relance l'enrichissement de toutes les recettes d'un planning (plats +
+    accompagnements), sans toucher au reste du catalogue."""
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+        plats = json.loads(planning["data_json"]).get("plats", [])
+
+        # Recettes uniques du planning (dédup par notion_id), format attendu par
+        # _enrich_one : {id, nom, url}.
+        seen: set[str] = set()
+        recettes: list[dict] = []
+        for p in plats:
+            for src in (p, p.get("accompagnement") or {}):
+                nid = src.get("notion_id")
+                if nid and nid not in seen:
+                    seen.add(nid)
+                    recettes.append({"id": nid, "nom": src.get("nom_recette", ""),
+                                     "url": src.get("url", "")})
+
+        counts = {"enriched": 0, "skipped": 0, "errors": 0}
+        for r in recettes:
+            status = await _enrich_one(r)
+            counts["errors" if status == "error" else status] += 1
+        return {"success": True, "total": len(recettes), **counts}
+    except Exception as e:
+        logger.exception("Erreur enrichissement semaine")
+        return {"error": str(e)}
+
+
 @app.get("/api/enrich-all/stream")
 async def api_enrich_all_stream():
     """Variante SSE : enrichit toutes les recettes en streamant la progression
