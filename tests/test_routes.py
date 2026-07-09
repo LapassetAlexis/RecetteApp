@@ -68,6 +68,19 @@ def test_analyze_url(client, monkeypatch):
     assert "error" in client.post("/api/analyze-url", json={"url": ""}).json()
 
 
+def test_analyze_text(client, monkeypatch):
+    async def _extract(text):
+        return {"nom": "Curry", "type_repas": "Plat", "tags": ["Épicé"],
+                "ingredients": ["2 oignons", "riz"], "instructions": "Cuire.\nServir.",
+                "image_url": "", "source": "llm-text"}
+    monkeypatch.setattr(main.llm, "extract_recipe_from_text", _extract)
+    d = client.post("/api/analyze-text", json={"text": "un curry..."}).json()
+    assert d["nom"] == "Curry"
+    assert d["ingredients"] == "2 oignons\nriz"   # liste -> texte
+    assert d["source"] == "llm-text"
+    assert "error" in client.post("/api/analyze-text", json={"text": "  "}).json()
+
+
 def test_generer_success_then_view(client, monkeypatch):
     async def _all():
         return [_recipe("Poulet"), _recipe("Soupe")]

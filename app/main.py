@@ -1004,6 +1004,35 @@ async def api_analyze_url(request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/analyze-text")
+async def api_analyze_text(request: Request):
+    """Structure une recette collée en texte libre (Gemini, note perso...)."""
+    try:
+        data = await request.json()
+        text = data.get("text", "")
+        if not text or not text.strip():
+            return {"error": "Texte manquant"}
+
+        info = await llm.extract_recipe_from_text(text)
+        ings = info.get("ingredients", [])
+        ingredients = "\n".join(ings) if isinstance(ings, list) else str(ings)
+
+        return {
+            "nom": info.get("nom", ""),
+            "repas": info.get("type_repas", ""),
+            "tags": info.get("tags", []),
+            "ingredients": ingredients,
+            "instructions": info.get("instructions", ""),
+            "image_url": "",
+            "moment": "Les deux",
+            "source": info.get("source", "llm-text"),
+        }
+
+    except Exception as e:
+        logger.exception("Erreur analyse texte")
+        return {"error": str(e)}
+
+
 def _ingredients_to_text(ings: list[dict]) -> str:
     """Formate les ingrédients en lignes propres « - 700 g d'épinards »."""
     out = []

@@ -181,7 +181,8 @@ class NotionClient:
         """Crée une nouvelle page dans la base de recettes."""
         properties: dict[str, Any] = {
             "Nom": {"title": [{"text": {"content": nom}}]},
-            "URL": {"url": url},
+            # URL vide → null (Notion rejette une chaîne vide pour une propriété URL).
+            "URL": {"url": url or None},
             "État": {"status": {"name": etat}},
         }
 

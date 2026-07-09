@@ -1376,3 +1376,50 @@ Réponds UNIQUEMENT ce JSON :
             "image_url": og_image,
             "source": "llm",
         }
+
+    async def extract_recipe_from_text(self, text: str) -> dict[str, Any]:
+        """Structure une recette collée en texte libre (note perso, sortie
+        Gemini/ChatGPT...) : titre, type, tags, ingrédients, instructions.
+
+        Recopie sans inventer — utile quand il n'y a pas d'URL source."""
+        raw_text = (text or "").strip()[:6000]
+        if not raw_text:
+            return {"nom": "", "type_repas": "", "tags": [], "ingredients": [], "instructions": "", "source": "llm-text"}
+
+        user_prompt = f"""Texte d'une recette (collé par l'utilisateur) :
+
+{raw_text}
+
+Structure-le sans rien inventer ni reformuler :
+- nom : titre de la recette
+- type_repas : une valeur parmi {REPAS_OPTIONS}
+- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+- ingredients : liste des ingrédients avec quantités, recopiés tels quels (un par entrée)
+- instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
+
+Réponds UNIQUEMENT ce JSON :
+{{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+
+        raw = await self._chat(
+            "", user_prompt, temperature=0.1, max_tokens=2000,
+            label="text-extract", json_mode=True,
+        )
+        data = self._parse_json(raw)
+        type_repas = data.get("type_repas", "")
+        if type_repas not in REPAS_OPTIONS:
+            type_repas = ""
+        ingredients = data.get("ingredients", [])
+        if isinstance(ingredients, str):
+            ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
+        instructions = data.get("instructions", "")
+        if isinstance(instructions, list):
+            instructions = "\n".join(str(s).strip() for s in instructions if str(s).strip())
+        return {
+            "nom": clean_recipe_title(data.get("nom", "")),
+            "type_repas": type_repas,
+            "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
+            "ingredients": [str(i) for i in ingredients],
+            "instructions": instructions,
+            "image_url": "",
+            "source": "llm-text",
+        }
