@@ -6,16 +6,118 @@ import httpx
 import ipaddress
 import json
 import logging
+import random
 import re
 import socket
+import time
 import unicodedata
 from typing import Any, Callable
+
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from urllib.parse import urlparse
 
 from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
 from app.text_utils import clean_recipe_title
 
 logger = logging.getLogger(__name__)
+
+
+# ── Robustesse des appels LLM ────────────────────────────────────────
+# Un seul point d'étranglement (`_chat` + `_complete`) : retry/backoff sur
+# erreurs transitoires, fallback ollama seulement si pertinent, validation
+# pydantic de la sortie, sinon `LLMError`. Constantes en dur (app perso).
+_MAX_RETRIES = 3
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_FATAL_STATUS = {400, 401, 403, 404}   # erreurs client : inutile de réessayer
+_BACKOFF_BASE = 1.0                    # secondes (exponentiel : 1, 2, 4)
+_BACKOFF_CAP = 8.0
+_BACKOFF_JITTER = 0.5
+
+
+class LLMError(Exception):
+    """Échec d'un appel LLM après retries/validation (transport ou sortie invalide)."""
+
+
+class RecipeExtraction(BaseModel):
+    """Sortie d'extraction d'une recette (URL ou texte collé)."""
+    nom: str = ""
+    type_repas: str = ""
+    tags: list[str] = Field(default_factory=list)
+    ingredients: list[str] = Field(default_factory=list)
+    instructions: str = ""
+
+    @field_validator("nom", "type_repas", "instructions", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, list):  # le LLM renvoie parfois instructions en liste
+            return "\n".join(str(x).strip() for x in v if str(x).strip())
+        return str(v)
+
+    @field_validator("ingredients", mode="before")
+    @classmethod
+    def _coerce_ing_list(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [l.strip() for l in v.split("\n") if l.strip()]
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        return []
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _coerce_tags(cls, v: Any) -> list[str]:
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return [str(v)] if v else []
+
+
+class IngredientItem(BaseModel):
+    nom: str = ""
+    quantite: str = ""
+    unite: str = ""
+
+    @field_validator("nom", "quantite", "unite", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: Any) -> str:
+        return "" if v is None else str(v)
+
+
+class IngredientsResponse(BaseModel):
+    """Sortie d'extraction d'ingrédients d'une recette."""
+    ingredients: list[IngredientItem] = Field(default_factory=list)
+    cuisson_minutes: int | None = None
+
+    @field_validator("ingredients", mode="before")
+    @classmethod
+    def _drop_non_dict(cls, v: Any) -> list:
+        return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+    @field_validator("cuisson_minutes", mode="before")
+    @classmethod
+    def _int_or_none(cls, v: Any) -> int | None:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+
+class ClassifyResponse(BaseModel):
+    """Sortie de classification type_repas + tags."""
+    type_repas: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("type_repas", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: Any) -> str:
+        return "" if v is None else str(v)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _coerce_tags(cls, v: Any) -> list[str]:
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return [str(v)] if v else []
 
 # Garde anti-SSRF : on ne fetch que du http(s) public, jamais une IP interne.
 _MAX_FETCH_BYTES = 5 * 1024 * 1024  # 5 Mo : refus des réponses trop grosses
@@ -566,24 +668,122 @@ class LLMClient:
                 f"🔢 {provider}/{label}: {in_tok} in + {out_tok} out = {in_tok + out_tok} tokens"
             )
 
+    async def _chat_call(
+        self, provider: str, system: str, user: str, temperature: float,
+        max_tokens: int, label: str, json_mode: bool,
+    ) -> str:
+        """Dispatch bas niveau vers un provider donné (sans retry ni fallback)."""
+        if provider == "gemini":
+            return await self._chat_gemini(system, user, temperature, max_tokens, label, json_mode)
+        if provider == "groq":
+            return await self._chat_groq(system, user, temperature, max_tokens, label, json_mode)
+        return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
+
+    @staticmethod
+    def _is_fatal(exc: Exception) -> bool:
+        """Erreur client non récupérable (clé invalide, mauvaise requête) : ne pas réessayer."""
+        return (isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code in _FATAL_STATUS)
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        """Erreur transitoire : timeout, coupure réseau, 429/5xx, réponse vide."""
+        if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+            return True
+        if isinstance(exc, httpx.HTTPStatusError):
+            return exc.response.status_code in _RETRYABLE_STATUS
+        return isinstance(exc, ValueError)  # ex. Gemini « aucune réponse »
+
+    @staticmethod
+    def _retry_after(exc: Exception) -> float | None:
+        """Délai imposé par l'en-tête Retry-After d'un 429, si présent."""
+        if isinstance(exc, httpx.HTTPStatusError):
+            ra = exc.response.headers.get("Retry-After")
+            if ra:
+                try:
+                    return float(ra)
+                except ValueError:
+                    return None
+        return None
+
     async def _chat(
         self, system: str, user: str, temperature: float = 0.3,
         max_tokens: int = 2048, label: str = "chat", json_mode: bool = False,
     ) -> str:
-        if self.provider == "gemini":
+        """Appel LLM durci : retry/backoff sur transitoire, fallback ollama si
+        pertinent, sinon `LLMError`. Point d'étranglement unique de tous les appels."""
+        last: Exception | None = None
+        for attempt in range(1, _MAX_RETRIES + 1):
+            t0 = time.monotonic()
             try:
-                return await self._chat_gemini(system, user, temperature, max_tokens, label, json_mode)
+                raw = await self._chat_call(
+                    self.provider, system, user, temperature, max_tokens, label, json_mode)
+                self._log_call(self.provider, label, attempt, t0, "ok")
+                return raw
             except Exception as e:
-                logger.warning(f"⚠️ Gemini a échoué ({e}). Fallback vers Ollama...")
-                return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
-        elif self.provider == "groq":
+                if self._is_fatal(e):
+                    self._log_call(self.provider, label, attempt, t0, "fatal")
+                    raise LLMError(f"{self.provider}/{label}: erreur non récupérable ({e})") from e
+                last = e
+                self._log_call(self.provider, label, attempt, t0, "échec")
+                if not self._is_retryable(e) or attempt == _MAX_RETRIES:
+                    break
+                delay = (self._retry_after(e)
+                         or min(_BACKOFF_CAP, _BACKOFF_BASE * 2 ** (attempt - 1)))
+                delay += random.uniform(0, _BACKOFF_JITTER)
+                logger.warning(f"⚠️ {self.provider}/{label} tentative {attempt} KO ({e}); "
+                               f"retry dans {delay:.1f}s")
+                await asyncio.sleep(delay)
+
+        # Provider principal épuisé → fallback ollama seulement si pertinent.
+        if self.provider in ("gemini", "groq") and settings.ollama_url:
+            logger.warning(f"⚠️ {self.provider}/{label} indisponible, fallback ollama…")
+            t0 = time.monotonic()
             try:
-                return await self._chat_groq(system, user, temperature, max_tokens, label, json_mode)
+                raw = await self._chat_call("ollama", system, user, temperature, max_tokens, label, json_mode)
+                self._log_call("ollama", label, 1, t0, "fallback")
+                return raw
             except Exception as e:
-                logger.warning(f"⚠️ Groq a échoué ({e}). Fallback vers Ollama...")
-                return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
-        else:
-            return await self._chat_ollama(system, user, temperature, max_tokens, json_mode)
+                raise LLMError(f"{self.provider}/{label}: fallback ollama échoué ({e})") from e
+        raise LLMError(f"{self.provider}/{label} indisponible après {_MAX_RETRIES} tentatives ({last})") from last
+
+    @staticmethod
+    def _log_call(provider: str, label: str, attempt: int, t0: float, outcome: str) -> None:
+        """Log structuré par appel (provider, issue, latence, tentative)."""
+        ms = int((time.monotonic() - t0) * 1000)
+        logger.info(f"🤖 {provider}/{label}: {outcome} — {ms}ms (tentative {attempt})")
+
+    async def _complete(
+        self, system: str, user: str, *, response_model: type[BaseModel], label: str,
+        temperature: float = 0.1, max_tokens: int = 1024, core_field: str | None = None,
+    ) -> BaseModel:
+        """Appel LLM + parse + validation pydantic, avec 1 retry de réparation.
+
+        Renvoie une instance validée de `response_model`, ou lève `LLMError`
+        (transport épuisé via `_chat`, ou sortie invalide après réparation).
+        `core_field` : si ce champ est vide au 1er essai, on retente une fois."""
+        strict = ("\n\nIMPORTANT : réponds UNIQUEMENT par un objet JSON valide "
+                  "conforme au schéma demandé, sans texte ni ``` autour.")
+        last_err: Exception | None = None
+        for attempt in (1, 2):
+            raw = await self._chat(
+                system, user if attempt == 1 else user + strict,
+                temperature=temperature, max_tokens=max_tokens, label=label, json_mode=True)
+            data = self._parse_json(raw)
+            try:
+                model = response_model.model_validate(data if isinstance(data, dict) else {})
+            except ValidationError as e:
+                last_err = e
+                logger.warning(f"{label}: JSON invalide (tentative {attempt}): {e.errors()[:2]}")
+                continue
+            # Champ cœur vide = extraction ratée (JSON vide/hors-sujet) : on
+            # retente une fois, puis on échoue (pas de faux succès silencieux).
+            if core_field and not getattr(model, core_field, None):
+                last_err = ValueError(f"champ cœur « {core_field} » vide")
+                logger.warning(f"{label}: {last_err} (tentative {attempt})")
+                continue
+            return model
+        raise LLMError(f"{label}: sortie LLM invalide après réparation ({last_err})") from last_err
 
     async def _chat_ollama(
         self, system: str, user: str, temperature: float = 0.3,
@@ -628,12 +828,9 @@ class LLMClient:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+        # Le retry/backoff (dont 429) est géré centralement par `_chat`.
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(self._url, json=payload, headers=headers)
-            if resp.status_code == 429:
-                logger.warning("⚠️ Groq rate limit (429). Attente 5s puis retry...")
-                await asyncio.sleep(5)
-                resp = await client.post(self._url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             usage = data.get("usage", {})
@@ -662,12 +859,6 @@ class LLMClient:
                 raise ValueError("Gemini: aucune réponse")
             parts = candidates[0].get("content", {}).get("parts", [])
             return "".join(p.get("text", "") for p in parts)
-
-    async def _chat_ingredients_gemini(
-        self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 1024
-    ) -> str:
-        """Gemini avec contrainte JSON forcée."""
-        return await self._chat_gemini(system, user, temperature, max_tokens, "ingredients", json_mode=True)
 
     # ── Génération planning ──────────────────────────────────────
 
@@ -1131,42 +1322,15 @@ Nombre de personnes : {nb_personnes}
 
 Donne les ingrédients pour {nb_personnes} personnes, en quantités adaptées."""
 
-        if self.provider in ("gemini", "groq"):
-            try:
-                if self.provider == "gemini":
-                    raw = await self._chat_ingredients_gemini(
-                        SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1, max_tokens=512
-                    )
-                else:
-                    raw = await self._chat(
-                        SYSTEM_PROMPT_INGREDIENTS, user_prompt,
-                        temperature=0.1, max_tokens=512, label="ingredients", json_mode=True,
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️ {self.provider} ingrédients échoué ({e}). Fallback Ollama...")
-                raw = await self._chat_ollama(
-                    SYSTEM_PROMPT_INGREDIENTS, user_prompt, temperature=0.1, max_tokens=512, json_mode=True
-                )
-        else:
-            raw = await self._chat(
-                SYSTEM_PROMPT_INGREDIENTS, user_prompt,
-                temperature=0.1, max_tokens=512, label="ingredients", json_mode=True,
-            )
-
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw.rsplit("```", 1)[0]
-        raw = raw.strip()
-
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            return {"ingredients": [], "cuisson_minutes": 30}
+        # Appel durci + validation pydantic (transport/retry/fallback via _chat).
+        resp: IngredientsResponse = await self._complete(
+            SYSTEM_PROMPT_INGREDIENTS, user_prompt, response_model=IngredientsResponse,
+            label="ingredients", temperature=0.1, max_tokens=512, core_field="ingredients",
+        )
+        return {
+            "ingredients": [i.model_dump() for i in resp.ingredients],
+            "cuisson_minutes": resp.cuisson_minutes or 30,
+        }
 
     # ── Classification type + tags ───────────────────────────────
     # Indices lexicaux pour corriger/compléter la classification LLM.
@@ -1225,14 +1389,11 @@ Classe cette recette :
 
 Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
         try:
-            raw = await self._chat(
-                "", prompt, temperature=0.0, max_tokens=150,
-                label="classify", json_mode=True,
+            resp: ClassifyResponse = await self._complete(
+                "", prompt, response_model=ClassifyResponse,
+                label="classify", temperature=0.0, max_tokens=150,
             )
-            data = self._parse_json(raw)
-            type_repas = data.get("type_repas", "")
-            if type_repas not in REPAS_OPTIONS:
-                type_repas = ""
+            type_repas = resp.type_repas if resp.type_repas in REPAS_OPTIONS else ""
             # Garde-fou : un plat clairement salé ne peut pas être un Dessert.
             if type_repas == "Dessert" and savory and not sweet:
                 logger.info(f"Classification corrigée : '{nom}' Dessert → {guess_type} (salé)")
@@ -1240,12 +1401,12 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
             if not type_repas:
                 type_repas = guess_type
             # Union tags LLM + tags mots-clés (sans doublon, max 4).
-            tags = [t for t in data.get("tags", []) if t in TAG_OPTIONS]
+            tags = [t for t in resp.tags if t in TAG_OPTIONS]
             for t in kw_tags:
                 if t not in tags:
                     tags.append(t)
             return type_repas, tags[:4]
-        except Exception as e:
+        except Exception as e:  # inclut LLMError : repli déterministe sur les mots-clés
             logger.warning(f"Classification échouée ({e}), repli sur mots-clés")
             return guess_type, kw_tags[:4]
 
@@ -1263,7 +1424,10 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
         except json.JSONDecodeError:
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
-                return json.loads(match.group())
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    return {}
         return {}
 
     # ── Extraction depuis URL ────────────────────────────────────
@@ -1348,31 +1512,26 @@ Extrais sans rien inventer ni reformuler :
 Réponds UNIQUEMENT ce JSON :
 {{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
 
-        raw = await self._chat(
-            "", user_prompt, temperature=0.1, max_tokens=2000,
-            label="url-extract", json_mode=True,
-        )
-        data = self._parse_json(raw)
-        # Normaliser / valider
-        type_repas = data.get("type_repas", "")
-        if type_repas not in REPAS_OPTIONS:
-            type_repas = ""
-        ingredients = data.get("ingredients", [])
-        if isinstance(ingredients, str):
-            ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
+        try:
+            r: RecipeExtraction = await self._complete(
+                "", user_prompt, response_model=RecipeExtraction,
+                label="url-extract", temperature=0.1, max_tokens=2000, core_field="nom",
+            )
+        except LLMError as e:
+            logger.warning(f"Extraction LLM (URL) indisponible : {e}")
+            # Dégradation : rien d'inventé, saisie manuelle possible côté /ajouter.
+            return {"nom": "", "type_repas": "", "tags": [],
+                    "ingredients": scraped or [], "instructions": "",
+                    "image_url": og_image, "source": "error"}
+        type_repas = r.type_repas if r.type_repas in REPAS_OPTIONS else ""
         # Les ingrédients scrapés du HTML sont plus fiables que ceux du LLM.
-        if scraped:
-            ingredients = scraped
-        # Le LLM renvoie parfois instructions en liste : on garde le contrat string.
-        instructions = data.get("instructions", "")
-        if isinstance(instructions, list):
-            instructions = "\n".join(str(s).strip() for s in instructions if str(s).strip())
+        ingredients = scraped if scraped else r.ingredients
         return {
-            "nom": clean_recipe_title(data.get("nom", "")),
+            "nom": clean_recipe_title(r.nom),
             "type_repas": type_repas,
-            "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
+            "tags": [t for t in r.tags if t in TAG_OPTIONS],
             "ingredients": [str(i) for i in ingredients],
-            "instructions": instructions,
+            "instructions": r.instructions,
             "image_url": og_image,
             "source": "llm",
         }
@@ -1400,26 +1559,22 @@ Structure-le sans rien inventer ni reformuler :
 Réponds UNIQUEMENT ce JSON :
 {{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
 
-        raw = await self._chat(
-            "", user_prompt, temperature=0.1, max_tokens=2000,
-            label="text-extract", json_mode=True,
-        )
-        data = self._parse_json(raw)
-        type_repas = data.get("type_repas", "")
-        if type_repas not in REPAS_OPTIONS:
-            type_repas = ""
-        ingredients = data.get("ingredients", [])
-        if isinstance(ingredients, str):
-            ingredients = [l.strip() for l in ingredients.split("\n") if l.strip()]
-        instructions = data.get("instructions", "")
-        if isinstance(instructions, list):
-            instructions = "\n".join(str(s).strip() for s in instructions if str(s).strip())
+        try:
+            r: RecipeExtraction = await self._complete(
+                "", user_prompt, response_model=RecipeExtraction,
+                label="text-extract", temperature=0.1, max_tokens=2000, core_field="nom",
+            )
+        except LLMError as e:
+            logger.warning(f"Structuration LLM (texte) indisponible : {e}")
+            return {"nom": "", "type_repas": "", "tags": [], "ingredients": [],
+                    "instructions": "", "image_url": "", "source": "error"}
+        type_repas = r.type_repas if r.type_repas in REPAS_OPTIONS else ""
         return {
-            "nom": clean_recipe_title(data.get("nom", "")),
+            "nom": clean_recipe_title(r.nom),
             "type_repas": type_repas,
-            "tags": [t for t in data.get("tags", []) if t in TAG_OPTIONS],
-            "ingredients": [str(i) for i in ingredients],
-            "instructions": instructions,
+            "tags": [t for t in r.tags if t in TAG_OPTIONS],
+            "ingredients": [str(i) for i in r.ingredients],
+            "instructions": r.instructions,
             "image_url": "",
             "source": "llm-text",
         }
