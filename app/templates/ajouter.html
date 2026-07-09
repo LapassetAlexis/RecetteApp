@@ -13,14 +13,33 @@
 {% endif %}
 
 <div class="card" id="step1">
+    <!-- Depuis une URL -->
     <div class="form-g">
-        <label for="url-input">🔗 URL de la recette (ou vidéo)</label>
+        <label for="url-input">🔗 Depuis une URL (site, vidéo)</label>
         <div style="display:flex;gap:8px;">
             <input type="url" id="url-input" placeholder="https://..." class="inp" style="flex:1;">
             <button id="btn-analyze" class="btn btn-primary">🔍 Analyser</button>
         </div>
-        <small>Colle le lien → clique Analyser → l'IA extrait les infos → tu valides.</small>
+        <small>Colle le lien → l'IA extrait les infos → tu valides.</small>
     </div>
+
+    <div class="or-sep">— ou —</div>
+
+    <!-- Depuis un texte collé -->
+    <div class="form-g">
+        <label for="text-input">📋 Depuis un texte (Gemini, ChatGPT, note...)</label>
+        <textarea id="text-input" rows="6" class="inp" placeholder="Colle ici une recette en texte libre..."></textarea>
+        <div style="margin-top:6px;">
+            <button id="btn-structure" class="btn btn-primary">✨ Structurer</button>
+        </div>
+        <small>L'IA découpe le texte en nom, ingrédients et étapes → tu valides.</small>
+    </div>
+
+    <div class="or-sep">— ou —</div>
+
+    <!-- Saisie manuelle -->
+    <button id="btn-manual" class="btn btn-ghost">✍️ Saisir manuellement</button>
+
     <div id="analyze-status" style="margin-top:8px;font-size:0.85rem;color:var(--t2);"></div>
 </div>
 
@@ -79,8 +98,14 @@
         <button type="button" id="add-step" class="btn btn-ghost btn-sm" style="margin-top:6px;">+ Ajouter une étape</button>
     </div>
 
+    <div class="form-g">
+        <label for="image_url">🖼️ Image <small class="muted-sm">(URL, optionnel)</small></label>
+        <input type="url" id="image_url" name="image_url" class="inp" placeholder="https://... (lien vers une image)">
+        <img id="recipe-preview-img" style="width:100%;max-height:180px;border-radius:8px;object-fit:cover;margin-top:8px;display:none;">
+    </div>
+
     <button type="submit" class="btn btn-primary btn-lg" id="btn-add">💾 Ajouter la recette</button>
-    <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Analyser une autre URL</button>
+    <button type="button" class="btn btn-ghost btn-lg" id="btn-back" style="margin-top:6px;">← Recommencer</button>
 </form>
 
 <div id="add-loading" class="loading-overlay">
@@ -123,68 +148,93 @@ document.getElementById('add-step')?.addEventListener('click', () => {
     addStepRow('').querySelector('textarea').focus();
 });
 
+// ── Aperçu image ────────────────────────────────────
+const imgInput = document.getElementById('image_url');
+const imgPreview = document.getElementById('recipe-preview-img');
+function refreshImgPreview() {
+    const v = imgInput.value.trim();
+    if (v) { imgPreview.src = v; imgPreview.style.display = 'block'; }
+    else { imgPreview.removeAttribute('src'); imgPreview.style.display = 'none'; }
+}
+imgInput?.addEventListener('input', refreshImgPreview);
+
+// ── Bascule vers le formulaire (rempli ou vide) ─────
+function showForm() {
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+}
+function fillForm(d, url) {
+    document.getElementById('url-hidden').value = url || '';
+    document.getElementById('nom').value = d.nom || '';
+    document.getElementById('repas').value = d.repas || '';
+    document.getElementById('moment').value = d.moment || 'Les deux';
+    document.getElementById('ingredients_manual').value = d.ingredients || '';
+    const steps = splitInstructions(d.instructions || '');
+    const sc = document.getElementById('steps');
+    sc.innerHTML = '';
+    steps.forEach(addStepRow);
+    if (!steps.length) addStepRow('');
+    imgInput.value = d.image_url || '';
+    refreshImgPreview();
+    document.querySelectorAll('.tag-cb').forEach(cb => {
+        cb.checked = (d.tags || []).includes(cb.value);
+    });
+}
+
+// ── Analyse URL ─────────────────────────────────────
 document.getElementById('btn-analyze')?.addEventListener('click', async function() {
     const url = document.getElementById('url-input').value.trim();
     if (!url) { toast('Colle une URL d\'abord !', 'error'); return; }
-
     const status = document.getElementById('analyze-status');
     const btn = this;
     btn.disabled = true; btn.textContent = '⏳ Analyse...'; status.textContent = 'Extraction en cours...';
-
     try {
         const r = await fetch('/api/analyze-url', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({url})
         });
         const d = await r.json();
-
         if (d.error) { status.textContent = '❌ ' + d.error; btn.disabled = false; btn.textContent = '🔍 Analyser'; return; }
-
-        // Remplir le formulaire
-        document.getElementById('url-hidden').value = url;
-        document.getElementById('nom').value = d.nom || '';
-        if (d.repas) document.getElementById('repas').value = d.repas;
-        if (d.moment) document.getElementById('moment').value = d.moment;
-        if (d.ingredients) document.getElementById('ingredients_manual').value = d.ingredients;
-        const steps = splitInstructions(d.instructions || '');
-        const sc = document.getElementById('steps');
-        sc.innerHTML = '';
-        steps.forEach(addStepRow);
-        if (!steps.length) addStepRow('');
-        if (d.image_url) {
-            let img = document.getElementById('recipe-preview-img');
-            if (!img) {
-                const div = document.createElement('div');
-                div.id = 'preview-img-wrapper';
-                div.style.cssText = 'margin-bottom:12px;';
-                div.innerHTML = '<img id="recipe-preview-img" style="width:100%;max-height:180px;border-radius:8px;object-fit:cover;margin-bottom:6px;">'
-                    + '<input type="url" id="image_url" name="image_url" class="inp" placeholder="URL de l\'image..." style="font-size:0.8rem;">';
-                document.getElementById('step2').insertBefore(div, document.getElementById('step2').firstChild);
-                img = document.getElementById('recipe-preview-img');
-                document.getElementById('image_url').addEventListener('input', function() {
-                    document.getElementById('recipe-preview-img').src = this.value || '';
-                });
-            }
-            img.src = d.image_url;
-            document.getElementById('image_url').value = d.image_url;
-        }
-        if (d.tags) {
-            document.querySelectorAll('.tag-cb').forEach(cb => {
-                cb.checked = d.tags.includes(cb.value);
-            });
-        }
-
-        document.getElementById('step1').style.display = 'none';
-        document.getElementById('step2').style.display = 'block';
-        const exact = d.source === 'jsonld';
-        status.textContent = exact
+        fillForm(d, url);
+        showForm();
+        status.textContent = d.source === 'jsonld'
             ? '✅ Données extraites de la fiche recette (exactes) — vérifie et ajoute !'
             : '✅ Analyse terminée (approximative, par IA) — vérifie bien et ajuste !';
     } catch(e) {
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '🔍 Analyser';
     }
+});
+
+// ── Structuration d'un texte collé ──────────────────
+document.getElementById('btn-structure')?.addEventListener('click', async function() {
+    const text = document.getElementById('text-input').value.trim();
+    if (!text) { toast('Colle un texte d\'abord !', 'error'); return; }
+    const status = document.getElementById('analyze-status');
+    const btn = this;
+    btn.disabled = true; btn.textContent = '⏳ Structuration...'; status.textContent = 'Analyse du texte en cours...';
+    try {
+        const r = await fetch('/api/analyze-text', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text})
+        });
+        const d = await r.json();
+        if (d.error) { status.textContent = '❌ ' + d.error; btn.disabled = false; btn.textContent = '✨ Structurer'; return; }
+        fillForm(d, '');
+        showForm();
+        status.textContent = '✅ Texte structuré par IA — vérifie bien et ajuste !';
+    } catch(e) {
+        status.textContent = '❌ Erreur réseau';
+        btn.disabled = false; btn.textContent = '✨ Structurer';
+    }
+});
+
+// ── Saisie manuelle (formulaire vide) ───────────────
+document.getElementById('btn-manual')?.addEventListener('click', function() {
+    fillForm({moment: 'Les deux'}, '');
+    if (!document.querySelectorAll('#steps .step-row').length) addStepRow('');
+    showForm();
+    document.getElementById('nom').focus();
 });
 
 // Retour visuel pendant l'ajout (le POST écrit dans Notion)
@@ -197,8 +247,10 @@ document.getElementById('step2')?.addEventListener('submit', () => {
 document.getElementById('btn-back')?.addEventListener('click', function() {
     document.getElementById('step2').style.display = 'none';
     document.getElementById('step1').style.display = 'block';
-    document.getElementById('btn-analyze').disabled = false;
-    document.getElementById('btn-analyze').textContent = '🔍 Analyser';
+    const ba = document.getElementById('btn-analyze');
+    if (ba) { ba.disabled = false; ba.textContent = '🔍 Analyser'; }
+    const bs = document.getElementById('btn-structure');
+    if (bs) { bs.disabled = false; bs.textContent = '✨ Structurer'; }
     document.getElementById('analyze-status').textContent = '';
 });
 </script>

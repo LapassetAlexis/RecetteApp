@@ -163,6 +163,10 @@ a.meal-warn:hover { background:#f9e0c4; }
 .shop-i small { font-size:0.75rem; color:var(--t2); background:var(--bg); padding:1px 6px; border-radius:8px; margin-left:auto; }
 .shop-src { font-size:0.8rem; cursor:help; opacity:0.5; margin-left:auto; flex-shrink:0; }
 .shop-i small + .shop-src { margin-left:4px; }
+.or-sep { display:flex; align-items:center; text-align:center; color:var(--t2); font-size:0.8rem; margin:14px 0; }
+.or-sep::before, .or-sep::after { content:""; flex:1; border-top:1px solid var(--bo); }
+.or-sep::before { margin-right:10px; }
+.or-sep::after { margin-left:10px; }
 
 /* ── Footer ──────────────────────────────────── */
 .footer { text-align:center; padding:16px; color:var(--t2); font-size:0.8rem; border-top:1px solid var(--bo); margin-top:30px; }
