@@ -289,6 +289,14 @@ class Database:
             )
             return _row_to_dict(rows[0]) if rows else None
 
+    async def delete_enriched(self, notion_id: str) -> None:
+        """Purge le cache local d'une recette supprimée."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "DELETE FROM enriched_recipes WHERE notion_id = ?", (notion_id,)
+            )
+            await db.commit()
+
     async def get_all_enriched_ingredients(self) -> dict[str, str]:
         """{notion_id: noms d'ingrédients en minuscules} pour la recherche par
         ingrédient (1 seule requête au lieu de N)."""

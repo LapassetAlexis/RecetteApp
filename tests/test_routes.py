@@ -289,6 +289,68 @@ def test_enrichir_page_and_submit(client, monkeypatch):
     assert r.status_code == 303 and r.headers["location"] == "/recette/abc"
 
 
+def test_enrichir_renomme_librement(client, monkeypatch):
+    # Un nom soumis différent du nom actuel doit renommer la recette dans Notion.
+    async def _get(pid):
+        return _recipe("Curry", id="abc", url="http://r")
+    async def _extract(url):
+        return {"ingredients": ["200 g riz"], "instructions": "Cuire."}
+    async def _enriched(nid):
+        return None
+    async def _instr(pid):
+        return []
+    renamed = {}
+    saved = {}
+    async def _title(pid, nom):
+        renamed["nom"] = nom
+        return {}
+    async def _save(nid, name, *a, **k):
+        saved["name"] = name
+        return None
+    async def _noop(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.llm, "extract_recipe_from_url", _extract)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
+    monkeypatch.setattr(main.notion, "update_recipe_title", _title)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
+    r = client.post("/recette/abc/enrichir", data={
+        "nom": "Curry de légumes", "repas": "Plat",
+        "ingredients_text": "200 g riz",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert renamed.get("nom") == "Curry de légumes"       # renommé dans Notion
+    assert saved.get("name") == "Curry de légumes"        # cache à jour
+
+
+def test_supprimer_recette(client, monkeypatch):
+    archived = {}
+    purged = {}
+    async def _archive(pid):
+        archived["id"] = pid
+        return {"archived": True}
+    async def _delete(nid):
+        purged["id"] = nid
+    monkeypatch.setattr(main.notion, "archive_recipe", _archive)
+    monkeypatch.setattr(main.db, "delete_enriched", _delete)
+    d = client.post("/recette/abc/supprimer").json()
+    assert d.get("success")
+    assert archived.get("id") == "abc" and purged.get("id") == "abc"
+
+
+def test_supprimer_recette_erreur(client, monkeypatch):
+    async def _boom(pid):
+        raise RuntimeError("Notion down")
+    monkeypatch.setattr(main.notion, "archive_recipe", _boom)
+    d = client.post("/recette/abc/supprimer").json()
+    assert "error" in d
+
+
 def test_enrichir_demande_url_si_absente(client, monkeypatch):
     # recette SANS url -> bannière + champ URL ; soumettre une URL la persiste
     async def _get(pid):

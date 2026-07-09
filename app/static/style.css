@@ -42,6 +42,8 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .btn-primary:hover { background:var(--prd); }
 .btn-secondary { background:var(--sc); color:#fff; }
 .btn-secondary:hover { background:#219a52; }
+.btn-danger { background:#c0392b; color:#fff; }
+.btn-danger:hover { background:#a93226; }
 .btn-sm { padding:6px 14px; font-size:0.85rem; }
 .btn-ghost { background:none; border:1px solid var(--bo); color:var(--text); }
 .btn-ghost:hover { background:var(--bg); }

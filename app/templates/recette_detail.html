@@ -15,7 +15,8 @@
         <div class="detail-links">
             {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
             {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
-            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">✨ Enrichir</a>
+            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">{% if ingredients %}✏️ Modifier{% else %}✨ Enrichir{% endif %}</a>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-delete">🗑 Supprimer</button>
         </div>
     </div>
 
@@ -79,6 +80,24 @@
 
     <div class="act"><a href="/recettes" class="btn btn-ghost">← Retour aux recettes</a></div>
 </div>
+
+<!-- Modale de confirmation de suppression -->
+<div id="del-modal" class="modal" style="display:none">
+    <div class="modal-bg"></div>
+    <div class="modal-box">
+        <div class="modal-top">
+            <h3>🗑 Supprimer la recette</h3>
+            <button class="modal-x" type="button" id="del-x">✕</button>
+        </div>
+        <div class="modal-body">
+            <p>Supprimer « {{ recette.nom | clean_title }} » ? La recette sera archivée dans Notion et retirée de la liste.</p>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm" type="button" id="del-cancel">Annuler</button>
+            <button class="btn btn-danger btn-sm" type="button" id="del-confirm">🗑 Supprimer</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -127,5 +146,33 @@ document.getElementById('srv-plus')?.addEventListener('click', () => {
     servings = Math.min(50, servings + 1); render();
 });
 render();
+
+// ── Suppression (archive Notion) avec modale de confirmation ──
+const delModal = document.getElementById('del-modal');
+const closeDel = () => { if (delModal) delModal.style.display = 'none'; };
+document.getElementById('btn-delete')?.addEventListener('click', () => {
+    if (delModal) delModal.style.display = 'flex';
+});
+document.getElementById('del-x')?.addEventListener('click', closeDel);
+document.getElementById('del-cancel')?.addEventListener('click', closeDel);
+delModal?.querySelector('.modal-bg')?.addEventListener('click', closeDel);
+document.getElementById('del-confirm')?.addEventListener('click', async function() {
+    this.disabled = true; this.textContent = '⏳ Suppression...';
+    try {
+        const r = await fetch('/recette/{{ recette.id }}/supprimer', { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+            toast('Recette supprimée', 'success');
+            window.navStart?.();
+            window.location.href = '/recettes';
+        } else {
+            toast(d.error || 'Erreur lors de la suppression', 'error');
+            this.disabled = false; this.textContent = '🗑 Supprimer';
+        }
+    } catch (e) {
+        toast('Erreur réseau', 'error');
+        this.disabled = false; this.textContent = '🗑 Supprimer';
+    }
+});
 </script>
 {% endblock %}

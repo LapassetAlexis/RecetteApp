@@ -452,6 +452,20 @@ class NotionClient:
             return resp.json()
 
 
+    async def archive_recipe(self, page_id: str) -> dict[str, Any]:
+        """Archive (= supprime) une recette dans Notion. Notion n'a pas de vraie
+        suppression via l'API : on passe la page en `archived: true`."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={"archived": True},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            self.invalidate_cache()  # la recette disparaît de la liste
+            return resp.json()
+
     # ── Mise à jour de la note ──────────────────────────────────
 
     async def update_rating(
