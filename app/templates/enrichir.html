@@ -7,6 +7,10 @@
         <p class="hero-sub">{{ recette.nom | clean_title }}</p>
     </div>
 
+    {% if error %}
+    <div class="alert alert-error">⚠ {{ error }}</div>
+    {% endif %}
+
     {% if needs_url and not source_url %}
     <div class="alert alert-warn">🔗 Cette recette n'a pas d'URL source. Colle-en une ci-dessous puis « Extraire » pour pré-remplir automatiquement (ou remplis à la main).</div>
     {% endif %}

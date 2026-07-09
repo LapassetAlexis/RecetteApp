@@ -529,3 +529,81 @@ def test_week_nutrition(client):
         assert await main._week_nutrition([{"jour": 1, "moment": "midi", "nom_recette": "X",
                                             "notion_id": "zzz", "accompagnement": None}]) is None
     asyncio.run(run())
+
+
+def test_enrichir_submit_notion_echec(client, monkeypatch):
+    """Une écriture Notion qui lève → pas de redirection succès : on re-affiche
+    le formulaire avec la saisie et un message d'erreur précis."""
+    async def _get(pid):
+        return _recipe("Curry", id="abc", url="http://r")
+    async def _noop(*a, **k):
+        return {}
+    async def _save(*a, **k):
+        return None
+    async def _boom(*a, **k):
+        raise RuntimeError("Notion 500")
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.db, "save_enriched", _save)          # cache local OK
+    monkeypatch.setattr(main.notion, "update_ingredients", _boom)  # Notion KO
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
+
+    r = client.post("/recette/abc/enrichir", data={
+        "repas": "Plat", "ingredients_text": "200 g riz\n1 oignon",
+        "steps": ["Cuire le riz."],
+    }, follow_redirects=False)
+    # PAS une redirection 303 de succès
+    assert r.status_code == 200
+    # message d'erreur précis listant l'étape ratée + sort du cache local
+    assert "enregistrement dans Notion" in r.text
+    assert "ingrédients" in r.text
+    assert "cache local des ingrédients a bien été enregistré" in r.text
+    # la saisie est conservée (ré-affichée)
+    assert "riz" in r.text and "Cuire le riz." in r.text
+
+
+def test_ajouter_recette_echec_ingredients(client, monkeypatch):
+    """Échec de save ingrédients → error listant l'étape ; page créée signalée,
+    pas de « succès » nu."""
+    async def _create(nom, url="", repas="", tags=None, moment=""):
+        return {"id": "newid", "url": "https://notion/newid"}
+    async def _noop(*a, **k):
+        return {}
+    async def _boom(*a, **k):
+        raise RuntimeError("Notion KO")
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+    monkeypatch.setattr(main.notion, "update_ingredients", _boom)
+    monkeypatch.setattr(main.notion, "append_instructions", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+
+    r = client.post("/ajouter-recette", data={
+        "nom": "Gratin", "repas": "Plat",
+        "ingredients_manual": "200 g pommes de terre\ncrème",
+    })
+    assert r.status_code == 200
+    assert "créée dans Notion" in r.text
+    assert "les ingrédients" in r.text
+    # pas de succès trompeur
+    assert "ajoutée avec succès" not in r.text
+
+
+def test_generer_valide_recette_inventee(client, monkeypatch):
+    """Le LLM invente une recette absente du catalogue → le créneau est re-tiré
+    avec une recette réelle du catalogue (ou listé en non-résolu)."""
+    async def _all():
+        return [_recipe("Poulet"), _recipe("Soupe")]
+    async def _gen(**kw):
+        return [
+            {"jour": 1, "moment": "midi", "nom_recette": "Inventée", "type_repas": "Plat"},
+            {"jour": 1, "moment": "soir", "nom_recette": "Poulet", "type_repas": "Plat"},
+        ]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    r = client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    page = client.get(r.headers["location"]).text
+    # la recette inventée a été remplacée par une recette réelle du catalogue
+    assert "Inventée" not in page
+    assert "Soupe" in page

@@ -181,6 +181,21 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["tags"] = r.get("tags", [])
 
 
+def _pick_replacement(
+    recettes_pool: list[dict], used_names: set[str], exclues: set[str],
+) -> dict | None:
+    """Pioche une recette de remplacement dans le catalogue filtré : une recette
+    réellement présente dans Notion, non déjà utilisée dans la semaine et non
+    exclue (récemment servie). Retourne None si aucune candidate."""
+    candidates = [
+        r for r in recettes_pool
+        if r["nom"].lower().strip() not in used_names and r["nom"] not in exclues
+    ]
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+
 async def _week_nutrition(plats: list[dict]) -> dict | None:
     """Estime la nutrition moyenne par jour/personne sur le planning, à partir
     des ingrédients en cache. Retourne None si rien d'estimable."""
@@ -377,6 +392,7 @@ async def voir_planning(request: Request, planning_id: int):
             "rayon_order": RAYON_ORDER,
             "per_day": per_day,
             "off_meals": data.get("off_meals", []),
+            "creneaux_non_resolus": data.get("creneaux_non_resolus", []),
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
         },
@@ -707,22 +723,69 @@ async def enrichir_submit(
             nutrition = nutrition_json
     except (json.JSONDecodeError, TypeError):
         nutrition = ""
-    try:
-        if nom_norm != recette["nom"]:
-            await notion.update_recipe_title(page_id, nom_norm)
-        if source_url and source_url != (recette.get("url") or ""):
-            await notion.update_recipe_url(page_id, source_url)
-        if structured:
+    # On isole CHAQUE écriture Notion pour remonter précisément ce qui a échoué
+    # (au lieu d'avaler tout dans un seul try/except et de rediriger en « succès »).
+    echecs: list[str] = []          # étapes Notion ratées (label FR)
+    cache_local_ok = False          # le cache local (ingrédients) a-t-il été sauvé ?
+
+    async def _etape(label: str, coro) -> None:
+        """Exécute une écriture Notion en isolant son échec éventuel."""
+        try:
+            await coro
+        except Exception:
+            logger.exception(f"Erreur validation enrichissement : {label}")
+            echecs.append(label)
+
+    if nom_norm != recette["nom"]:
+        await _etape("titre", notion.update_recipe_title(page_id, nom_norm))
+    if source_url and source_url != (recette.get("url") or ""):
+        await _etape("URL source", notion.update_recipe_url(page_id, source_url))
+    if structured:
+        # Cache local d'abord (distinct de Notion) : on note s'il a réussi.
+        try:
             await db.save_enriched(page_id, nom_norm, ingredients=json.dumps(structured),
                                    cuisson_minutes=duree_minutes or 0, nutrition=nutrition)
-            await notion.update_ingredients(page_id, _ingredients_to_text(structured))
-        if instructions_text:
-            await notion.rewrite_recipe_body(page_id, instructions_text)
-        if image_url:
-            await notion.update_image(page_id, image_url)
-        await notion.update_recipe_meta(page_id, repas=repas, tags=tags or None)
-    except Exception:
-        logger.exception("Erreur validation enrichissement")
+            cache_local_ok = True
+        except Exception:
+            logger.exception("Erreur validation enrichissement : cache local")
+        await _etape("ingrédients", notion.update_ingredients(page_id, _ingredients_to_text(structured)))
+    if instructions_text:
+        await _etape("instructions", notion.rewrite_recipe_body(page_id, instructions_text))
+    if image_url:
+        await _etape("image", notion.update_image(page_id, image_url))
+    await _etape("type/tags", notion.update_recipe_meta(page_id, repas=repas, tags=tags or None))
+
+    if echecs:
+        # Au moins une écriture Notion a échoué : on NE redirige PAS en succès.
+        # On re-affiche le formulaire en conservant toute la saisie + un message
+        # d'erreur précis (étapes ratées et sort du cache local).
+        msg = "Échec d'enregistrement dans Notion pour : " + ", ".join(echecs) + "."
+        if structured:
+            msg += (" Le cache local des ingrédients a bien été enregistré."
+                    if cache_local_ok else
+                    " Le cache local des ingrédients n'a pas non plus pu être enregistré.")
+        msg += " Rien n'a été validé : corrige puis re-valide."
+        # On reflète la saisie dans la recette pour re-cocher type/tags/nom.
+        recette["nom"] = nom_norm
+        recette["repas"] = repas
+        recette["tags"] = tags or []
+        return templates.TemplateResponse(
+            "enrichir.html",
+            {
+                "request": request,
+                "recette": recette,
+                "ingredients": structured,
+                "steps": [s.strip() for s in steps if s.strip()],
+                "image_url": image_url,
+                "nutrition_json": nutrition_json,
+                "duree_minutes": duree_minutes,
+                "repas_options": REPAS_OPTIONS,
+                "tag_options": TAG_OPTIONS,
+                "source_url": source_url,
+                "needs_url": not recette.get("url"),
+                "error": msg,
+            },
+        )
 
     return RedirectResponse(url=f"/recette/{page_id}", status_code=303)
 
@@ -879,6 +942,53 @@ async def generer(
             if r:
                 _apply_recipe_info(plat, r)
 
+        # 4bis. Valider le planning généré (créneaux ACTIFS uniquement) :
+        #   - une recette réellement dans le catalogue Notion (notion_id non vide,
+        #     sinon le LLM l'a inventée) ;
+        #   - pas de doublon (même recette sur 2 jours différents ; une même
+        #     recette midi+soir le MÊME jour reste tolérée = fusion légitime).
+        # Chaque créneau invalide est re-tiré (max 2 tentatives) dans le catalogue
+        # filtré ; s'il reste invalide on le liste en avertissement (sans bloquer).
+        JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+        MOMENTS = {"midi": "Midi", "soir": "Soir"}
+        # Noms déjà placés (normalisés) : évite de re-tirer une recette déjà présente.
+        used_names = {p["nom_recette"].lower().strip() for p in plats if p.get("nom_recette")}
+        # 1re apparition d'une recette par jour, pour détecter les doublons.
+        seen_nom_jour: dict[str, int] = {}
+        creneaux_non_resolus: list[str] = []
+
+        for plat in plats:
+            if (plat["jour"], plat["moment"]) in off_set:
+                continue  # créneau désactivé : non validé
+            nom = plat["nom_recette"].lower().strip()
+            doublon = nom in seen_nom_jour and seen_nom_jour[nom] != plat["jour"]
+            invalide = (not plat.get("notion_id")) or doublon
+            if not invalide:
+                seen_nom_jour.setdefault(nom, plat["jour"])
+                continue
+
+            # Re-tir ciblé dans le catalogue filtré (max 2 tentatives).
+            resolu = False
+            for _ in range(2):
+                remplacement = _pick_replacement(recettes_filtered, used_names, exclues)
+                if not remplacement:
+                    break
+                nouveau = remplacement["nom"].lower().strip()
+                used_names.add(nouveau)
+                plat["nom_recette"] = remplacement["nom"]
+                _apply_recipe_info(plat, remplacement)
+                seen_nom_jour[nouveau] = plat["jour"]
+                resolu = True
+                break
+
+            if not resolu:
+                jl = JOURS[plat["jour"] - 1] if 1 <= plat["jour"] <= 7 else f"Jour {plat['jour']}"
+                ml = MOMENTS.get(plat["moment"], plat["moment"])
+                creneaux_non_resolus.append(f"{jl} {ml}")
+
+        if creneaux_non_resolus:
+            logger.warning(f"Créneaux non résolus après re-tir : {creneaux_non_resolus}")
+
         # 5. Sauvegarder en BROUILLON (valide=0). Le planning n'apparaît dans
         #    l'historique qu'après validation explicite par l'utilisateur.
         #    On purge d'abord l'éventuel brouillon précédent non validé.
@@ -888,6 +998,7 @@ async def generer(
             "liste_courses": [],
             "per_day": per_day,
             "off_meals": sorted(f"{d}:{m}" for d, m in off_set),
+            "creneaux_non_resolus": creneaux_non_resolus,
         }
         planning_id = await db.save_planning(
             week_start=week_start,
@@ -1219,31 +1330,43 @@ async def ajouter_recette(
             )
             page_id = result.get("id", "")
             recette_url = result.get("url", "")
-            success = f"Recette « {nom} » ajoutée avec succès !"
             logger.info(f"Recette ajoutée: {nom} → {recette_url}")
 
-            # Sauvegarder les ingrédients, instructions et image
-            if page_id and (ingredients_manual or instructions_manual or image_url):
+            # Sauvegarder les ingrédients, instructions et image : chaque écriture
+            # est isolée pour remonter précisément ce qui n'a pas pu être enregistré
+            # (au lieu d'avaler l'échec et d'annoncer un « succès » trompeur).
+            echecs: list[str] = []
+
+            async def _etape(label: str, coro) -> None:
                 try:
-                    if ingredients_manual:
-                        await notion.update_ingredients(page_id, ingredients_manual)
-                    if instructions_manual:
-                        await notion.append_instructions(page_id, instructions_manual)
-                    if image_url:
-                        await notion.update_image(page_id, image_url)
-                    # Cache local : ingrédients STRUCTURÉS (pour scaling + nutrition)
-                    if ingredients_manual:
-                        ings_list = [
-                            i for i in (parse_ingredient_line(l) for l in ingredients_manual.split("\n"))
-                            if i and i["nom"]
-                        ]
-                        await db.save_enriched(
-                            notion_id=page_id,
-                            recipe_name=nom,
-                            ingredients=json.dumps(ings_list),
-                        )
+                    await coro
                 except Exception as e:
-                    logger.warning(f"Impossible de sauvegarder les infos: {e}")
+                    logger.warning(f"Impossible de sauvegarder {label}: {e}")
+                    echecs.append(label)
+
+            if page_id and ingredients_manual:
+                await _etape("les ingrédients", notion.update_ingredients(page_id, ingredients_manual))
+            if page_id and instructions_manual:
+                await _etape("les instructions", notion.append_instructions(page_id, instructions_manual))
+            if page_id and image_url:
+                await _etape("l'image", notion.update_image(page_id, image_url))
+            if page_id and ingredients_manual:
+                # Cache local : ingrédients STRUCTURÉS (pour scaling + nutrition)
+                ings_list = [
+                    i for i in (parse_ingredient_line(l) for l in ingredients_manual.split("\n"))
+                    if i and i["nom"]
+                ]
+                await _etape("le cache local des ingrédients", db.save_enriched(
+                    notion_id=page_id, recipe_name=nom, ingredients=json.dumps(ings_list),
+                ))
+
+            if echecs:
+                # Échec partiel : la page a bien été créée mais des infos manquent.
+                # On n'affiche PAS un « succès » nu.
+                error = (f"Recette « {nom} » créée dans Notion, mais impossible d'enregistrer : "
+                         + ", ".join(echecs) + ". Ré-essaie depuis la page « Enrichir ».")
+            else:
+                success = f"Recette « {nom} » ajoutée avec succès !"
 
     except Exception as e:
         logger.exception("Erreur ajout recette")

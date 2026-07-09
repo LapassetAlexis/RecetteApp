@@ -12,6 +12,14 @@
     </p>
 </div>
 
+{% if creneaux_non_resolus %}
+<div class="alert alert-warn">
+    ⚠ Certains créneaux n'ont pas pu être remplis avec une recette valide du catalogue :
+    <strong>{{ creneaux_non_resolus | join(', ') }}</strong>.
+    Change-les manuellement (↻) ou ajoute des recettes.
+</div>
+{% endif %}
+
 {% if not valide %}
 <div class="card validate-bar">
     <span>📝 <strong>Brouillon</strong> — pas encore enregistré dans l'historique. Ajuste si besoin, puis valide.</span>
