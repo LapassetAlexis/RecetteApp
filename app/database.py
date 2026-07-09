@@ -247,6 +247,28 @@ class Database:
             planning["recipes"] = [_row_to_dict(r) for r in recipe_rows]
             return planning
 
+    async def get_planning_by_share_token(self, token: str) -> dict[str, Any] | None:
+        """Retrouve un planning dont le data_json contient ce share_token.
+
+        Pas de colonne dédiée : on filtre en Python sur le JSON (le nombre de
+        plannings reste petit, et le partage est une action ponctuelle)."""
+        if not token:
+            return None
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await db.execute_fetchall(
+                "SELECT * FROM planning_history ORDER BY id DESC"
+            )
+            for row in rows:
+                planning = _row_to_dict(row)
+                try:
+                    data = json.loads(planning["data_json"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if data.get("share_token") == token:
+                    return planning
+        return None
+
     async def list_plannings(
         self, limit: int = 10
     ) -> list[dict[str, Any]]:

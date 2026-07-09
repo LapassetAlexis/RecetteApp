@@ -221,6 +221,7 @@
             <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
             {% if liste_courses %}
             <button class="btn btn-ghost btn-sm" id="btn-copy" onclick="copyShop()" title="Copier la liste">📋 Copier</button>
+            <button class="btn btn-ghost btn-sm" id="btn-share" onclick="partagerListe()" title="Lien de partage public (lecture seule)">🔗 Partager la liste</button>
             <button class="btn btn-ghost btn-sm" onclick="window.print()" title="Imprimer la liste">🖨️</button>
             <button class="btn btn-ghost btn-sm" id="btn-regen" onclick="genShop(true)" title="Régénérer la liste">↻</button>
             {% endif %}
@@ -276,28 +277,79 @@ async function validerSemaine() {
 const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const RAYON_ORDER = {{ rayon_order | tojson }};
 
-// ── Persistance des cases cochées (par planning) ────
-const SHOP_KEY = 'shop_checked_' + pid;
-function loadChecked() {
-    try { return new Set(JSON.parse(localStorage.getItem(SHOP_KEY) || '[]')); }
-    catch(e) { return new Set(); }
+// ── Persistance des cases cochées (côté serveur, cache offline) ────
+// L'état de référence vient du serveur (courses_checked). On garde localStorage
+// comme cache offline : les changements non envoyés (réseau HS) sont mis en file
+// et rejoués au prochain chargement.
+const SHOP_KEY = 'shop_checked_' + pid;      // cache local de l'état
+const SHOP_QUEUE = 'shop_queue_' + pid;      // file des POST en attente
+let CHECKED = new Set({{ courses_checked | tojson }});
+
+function saveLocal() {
+    try { localStorage.setItem(SHOP_KEY, JSON.stringify([...CHECKED])); } catch(e) {}
 }
-function saveChecked() {
-    const done = [];
-    document.querySelectorAll('.shop-i').forEach(l => {
-        if (l.querySelector('.shop-c').checked) done.push(l.dataset.item);
+function loadQueue() {
+    try { return JSON.parse(localStorage.getItem(SHOP_QUEUE) || '[]'); }
+    catch(e) { return []; }
+}
+function saveQueue(q) {
+    try { localStorage.setItem(SHOP_QUEUE, JSON.stringify(q)); } catch(e) {}
+}
+async function postCheck(item, checked) {
+    const r = await fetch(`/api/shopping-check/${pid}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({item, checked}),
     });
-    localStorage.setItem(SHOP_KEY, JSON.stringify(done));
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error || 'Erreur serveur');
+}
+function enqueue(item, checked) {
+    // Dédoublonne : le dernier état d'un item écrase le précédent.
+    const q = loadQueue().filter(e => e.item !== item);
+    q.push({item, checked});
+    saveQueue(q);
+}
+async function flushQueue() {
+    let q = loadQueue();
+    if (!q.length) return;
+    const rest = [];
+    for (const e of q) {
+        try { await postCheck(e.item, e.checked); }
+        catch(err) { rest.push(e); }  // on garde ceux qui échouent encore
+    }
+    saveQueue(rest);
+}
+async function onToggle(item, checked) {
+    if (checked) CHECKED.add(item); else CHECKED.delete(item);
+    saveLocal();
+    try { await postCheck(item, checked); }
+    catch(err) { enqueue(item, checked); }  // réseau HS : on rejouera au load
 }
 function bindShopItems() {
-    const done = loadChecked();
     document.querySelectorAll('.shop-i').forEach(l => {
         const cb = l.querySelector('.shop-c');
-        if (done.has(l.dataset.item)) cb.checked = true;
-        cb.addEventListener('change', saveChecked);
+        if (CHECKED.has(l.dataset.item)) cb.checked = true;
+        cb.addEventListener('change', () => onToggle(l.dataset.item, cb.checked));
     });
 }
 bindShopItems();
+flushQueue();  // rejoue les changements offline en attente
+
+// ── Partage public de la liste (lecture seule, non coché uniquement) ──
+async function partagerListe() {
+    const b = document.getElementById('btn-share');
+    if (b) b.disabled = true;
+    try {
+        const r = await fetch(`/planning/${pid}/partager`, {method: 'POST'});
+        const d = await r.json();
+        if (d.url) {
+            const abs = window.location.origin + d.url;
+            try { await navigator.clipboard.writeText(abs); toast('Lien copié ✓', 'success'); }
+            catch(e) { toast(abs, 'info'); }
+        } else { toast(d.error || 'Erreur', 'error'); }
+    } catch(e) { toast('Erreur réseau', 'error'); }
+    finally { if (b) b.disabled = false; }
+}
 
 // ── Sélection des repas à changer (une case = 1+ jours fusionnés) ──
 const parseJours = el => (el.dataset.jours||'').split(',').filter(Boolean).map(Number);
@@ -434,7 +486,9 @@ async function genShop(regen) {
         const r=await fetch(`/generate-shopping/${pid}`,{method:'POST'});
         const d=await r.json();
         if(d.success) {
+            // Nouveaux items : on repart de zéro côté cache local aussi.
             localStorage.removeItem(SHOP_KEY);
+            localStorage.removeItem(SHOP_QUEUE);
             if(d.non_enrichis&&d.non_enrichis.length){
                 sessionStorage.setItem('shop_warn_'+pid,
                     `${d.non_enrichis.length} recette(s) non enrichie(s), ingrédients manquants : ${d.non_enrichis.join(', ')}`);

@@ -59,7 +59,9 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 # Auth HTTP Basic optionnelle, activée seulement si AUTH_USER + AUTH_PASSWORD
 # sont définis. /health et /static restent publics (sondes, assets).
 if settings.auth_enabled:
-    _PUBLIC_PREFIXES = ("/health", "/static")
+    # /courses/<token> : partage public en lecture seule, le token fait office
+    # d'accès (pas d'auth Basic exigée sur ce préfixe).
+    _PUBLIC_PREFIXES = ("/health", "/static", "/courses/")
 
     @app.middleware("http")
     async def basic_auth(request: Request, call_next):
@@ -374,6 +376,7 @@ async def voir_planning(request: Request, planning_id: int):
             "week_nutrition": await _week_nutrition(plats),
             "liste_courses": liste_courses,
             "courses_par_rayon": group_by_rayon(liste_courses),
+            "courses_checked": data.get("courses_checked", []),
             "rayon_order": RAYON_ORDER,
             "per_day": per_day,
             "off_meals": data.get("off_meals", []),
@@ -964,6 +967,9 @@ async def generate_shopping(planning_id: int, request: Request):
         # liste agrégée/dédupliquée de la semaine, pas les ingrédients d'une
         # recette donnée (ceux-ci sont gérés à l'ajout / via enrich-all).
         planning_data["liste_courses"] = liste_courses
+        # Nouveaux items : on repart d'une liste vierge de cases cochées.
+        # (Le share_token éventuel est conservé tel quel.)
+        planning_data["courses_checked"] = []
         await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
 
         return {
@@ -975,6 +981,84 @@ async def generate_shopping(planning_id: int, request: Request):
     except Exception as e:
         logger.exception("Erreur génération liste courses")
         return {"error": str(e)}
+
+
+@app.post("/api/shopping-check/{planning_id}")
+async def shopping_check(planning_id: int, request: Request):
+    """Coche/décoche un item de la liste de courses côté serveur.
+
+    Body JSON : {"item": "<nom en minuscules>", "checked": true|false}.
+    L'état est persisté dans planning_data["courses_checked"] (liste de clés)."""
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        body = await request.json()
+        item = str(body.get("item", "")).strip().lower()
+        checked = bool(body.get("checked"))
+        if not item:
+            return {"error": "Item manquant"}
+
+        planning_data = json.loads(planning["data_json"])
+        # set pour dédupliquer, on repart de l'existant
+        checked_set = set(planning_data.get("courses_checked", []))
+        if checked:
+            checked_set.add(item)
+        else:
+            checked_set.discard(item)
+        planning_data["courses_checked"] = sorted(checked_set)
+        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
+        return {"success": True}
+
+    except Exception as e:
+        logger.exception("Erreur mise à jour case liste de courses")
+        return {"error": str(e)}
+
+
+@app.post("/planning/{planning_id}/partager")
+async def partager_liste(planning_id: int):
+    """Génère (une fois) un token de partage public et renvoie l'URL relative."""
+    try:
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        token = planning_data.get("share_token")
+        if not token:
+            token = secrets.token_urlsafe(8)
+            planning_data["share_token"] = token
+            await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
+        return {"url": f"/courses/{token}"}
+
+    except Exception as e:
+        logger.exception("Erreur génération lien de partage")
+        return {"error": str(e)}
+
+
+@app.get("/courses/{token}", response_class=HTMLResponse)
+async def courses_public(request: Request, token: str):
+    """Liste de courses publique (lecture seule) : n'affiche que les items NON
+    cochés, groupés par rayon. Accès par token (exempté du basic-auth)."""
+    planning = await db.get_planning_by_share_token(token)
+    if not planning:
+        return HTMLResponse("Liste introuvable", status_code=404)
+
+    data = json.loads(planning["data_json"])
+    liste_courses = data.get("liste_courses", [])
+    checked = {str(c).lower() for c in data.get("courses_checked", [])}
+    restants = [it for it in liste_courses if it.get("nom", "").lower() not in checked]
+
+    return templates.TemplateResponse(
+        "courses_public.html",
+        {
+            "request": request,
+            "courses_par_rayon": group_by_rayon(restants),
+            "nb_restants": len(restants),
+            "nb_total": len(liste_courses),
+        },
+    )
 
 
 @app.post("/api/rate/{page_id}")
