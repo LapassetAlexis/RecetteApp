@@ -196,23 +196,29 @@ def test_alternatives_and_shopping(client, monkeypatch):
             {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
             {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
         ]
-    async def _batch(plats, nb):
-        return [{"nom": "sel", "quantite": "1", "unite": "pincée"}]
+    # Liste de courses ANCRÉE sur le cache DB (plus de batch LLM à l'aveugle).
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
     async def _noop(*a, **k):
         return {}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
     monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    monkeypatch.setattr(main.llm, "batch_extract_ingredients", _batch)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver",
+                                             "nb_lun": "8"},
                           follow_redirects=False).headers["location"].rsplit("/", 1)[1])
 
     alts = client.get(f"/api/alternatives/{pid}").json()["alternatives"]
     assert any(a["nom"] == "Curry" for a in alts)
 
     shop = client.post(f"/generate-shopping/{pid}").json()
-    assert shop.get("success") and shop["liste_courses"][0]["nom"] == "sel"
+    assert shop.get("success")
+    riz = next(i for i in shop["liste_courses"] if i["nom"] == "riz")
+    # 2 repas lundi (8 pers) × 100 g / base 4 = 400 g, avec recettes source.
+    assert riz["quantite"] == "400"
+    assert set(riz["recettes"]) == {"Poulet", "Soupe"}
 
 
 def test_enrich_one(client, monkeypatch):

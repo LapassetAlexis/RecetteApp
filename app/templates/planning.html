@@ -236,6 +236,7 @@
                 <label class="shop-i" data-item="{{ item.nom|lower }}">
                     <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
                     {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
+                    {% if item.recettes %}<span class="shop-src" title="{{ item.recettes | join(' · ') }}">🍽</span>{% endif %}
                 </label>
                 {% endfor %}
             </div>
@@ -382,10 +383,13 @@ function usl(items) {
     items.forEach(i=>{ const r=i.rayon||'Autre'; (buckets[r]=buckets[r]||[]).push(i); });
     const order=[...RAYON_ORDER.filter(r=>buckets[r]), ...Object.keys(buckets).filter(r=>!RAYON_ORDER.includes(r))];
     g.innerHTML=order.map(r=>`<div class="shop-rayon" data-rayon="${r}"><h3 class="rayon-h">${r} <span class="rayon-n">${buckets[r].length}</span></h3><div class="shop-grid">`+
-        buckets[r].map(i=>`<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${cap(i.nom)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}</label>`).join('')+
+        buckets[r].map(i=>`<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${cap(i.nom)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}${(i.recettes&&i.recettes.length)?`<span class="shop-src" title="${i.recettes.join(' · ').replace(/"/g,'&quot;')}">🍽</span>`:''}</label>`).join('')+
         `</div></div>`).join('');
     bindShopItems();
 }
+// Avertissement recettes non enrichies (posé avant reload par genShop).
+(function(){ const w=sessionStorage.getItem('shop_warn_'+pid);
+    if(w){ sessionStorage.removeItem('shop_warn_'+pid); toast(w,'error'); } })();
 function copyMenu() {
     const days = {};  // jour -> {midi, soir}
     document.querySelectorAll('.meal').forEach(cell => {
@@ -429,7 +433,14 @@ async function genShop(regen) {
     try {
         const r=await fetch(`/generate-shopping/${pid}`,{method:'POST'});
         const d=await r.json();
-        if(d.success) { localStorage.removeItem(SHOP_KEY); window.location.reload(); }
+        if(d.success) {
+            localStorage.removeItem(SHOP_KEY);
+            if(d.non_enrichis&&d.non_enrichis.length){
+                sessionStorage.setItem('shop_warn_'+pid,
+                    `${d.non_enrichis.length} recette(s) non enrichie(s), ingrédients manquants : ${d.non_enrichis.join(', ')}`);
+            }
+            window.location.reload();
+        }
         else {
             toast('Erreur : '+(d.error||'?'),'error');
             if(st) st.textContent='Erreur: '+(d.error||'?');

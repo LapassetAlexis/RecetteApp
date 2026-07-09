@@ -1168,62 +1168,6 @@ Donne les ingrédients pour {nb_personnes} personnes, en quantités adaptées.""
                 return json.loads(match.group())
             return {"ingredients": [], "cuisson_minutes": 30}
 
-    async def batch_extract_ingredients(
-        self,
-        plats: list[dict[str, Any]],
-        nb_personnes: int,
-    ) -> list[dict[str, Any]]:
-        """Extrait et déduplonne les ingrédients de TOUTES les recettes en 1 appel."""
-        recettes_str = "\n".join(
-            f"{i+1}. {p['nom_recette']} ({p.get('moment', '?')})"
-            for i, p in enumerate(plats)
-        )
-
-        user_prompt = f"""Voici 14 recettes pour une semaine à {nb_personnes} personnes :
-
-{recettes_str}
-
-Pour chaque recette, liste les ingrédients nécessaires, PUIS regroupe-les en UNE SEULE liste sans doublon.
-
-Exemple : si "huile d'olive" apparaît dans 3 recettes, additionne les quantités.
-
-Répond UNIQUEMENT ce JSON :
-{{"ingredients": [
-  {{"nom": "huile d'olive", "quantite": "6", "unite": "cuillères à soupe"}},
-  {{"nom": "oignons", "quantite": "4", "unite": "pièces"}}
-]}}"""
-
-        try:
-            if self.provider == "gemini":
-                raw = await self._chat_ingredients_gemini(
-                    "", user_prompt, temperature=0.1, max_tokens=1024
-                )
-            else:
-                raw = await self._chat(
-                    "", user_prompt, temperature=0.1, max_tokens=1024, label="batch-ing", json_mode=True,
-                )
-        except Exception as e:
-            logger.warning(f"⚠️ Batch ingrédients échoué ({e}), fallback extraction individuelle...")
-            return []
-
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw.rsplit("```", 1)[0]
-        raw = raw.strip()
-
-        try:
-            data = json.loads(raw)
-            return data.get("ingredients", [])
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
-                return data.get("ingredients", [])
-            logger.warning("Batch ingrédients : JSON invalide, fallback extraction individuelle")
-            return []
-
     # ── Classification type + tags ───────────────────────────────
     # Indices lexicaux pour corriger/compléter la classification LLM.
     _SAVORY_WORDS = {

@@ -23,7 +23,7 @@ from app.llm_client import LLMClient
 from app.notion_client import NotionClient
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.nutrition import estimate_nutrition
-from app.text_utils import clean_recipe_title, merge_ingredients, normalize_title_case, parse_ingredient_line, split_instructions
+from app.text_utils import clean_recipe_title, merge_ingredients, normalize_title_case, parse_ingredient_line, scale_ingredients, split_instructions
 
 VERSION = "1.1.0"
 
@@ -470,6 +470,71 @@ async def liste_recettes(request: Request):
 BASE_SERVINGS = 4  # base d'extraction des ingrédients (cf. extract_ingredients)
 
 
+def _per_day_list(planning: dict, data: dict) -> list[int]:
+    """Personnes par jour du planning (repli sur nb_personnes pour tous les
+    anciens plannings sans `per_day`)."""
+    raw = data.get("per_day", "")
+    try:
+        per_day = [int(x) for x in raw.split(",")] if raw else []
+    except (ValueError, AttributeError):
+        per_day = []
+    if len(per_day) != 7:
+        per_day = [planning.get("nb_personnes", 4)] * 7
+    return per_day
+
+
+async def _collect_shopping(
+    plats: list[dict], per_day: list[int], nb_personnes: int,
+) -> tuple[list[dict], list[str]]:
+    """Construit les ingrédients de courses ANCRÉS sur le cache DB par recette.
+
+    - une recette contribue UNIQUEMENT ses ingrédients enregistrés (aucune
+      extraction LLM à l'aveugle → pas d'ingrédients hallucinés) ;
+    - les quantités sont mises à l'échelle selon le nb de personnes du JOUR du
+      repas (× pers / BASE_SERVINGS) ;
+    - chaque ingrédient porte le titre de sa recette source (`recette`).
+
+    Retourne (ingrédients, titres des recettes non enrichies à signaler).
+    """
+    def _persons_for(src: dict) -> int:
+        try:
+            j = int(src.get("jour", 0))
+        except (TypeError, ValueError):
+            j = 0
+        if per_day and 1 <= j <= len(per_day):
+            return per_day[j - 1]
+        return nb_personnes
+
+    # Plats + accompagnements (l'accompagnement hérite du jour de son plat).
+    sources: list[dict] = []
+    for p in plats:
+        sources.append(p)
+        acc = p.get("accompagnement")
+        if acc and acc.get("nom_recette"):
+            sources.append({**acc, "jour": p.get("jour")})
+
+    collected: list[dict] = []
+    non_enrichis: list[str] = []
+    for src in sources:
+        nid = src.get("notion_id", "")
+        title = clean_recipe_title(src.get("nom_recette", ""))
+        cached = await db.get_enriched(nid) if nid else None
+        ings = None
+        if cached and cached.get("ingredients"):
+            try:
+                ings = [i for i in json.loads(cached["ingredients"]) if i.get("nom")]
+            except (json.JSONDecodeError, TypeError):
+                ings = None
+        if not ings:
+            non_enrichis.append(title or src.get("nom_recette", ""))
+            continue
+        factor = _persons_for(src) / BASE_SERVINGS
+        for ing in scale_ingredients(ings, factor):
+            ing["recette"] = title
+            collected.append(ing)
+    return collected, non_enrichis
+
+
 @app.get("/recette/{page_id}", response_class=HTMLResponse)
 async def detail_recette(request: Request, page_id: str):
     """Fiche détail : ingrédients (Cooklang, portions ajustables) + instructions."""
@@ -851,42 +916,21 @@ async def generate_shopping(planning_id: int, request: Request):
         if not plats:
             return {"error": "Aucun plat dans ce planning"}
 
-        # Inclure les accompagnements (légumes appariés) dans les courses.
-        extract_plats = []
-        for p in plats:
-            extract_plats.append(p)
-            acc = p.get("accompagnement")
-            if acc and acc.get("nom_recette"):
-                extract_plats.append({
-                    "nom_recette": acc["nom_recette"],
-                    "moment": p.get("moment", ""),
-                    "url": acc.get("url", ""),
-                    "notion_id": acc.get("notion_id", ""),
-                })
-
-        liste_courses = []
-        try:
-            liste_courses = await llm.batch_extract_ingredients(extract_plats, planning["nb_personnes"])
-        except Exception as e:
-            logger.warning(f"Batch échoué ({e}), extraction individuelle...")
-            collected = []
-            for plat in extract_plats:
-                try:
-                    d = await llm.extract_ingredients(plat["nom_recette"], plat.get("url", ""), planning["nb_personnes"])
-                    collected.extend(d.get("ingredients", []))
-                except Exception as e:
-                    logger.warning(f"Extraction ingrédients échouée pour {plat.get('nom_recette','?')}: {e}")
-            liste_courses = collected
-        # Normalisation/fusion déterministe (dédup + addition par nom+unité),
-        # y compris pour nettoyer d'éventuels doublons de la sortie du batch LLM.
-        liste_courses = merge_ingredients(liste_courses)
+        # Ingrédients ANCRÉS sur le cache DB (pas d'extraction LLM à l'aveugle),
+        # mis à l'échelle selon le nb de personnes de chaque jour.
+        per_day = _per_day_list(planning, planning_data)
+        collected, non_enrichis = await _collect_shopping(
+            plats, per_day, planning["nb_personnes"],
+        )
+        # Fusion déterministe (dédup + addition par nom+unité, union des recettes).
+        liste_courses = merge_ingredients(collected)
 
         # Ajouter les ingrédients forcés
         force = planning.get("ingredients_force", "")
         if force:
             for f in [i.strip() for i in force.split(",") if i.strip()]:
                 if f.lower() not in {i["nom"].lower() for i in liste_courses}:
-                    liste_courses.append({"nom": f, "quantite": "", "unite": ""})
+                    liste_courses.append({"nom": f, "quantite": "", "unite": "", "recettes": []})
 
         # Rayon de magasin pour chaque ingrédient (pour le groupement à l'affichage)
         for it in liste_courses:
@@ -899,7 +943,11 @@ async def generate_shopping(planning_id: int, request: Request):
         planning_data["liste_courses"] = liste_courses
         await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
 
-        return {"success": True, "liste_courses": liste_courses}
+        return {
+            "success": True,
+            "liste_courses": liste_courses,
+            "non_enrichis": sorted(set(non_enrichis)),
+        }
 
     except Exception as e:
         logger.exception("Erreur génération liste courses")
@@ -1220,34 +1268,13 @@ async def api_update_meal(
         if r:
             _apply_recipe_info(target, r)
 
-        # Regénérer la liste de courses. On privilégie le cache local pour
-        # chaque plat ; on n'appelle le LLM que pour les recettes sans cache
-        # (typiquement uniquement le plat qui vient d'être remplacé).
-        nb_personnes = planning.get("nb_personnes", 4)
-        collected: list[dict] = []
-
-        for plat in plats:
-            nid = plat.get("notion_id", "")
-            cached = await db.get_enriched(nid) if nid else None
-            if cached and cached.get("ingredients"):
-                try:
-                    collected.extend(json.loads(cached["ingredients"]))
-                    continue
-                except (json.JSONDecodeError, TypeError) as e:
-                    logger.debug(f"Cache ingrédients illisible pour {nid}: {e}")
-            # Pas de cache → extraction LLM, puis mise en cache
-            try:
-                ingredients_data = await llm.extract_ingredients(
-                    plat["nom_recette"], plat.get("url", ""), nb_personnes,
-                )
-                ings = ingredients_data.get("ingredients", [])
-                collected.extend(ings)
-                if nid and ings:
-                    await db.save_enriched(nid, plat["nom_recette"], ingredients=json.dumps(ings))
-            except Exception as e:
-                logger.warning(f"Extraction ingrédients échouée pour {plat['nom_recette']}: {e}")
-
-        # Fusion déterministe (dédup + addition par nom+unité)
+        # Regénérer la liste de courses, ANCRÉE sur le cache DB (mêmes règles
+        # que /generate-shopping : pas d'extraction LLM à l'aveugle, mise à
+        # l'échelle par jour, titre de recette par ingrédient).
+        per_day = _per_day_list(planning, planning_data)
+        collected, _ = await _collect_shopping(
+            plats, per_day, planning.get("nb_personnes", 4),
+        )
         liste_courses = merge_ingredients(collected)
         for it in liste_courses:
             it["rayon"] = categorize(it.get("nom", ""))
