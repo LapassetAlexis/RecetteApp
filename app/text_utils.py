@@ -61,18 +61,75 @@ def clean_recipe_title(name: str) -> str:
     return normalize_title_case(s.strip())
 
 
+# Repli d'accents 1:1 (préserve les indices, contrairement à NFD) pour
+# reconnaître les unités quelle que soit la casse/accentuation.
+_ACCENT_FOLD = str.maketrans(
+    "àâäáãéèêëíìîïóòôöõúùûüçñ",
+    "aaaaaeeeeiiiiooooouuuucn",
+)
+
+# Unités canoniques ← variantes. Ordre = longueur décroissante (le regex teste
+# les formes longues avant les courtes). L'unité doit être suivie d'un espace ou
+# d'une fin (lookahead) pour ne pas manger un mot (« lardons », « cassonade »...).
+_UNIT_PATTERNS: list[tuple[str, str]] = [
+    ("c. à s.", r"cuilleres?\s+a\s+soupe|cuil\.?\s+a\s+soupe|c\.?\s*a\.?\s*s\.?|cas|cs"),
+    ("c. à c.", r"cuilleres?\s+a\s+cafe|cuil\.?\s+a\s+cafe|c\.?\s*a\.?\s*c\.?|cac|cc"),
+    ("kg", r"kilogrammes?|kilos?|kg"),
+    ("mg", r"mg"),
+    ("g", r"grammes?|grs?|g"),
+    ("cl", r"cl"),
+    ("ml", r"ml"),
+    ("l", r"litres?|l"),
+    ("pincée", r"pincees?"),
+    ("gousse", r"gousses?"),
+    ("tranche", r"tranches?"),
+    ("feuille", r"feuilles?"),
+    ("sachet", r"sachets?"),
+    ("boîte", r"boites?"),
+    ("pièce", r"pieces?"),
+    ("verre", r"verres?"),
+    ("brin", r"brins?"),
+    ("botte", r"bottes?"),
+    ("bouquet", r"bouquets?"),
+    ("poignée", r"poignees?"),
+    ("pot", r"pots?"),
+    ("boule", r"boules?"),
+]
+# Un regex par unité (testés dans l'ordre = longues formes d'abord).
+_UNIT_LOOKUP = [(re.compile(r"^(?:" + p + r")(?=\s|$)", re.IGNORECASE), canon)
+                for canon, p in _UNIT_PATTERNS]
+
+# Mots de liaison à retirer en tête du nom après l'unité (« 700 g DE farine »).
+_CONNECTOR_RE = re.compile(r"^(?:de\s+|d['’]\s*|des\s+|du\s+)", re.IGNORECASE)
+
+
+def _match_unit(rest: str) -> tuple[str, str]:
+    """(unité canonique, nom restant) si `rest` commence par une unité connue,
+    sinon ("", rest). Insensible casse/accents, préserve la casse du nom."""
+    folded = rest.lower().translate(_ACCENT_FOLD)
+    for rx, canon in _UNIT_LOOKUP:
+        m = rx.match(folded)
+        if m:
+            name = rest[m.end():].lstrip()
+            name = _CONNECTOR_RE.sub("", name).strip()
+            if name:  # sinon l'« unité » était en fait le nom (ex. « Litre »)
+                return canon, name
+    return "", rest
+
+
 def parse_ingredient_line(line: str) -> dict | None:
-    """Transforme une ligne en {quantite, nom} en PRÉSERVANT le libellé source.
+    """Transforme une ligne en {nom, quantite, unite} NORMALISÉ (en amont).
 
-    On extrait seulement le nombre de tête (pour pouvoir scaler les portions) et
-    on garde TOUT le reste tel quel comme libellé — pas de découpe d'unité (qui
-    cassait « cuillère à café », « d'épinards »...). `unite` reste vide.
+    Extrait la quantité de tête, reconnaît l'unité (dictionnaire canonique,
+    insensible casse/accents) et retire le mot de liaison « de/d'/du ». Ce qui
+    reste est le nom propre — plus d'unité qui fuit dans le libellé.
 
-    "700 g d'épinards"                 -> {quantite:"700", nom:"g d'épinards", unite:""}
-    "1/2 cuillère à café de fond ..."  -> {quantite:"1/2", nom:"cuillère à café de fond ...", unite:""}
-    "4 œufs"                           -> {quantite:"4", nom:"œufs", unite:""}
-    "Sel, poivre"                      -> {quantite:"", nom:"Sel, poivre", unite:""}
-    "farine : 200 g" (legacy)          -> {quantite:"200", nom:"farine", unite:"g"}
+    "700 g d'épinards"                 -> {nom:"épinards", quantite:"700", unite:"g"}
+    "1/2 cuillère à café de fond ..."  -> {nom:"fond ...", quantite:"1/2", unite:"c. à c."}
+    "Cs huile"                         -> {nom:"huile", quantite:"", unite:"c. à s."}
+    "4 œufs"                           -> {nom:"œufs", quantite:"4", unite:""}
+    "Sel, poivre"                      -> {nom:"Sel, poivre", quantite:"", unite:""}
+    "farine : 200 g" (legacy)          -> {nom:"farine", quantite:"200", unite:"g"}
     """
     s = line.strip().lstrip("-•*–").strip()
     if not s:
@@ -82,14 +139,60 @@ def parse_ingredient_line(line: str) -> dict | None:
         nom, _, rest = s.partition(" : ")
         m = re.match(r"^([\d.,/]+)\s*(.*)$", rest.strip())
         if m:
-            return {"nom": nom.strip(), "quantite": m.group(1).replace(",", "."), "unite": m.group(2).strip()}
+            unite, _ = _match_unit(m.group(2).strip()) if m.group(2).strip() else ("", "")
+            return {"nom": nom.strip(), "quantite": m.group(1).replace(",", "."),
+                    "unite": unite or m.group(2).strip()}
         return {"nom": nom.strip(), "quantite": "", "unite": ""}
-    # Format source "quantité <libellé>" : on garde le libellé intact.
-    # \s* (et non \s+) pour gérer le nombre collé à l'unité ("200g de pâtes").
+    # Format source "quantité unité nom". \s* pour gérer "200g de pâtes".
     m = re.match(r"^([\d]+(?:[.,/]\d+)?)\s*(.*)$", s)
     if m and m.group(2).strip():
-        return {"nom": m.group(2).strip(), "quantite": m.group(1).replace(",", "."), "unite": ""}
-    return {"nom": s, "quantite": "", "unite": ""}
+        qty, rest = m.group(1).replace(",", "."), m.group(2).strip()
+    else:
+        qty, rest = "", s
+    unite, nom = _match_unit(rest)
+    return {"nom": nom, "quantite": qty, "unite": unite}
+
+
+# Séparateurs de listes de condiments (« sel, poivre », « sel et poivre »).
+_CONDIMENT_SPLIT_RE = re.compile(r"\s*(?:,|\+|&|\bet\b)\s*", re.IGNORECASE)
+
+
+def _split_condiments(nom: str) -> list[str]:
+    """Éclate une ligne d'assaisonnements en items simples.
+
+    « Sel, poivre » -> ["Sel", "poivre"] ; « Sel et poivre » -> [...]. Ne
+    s'applique que si aucun chiffre et si chaque morceau reste court (≤3 mots),
+    pour ne pas casser « poulet à la crème et estragon » ni « farine, tamisée »
+    quantifiée.
+    """
+    if any(c.isdigit() for c in nom):
+        return [nom]
+    parts = [p.strip(" .").strip() for p in _CONDIMENT_SPLIT_RE.split(nom)]
+    parts = [p for p in parts if p]
+    if len(parts) >= 2 and all(len(p.split()) <= 3 for p in parts):
+        return parts
+    return [nom]
+
+
+def normalize_cached_ingredient(ing: dict) -> list[dict]:
+    """Re-normalise un ingrédient (possiblement issu d'un ancien cache « sale »)
+    et éclate les listes de condiments. Idempotent sur une entrée déjà propre.
+
+    Reconstruit la ligne « qty unite nom » puis la re-parse (corrige les unités
+    qui avaient fui dans le nom), puis éclate si ni quantité ni unité."""
+    line = " ".join(p for p in (
+        str(ing.get("quantite", "") or "").strip(),
+        (ing.get("unite", "") or "").strip(),
+        (ing.get("nom", "") or "").strip(),
+    ) if p)
+    parsed = parse_ingredient_line(line)
+    if not parsed or not parsed["nom"]:
+        return []
+    if not parsed["quantite"] and not parsed["unite"]:
+        parts = _split_condiments(parsed["nom"])
+        if len(parts) > 1:
+            return [{"nom": p, "quantite": "", "unite": ""} for p in parts]
+    return [parsed]
 
 
 def split_instructions(text: str) -> list[str]:
