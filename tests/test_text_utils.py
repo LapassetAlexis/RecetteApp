@@ -1,8 +1,8 @@
 """Tests du nettoyage des titres de recettes."""
 
 from app.text_utils import (
-    clean_recipe_title, merge_ingredients, normalize_title_case,
-    parse_ingredient_line, split_instructions,
+    clean_recipe_title, merge_ingredients, normalize_cached_ingredient,
+    normalize_title_case, parse_ingredient_line, split_instructions,
 )
 
 
@@ -42,17 +42,45 @@ def test_split_instructions_empty():
 
 
 def test_parse_ingredient_line():
-    # On extrait seulement la quantité de tête ; le libellé source reste intact.
-    assert parse_ingredient_line("700 g d'épinards") == {"nom": "g d'épinards", "quantite": "700", "unite": ""}
+    # Normalisation en amont : quantité + unité canonique extraites, nom propre.
+    assert parse_ingredient_line("700 g d'épinards") == {"nom": "épinards", "quantite": "700", "unite": "g"}
     assert parse_ingredient_line("1/2 cuillère à café de fond de volaille") == {
-        "nom": "cuillère à café de fond de volaille", "quantite": "1/2", "unite": ""}
+        "nom": "fond de volaille", "quantite": "1/2", "unite": "c. à c."}
     assert parse_ingredient_line("4 œufs") == {"nom": "œufs", "quantite": "4", "unite": ""}
     # nombre collé à l'unité ("200g")
-    assert parse_ingredient_line("200g de pâtes courtes") == {"nom": "g de pâtes courtes", "quantite": "200", "unite": ""}
-    assert parse_ingredient_line("80g de roquette") == {"nom": "g de roquette", "quantite": "80", "unite": ""}
+    assert parse_ingredient_line("200g de pâtes courtes") == {"nom": "pâtes courtes", "quantite": "200", "unite": "g"}
+    assert parse_ingredient_line("80g de roquette") == {"nom": "roquette", "quantite": "80", "unite": "g"}
+    # abréviations d'unité normalisées, même sans quantité
+    assert parse_ingredient_line("Cs huile") == {"nom": "huile", "quantite": "", "unite": "c. à s."}
+    assert parse_ingredient_line("2 CaS de crème") == {"nom": "crème", "quantite": "2", "unite": "c. à s."}
+    assert parse_ingredient_line("1 gousse d'ail") == {"nom": "ail", "quantite": "1", "unite": "gousse"}
+    # pas d'unité → nom intact (ne pas manger un mot qui commence comme une unité)
+    assert parse_ingredient_line("cassonade") == {"nom": "cassonade", "quantite": "", "unite": ""}
+    assert parse_ingredient_line("lardons") == {"nom": "lardons", "quantite": "", "unite": ""}
     assert parse_ingredient_line("Sel, poivre") == {"nom": "Sel, poivre", "quantite": "", "unite": ""}
     assert parse_ingredient_line("farine : 200 g") == {"nom": "farine", "quantite": "200", "unite": "g"}
     assert parse_ingredient_line("   ") is None
+
+
+def test_normalize_cached_ingredient_fixes_leaked_unit():
+    # Ancien cache « sale » : l'unité avait fui dans le nom.
+    assert normalize_cached_ingredient({"nom": "G de farine complète", "quantite": "250", "unite": ""}) == \
+        [{"nom": "farine complète", "quantite": "250", "unite": "g"}]
+    assert normalize_cached_ingredient({"nom": "Cs huile", "quantite": "0.75", "unite": ""}) == \
+        [{"nom": "huile", "quantite": "0.75", "unite": "c. à s."}]
+    # déjà propre → idempotent
+    assert normalize_cached_ingredient({"nom": "épinards", "quantite": "700", "unite": "g"}) == \
+        [{"nom": "épinards", "quantite": "700", "unite": "g"}]
+
+
+def test_normalize_cached_ingredient_splits_condiments():
+    assert normalize_cached_ingredient({"nom": "Sel, poivre.", "quantite": "", "unite": ""}) == \
+        [{"nom": "Sel", "quantite": "", "unite": ""}, {"nom": "poivre", "quantite": "", "unite": ""}]
+    assert normalize_cached_ingredient({"nom": "Sel et poivre", "quantite": "", "unite": ""}) == \
+        [{"nom": "Sel", "quantite": "", "unite": ""}, {"nom": "poivre", "quantite": "", "unite": ""}]
+    # ne casse pas un nom composé long
+    assert normalize_cached_ingredient({"nom": "Poivre du moulin", "quantite": "", "unite": ""}) == \
+        [{"nom": "Poivre du moulin", "quantite": "", "unite": ""}]
 
 
 def test_strip_site_suffix_dash():

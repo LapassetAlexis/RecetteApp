@@ -23,7 +23,7 @@ from app.llm_client import LLMClient
 from app.notion_client import NotionClient
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.nutrition import estimate_nutrition
-from app.text_utils import clean_recipe_title, merge_ingredients, normalize_title_case, parse_ingredient_line, scale_ingredients, split_instructions
+from app.text_utils import clean_recipe_title, merge_ingredients, normalize_cached_ingredient, normalize_title_case, parse_ingredient_line, scale_ingredients, split_instructions
 
 VERSION = "1.1.0"
 
@@ -528,8 +528,13 @@ async def _collect_shopping(
         if not ings:
             non_enrichis.append(title or src.get("nom_recette", ""))
             continue
+        # Factorisation en aval : re-normalise (unités qui avaient fui dans le
+        # nom sur d'anciens caches) et éclate les listes de condiments.
+        clean: list[dict] = []
+        for ing in ings:
+            clean.extend(normalize_cached_ingredient(ing))
         factor = _persons_for(src) / BASE_SERVINGS
-        for ing in scale_ingredients(ings, factor):
+        for ing in scale_ingredients(clean, factor):
             ing["recette"] = title
             collected.append(ing)
     return collected, non_enrichis
