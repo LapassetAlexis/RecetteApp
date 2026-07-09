@@ -197,9 +197,11 @@ document.getElementById('btn-analyze')?.addEventListener('click', async function
         if (d.error) { status.textContent = '❌ ' + d.error; btn.disabled = false; btn.textContent = '🔍 Analyser'; return; }
         fillForm(d, url);
         showForm();
-        status.textContent = d.source === 'jsonld'
-            ? '✅ Données extraites de la fiche recette (exactes) — vérifie et ajoute !'
-            : '✅ Analyse terminée (approximative, par IA) — vérifie bien et ajuste !';
+        status.textContent = d.source === 'error'
+            ? '⚠️ Extraction automatique indisponible (IA) — saisis les infos à la main.'
+            : d.source === 'jsonld'
+                ? '✅ Données extraites de la fiche recette (exactes) — vérifie et ajoute !'
+                : '✅ Analyse terminée (approximative, par IA) — vérifie bien et ajuste !';
     } catch(e) {
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '🔍 Analyser';
@@ -222,7 +224,9 @@ document.getElementById('btn-structure')?.addEventListener('click', async functi
         if (d.error) { status.textContent = '❌ ' + d.error; btn.disabled = false; btn.textContent = '✨ Structurer'; return; }
         fillForm(d, '');
         showForm();
-        status.textContent = '✅ Texte structuré par IA — vérifie bien et ajuste !';
+        status.textContent = d.source === 'error'
+            ? '⚠️ Structuration automatique indisponible (IA) — saisis les infos à la main.'
+            : '✅ Texte structuré par IA — vérifie bien et ajuste !';
     } catch(e) {
         status.textContent = '❌ Erreur réseau';
         btn.disabled = false; btn.textContent = '✨ Structurer';
