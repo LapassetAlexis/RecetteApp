@@ -901,3 +901,127 @@ def test_free_meal_creneau_introuvable(client, monkeypatch):
         "jour": 1, "moment": "soir", "nom": "Test", "ingredients": ""})
     assert resp.json().get("error")
     assert appels["create"] == 0  # aucune page Notion orpheline
+
+
+def _brique_mocks(monkeypatch):
+    """Prépare les mocks partagés des tests brique : catalogue Notion minimal,
+    génération d'un planning 1 jour, capture de create_recipe/update_ingredients.
+    Renvoie (created, ings_ecrits) pour inspection. Le cache DB reste RÉEL."""
+    async def _all():
+        return [_recipe("Poulet"), _recipe("Soupe")]
+    async def _gen(**kw):
+        return [
+            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
+            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
+        ]
+    created = {}
+    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="", base=None):
+        created["nom"] = nom
+        created["nature"] = nature
+        created["base"] = base
+        created["repas"] = repas
+        return {"id": "brique1", "url": "https://notion.so/brique1"}
+    ings_ecrits = {}
+    async def _upd_ings(page_id, text):
+        ings_ecrits["page_id"] = page_id
+        ings_ecrits["text"] = text
+        return {}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+    monkeypatch.setattr(main.notion, "update_ingredients", _upd_ings)
+    return created, ings_ecrits
+
+
+def test_brique_plat_creates_and_places(client, monkeypatch):
+    """Quick-create brique en slot plat : crée une recette Nature=Ingrédient +
+    Base, avec pour ingrédient elle-même, la place et l'inclut dans les courses."""
+    import asyncio
+    created, ings_ecrits = _brique_mocks(monkeypatch)
+
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    resp = client.post(f"/api/brique/{pid}", json={
+        "jour": 1, "moment": "soir", "slot": "plat",
+        "nom": "Riz", "base": ["Féculent"], "quantite": "100", "unite": "g",
+    })
+    data = resp.json()
+    assert data.get("success")
+
+    # create_recipe a bien reçu Nature=Ingrédient + la Base, sans repas forcé.
+    assert created["nom"] == "Riz"
+    assert created["nature"] == "Ingrédient"
+    assert created["base"] == ["Féculent"]
+    assert not created["repas"]
+    # L'ingrédient écrit = la brique elle-même.
+    assert ings_ecrits["page_id"] == "brique1"
+    assert "riz" in ings_ecrits["text"].lower()
+
+    # Placée dans le créneau, avec sa nature/base reportées.
+    soir = next(p for p in data["plats"] if p["jour"] == 1 and p["moment"] == "soir")
+    assert soir["nom_recette"] == "Riz"
+    assert soir["notion_id"] == "brique1"
+    assert soir["nature"] == "Ingrédient"
+    assert soir["base"] == ["Féculent"]
+
+    # Présente dans la liste de courses.
+    noms = {i["nom"].lower() for i in data["liste_courses"]}
+    assert "riz" in noms
+
+    # Persistée dans le planning enregistré.
+    p = asyncio.run(main.db.get_planning_with_recipes(pid))
+    assert "Riz" in {r["recipe_name"] for r in p["recipes"]}
+
+
+def test_brique_accompagnement_creates_and_places(client, monkeypatch):
+    """Quick-create brique en slot accompagnement : placée comme side du repas."""
+    created, ings_ecrits = _brique_mocks(monkeypatch)
+
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    resp = client.post(f"/api/brique/{pid}", json={
+        "jour": 1, "moment": "midi", "slot": "accompagnement",
+        "nom": "Brocolis", "base": ["Légume"], "quantite": "200", "unite": "g",
+    })
+    data = resp.json()
+    assert data.get("success")
+
+    assert created["nature"] == "Ingrédient"
+    assert created["base"] == ["Légume"]
+
+    # La brique est posée comme accompagnement (pas comme plat).
+    midi = next(p for p in data["plats"] if p["jour"] == 1 and p["moment"] == "midi")
+    assert midi["nom_recette"] == "Poulet"  # plat inchangé
+    acc = midi["accompagnement"]
+    assert acc and acc["nom_recette"] == "Brocolis"
+    assert acc["notion_id"] == "brique1"
+    assert acc["base"] == ["Légume"]
+
+    # Ses ingrédients figurent dans la liste de courses.
+    noms = {i["nom"].lower() for i in data["liste_courses"]}
+    assert "brocolis" in noms
+
+
+def test_brique_creneau_introuvable(client, monkeypatch):
+    """Créneau inexistant → erreur, aucune recette brique créée."""
+    async def _all():
+        return [_recipe("Poulet")]
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"}]
+    appels = {"create": 0}
+    async def _create(**kw):
+        appels["create"] += 1
+        return {"id": "x"}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    # jour 1 soir n'existe pas dans ce planning
+    resp = client.post(f"/api/brique/{pid}", json={
+        "jour": 1, "moment": "soir", "slot": "plat", "nom": "Riz", "base": ["Féculent"]})
+    assert resp.json().get("error")
+    assert appels["create"] == 0  # pas de page Notion orpheline

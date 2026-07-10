@@ -18,8 +18,15 @@
     <form method="POST" action="/recette/{{ recette.id }}/enrichir" class="card" id="enrich-form">
         <input type="hidden" name="nutrition_json" value="{{ nutrition_json }}">
         <input type="hidden" name="duree_minutes" value="{{ duree_minutes or 0 }}">
-        <!-- Nature : pas de champ visible pour l'instant (défaut Recette). -->
-        <input type="hidden" name="nature" value="{{ recette.nature or 'Recette' }}">
+        <div class="form-g">
+            <label>🧬 Nature</label>
+            <div class="tag-group-chips">
+                {% for opt in nature_options %}
+                <label class="tgl"><input type="radio" name="nature" value="{{ opt }}" {% if opt == (recette.nature or 'Recette') %}checked{% endif %}><span>{{ opt }}</span></label>
+                {% endfor %}
+            </div>
+            <small class="muted-sm">Une « brique » (Ingrédient : steak, œuf, riz…) se classe surtout par sa Base ; le Type peut rester vide.</small>
+        </div>
 
         <div class="form-g">
             <label for="nom">📝 Nom de la recette</label>
