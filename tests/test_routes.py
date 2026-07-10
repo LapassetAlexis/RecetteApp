@@ -49,6 +49,8 @@ def test_recettes_lists(client, monkeypatch):
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
     r = client.get("/recettes")
     assert r.status_code == 200 and "Tarte" in r.text and "Curry" in r.text
+    assert 'data-filter="nature"' in r.text          # filtre Nature présent
+    assert 'data-nature="Recette"' in r.text          # nature portée par les cartes
 
 
 def test_rate_valid_and_invalid(client, monkeypatch):
