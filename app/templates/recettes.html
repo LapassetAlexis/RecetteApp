@@ -77,7 +77,7 @@
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
     <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-nature="{{ recette.nature or 'Recette' }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-base="{{ recette.base|join('|') }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
-        {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
+        {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% else %}<div class="recipe-img recipe-img-ph" aria-hidden="true">🍽️</div>{% endif %}
         <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
             {% if recette.duree %}
