@@ -1192,6 +1192,54 @@ def test_generer_repas_simples(client, monkeypatch):
     assert {"steak", "saumon"} <= noms_courses       # protéines des 2 repas simples
 
 
+def test_generer_repas_simples_groupes_meme_assiette(client, monkeypatch):
+    """Deux midis SIMPLES du même groupe partagent la MÊME assiette."""
+    import asyncio
+
+    async def _all():
+        return [
+            _recipe("Plat A", id="a"), _recipe("Plat B", id="b"),
+            _brique("Steak", "Viande"), _brique("Saumon", "Poisson"),
+            _brique("Riz", "Féculent"), _brique("Pâtes", "Féculent"),
+            _brique("Brocoli", "Légume"), _brique("Carottes", "Légume"),
+        ]
+
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Plat A", "type_repas": "Plat"},
+                {"jour": 2, "moment": "midi", "nom_recette": "Plat B", "type_repas": "Plat"}]
+
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    # Grille : lun + mar midi, même groupe (1), type simple ; tout le reste absent.
+    meals = []
+    for d in range(1, 8):
+        for m in ("midi", "soir"):
+            simple = d in (1, 2) and m == "midi"
+            case = {"jour": d, "moment": m, "persons": 2 if simple else 0,
+                    "type": "simple" if simple else "recette"}
+            if m == "midi":
+                case["group"] = 1  # même groupe pour tous les midis
+            meals.append(case)
+
+    pid = int(client.post("/generer", data={
+        "week_start": "2026-01-05", "saison": "Hiver", "meals": json.dumps(meals),
+    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    data = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])
+    midis = {p["jour"]: p for p in data["plats"] if p["moment"] == "midi"}
+    assert 1 in midis and 2 in midis
+    # même protéine ET mêmes accompagnements (même assiette, groupe partagé)
+    assert midis[1]["nom_recette"] == midis[2]["nom_recette"]
+    accs1 = [a["nom_recette"] for a in midis[1]["accompagnements"]]
+    accs2 = [a["nom_recette"] for a in midis[2]["accompagnements"]]
+    assert accs1 == accs2 and len(accs1) == 2
+
+
 def test_generer_repas_simples_briques_insuffisantes(client, monkeypatch):
     """Pas assez de briques → bannière briques_manquantes présente."""
     import asyncio
