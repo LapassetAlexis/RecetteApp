@@ -48,6 +48,7 @@
 {% macro meal_inner(run, moment, plat, daylabel) %}
     <div class="meal-head">
         <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}"> <span class="meal-tag">{{ daylabel }}</span></label>
+        {% if plat.persons %}<span class="meal-pers" title="Personnes pour ce repas">👤 {{ plat.persons }}</span>{% endif %}
         <button class="meal-ch" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
     </div>
     {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
