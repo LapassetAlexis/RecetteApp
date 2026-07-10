@@ -112,6 +112,13 @@ TAG_OPTIONS = [
     "Salade",
     "Quiche/tarte",
     "Tartines",
+    "Gratin",
+    "Wok",
+    "Burger",
+    "Pâtes",
+    "Sandwich",
+    "Pizza",
+    "Bowl",
     "Diet",
     "Végétarien",
     "Fun",
@@ -142,7 +149,8 @@ SAISON_TAGS = ["Printemps", "Été", "Automne", "Hiver"]
 # Doit couvrir l'ensemble de TAG_OPTIONS (l'ingrédient principal est désormais
 # la propriété Base, et le moment la propriété Moment — plus des tags).
 TAG_GROUPS = [
-    {"label": "🍽️ Type de plat", "tags": ["Soupe", "Salade", "Quiche/tarte", "Tartines"]},
+    {"label": "🍽️ Type de plat", "tags": ["Soupe", "Salade", "Quiche/tarte", "Tartines",
+                                           "Gratin", "Wok", "Burger", "Pâtes", "Sandwich", "Pizza", "Bowl"]},
     {"label": "🥗 Régime", "tags": ["Diet", "Végétarien"]},
     {"label": "👥 Occasion", "tags": ["Fun", "Invités", "Sur le pouce", "1 personne"]},
     {"label": "⏱️ Effort", "tags": ["Rapide", "Mijoté"]},
