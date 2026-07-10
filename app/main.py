@@ -17,7 +17,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import REPAS_OPTIONS, TAG_GROUPS, TAG_OPTIONS, recipe_types, settings
+from app.config import (
+    BASE_OPTIONS,
+    NATURE_OPTIONS,
+    REPAS_OPTIONS,
+    TAG_GROUPS,
+    TAG_OPTIONS,
+    recipe_base,
+    recipe_nature,
+    recipe_types,
+    settings,
+)
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
@@ -180,6 +190,8 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["url"] = r.get("url", "")
     plat["notion_url"] = r.get("notion_url", "")
     plat["repas"] = r.get("repas", [])
+    plat["base"] = r.get("base", [])
+    plat["nature"] = recipe_nature(r)
     plat["tags"] = r.get("tags", [])
 
 
@@ -460,9 +472,10 @@ async def liste_recettes(request: Request):
         logger.warning(f"Lecture cache recettes échouée: {e}")
         ings_by_id, duree_by_id = {}, {}
 
-    # Stats pour les filtres (type / état / tag)
+    # Stats pour les filtres (type / base / état / tag)
     total = len(recettes)
     par_type: dict[str, int] = {}
+    par_base: dict[str, int] = {}
     par_etat: dict[str, int] = {}
     par_tag: dict[str, int] = {}
     for r in recettes:
@@ -471,6 +484,8 @@ async def liste_recettes(request: Request):
         types = recipe_types(r) or ["Non classé"]
         for t in types:
             par_type[t] = par_type.get(t, 0) + 1
+        for b in recipe_base(r):
+            par_base[b] = par_base.get(b, 0) + 1
         if r["etat"]:
             par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1
         for t in r["tags"]:
@@ -483,10 +498,12 @@ async def liste_recettes(request: Request):
             "recettes": recettes,
             "total": total,
             "par_type": sorted(par_type.items()),
+            "par_base": sorted(par_base.items(), key=lambda kv: -kv[1]),
             "par_etat": sorted(par_etat.items()),
             "par_tag": sorted(par_tag.items(), key=lambda kv: -kv[1]),  # tags par fréquence
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            "base_options": BASE_OPTIONS,
         },
     )
 
@@ -691,6 +708,7 @@ async def enrichir_page(request: Request, page_id: str, url: str = ""):
             "duree_minutes": duree_minutes,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            "base_options": BASE_OPTIONS,
             "source_url": source_url,
             "needs_url": needs_url,
         },
@@ -704,6 +722,8 @@ async def enrichir_submit(
     nom: str = Form(""),
     repas: list[str] = Form([]),
     tags: list[str] = Form([]),
+    base: list[str] = Form([]),
+    nature: str = Form("Recette"),
     ingredients_text: str = Form(""),
     steps: list[str] = Form([]),
     image_url: str = Form(""),
@@ -767,7 +787,8 @@ async def enrichir_submit(
         await _etape("instructions", notion.rewrite_recipe_body(page_id, instructions_text))
     if image_url:
         await _etape("image", notion.update_image(page_id, image_url))
-    await _etape("type/tags", notion.update_recipe_meta(page_id, repas=repas, tags=tags or None))
+    await _etape("type/tags/base", notion.update_recipe_meta(
+        page_id, repas=repas, tags=tags or None, nature=nature, base=base))
 
     if echecs:
         # Au moins une écriture Notion a échoué : on NE redirige PAS en succès.
@@ -783,6 +804,8 @@ async def enrichir_submit(
         recette["nom"] = nom_norm
         recette["repas"] = repas or []
         recette["tags"] = tags or []
+        recette["base"] = base or []
+        recette["nature"] = nature or "Recette"
         return templates.TemplateResponse(
             "enrichir.html",
             {
@@ -795,6 +818,7 @@ async def enrichir_submit(
                 "duree_minutes": duree_minutes,
                 "repas_options": REPAS_OPTIONS,
                 "tag_options": TAG_OPTIONS,
+                "base_options": BASE_OPTIONS,
                 "source_url": source_url,
                 "needs_url": not recette.get("url"),
                 "error": msg,
@@ -826,6 +850,7 @@ async def ajouter_page(request: Request):
             "request": request,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            "base_options": BASE_OPTIONS,
             "success": None,
             "error": None,
         },
@@ -900,10 +925,15 @@ async def generer(
     try:
         # 1. Récupérer toutes les recettes Notion
         recettes = await notion.get_all_recipes()
+        # On garde les recettes utilisables au menu : plats/entrées, ou
+        # accompagnements (Base = Légume). On exclut les briques (Nature =
+        # Ingrédient). Les recettes sans type restent éligibles.
         recettes = [
             r for r in recettes
-            if not recipe_types(r)
-            or set(recipe_types(r)) & {"Plat", "Entrée", "Accompagnement", "Légume"}
+            if recipe_nature(r) == "Recette"
+            and (not recipe_types(r)
+                 or set(recipe_types(r)) & {"Plat", "Entrée"}
+                 or "Légume" in recipe_base(r))
         ]
 
         if not recettes:
@@ -1232,6 +1262,7 @@ async def api_analyze_url(request: Request):
             "nom": info.get("nom", ""),
             "repas": info.get("type_repas", ""),
             "tags": info.get("tags", []),
+            "base": info.get("base", []),
             "ingredients": ingredients,
             "instructions": info.get("instructions", ""),
             "image_url": info.get("image_url", ""),
@@ -1261,6 +1292,7 @@ async def api_analyze_text(request: Request):
             "nom": info.get("nom", ""),
             "repas": info.get("type_repas", ""),
             "tags": info.get("tags", []),
+            "base": info.get("base", []),
             "ingredients": ingredients,
             "instructions": info.get("instructions", ""),
             "image_url": "",
@@ -1433,6 +1465,8 @@ async def ajouter_recette(
     nom: str = Form(""),
     repas: list[str] = Form([]),
     tags: list[str] = Form([]),
+    base: list[str] = Form([]),
+    nature: str = Form("Recette"),
     moment: str = Form(""),
     ingredients_manual: str = Form(""),
     steps: list[str] = Form([]),
@@ -1452,6 +1486,8 @@ async def ajouter_recette(
                 repas = [extracted["type_repas"]]
             if not tags:
                 tags = extracted.get("tags", [])
+            if not base:
+                base = extracted.get("base", [])
         elif not nom:
             error = "Il faut au moins un nom ou une URL."
         else:
@@ -1465,6 +1501,8 @@ async def ajouter_recette(
                 repas=repas,
                 tags=tags,
                 moment=moment,
+                nature=nature,
+                base=base,
             )
             page_id = result.get("id", "")
             recette_url = result.get("url", "")
@@ -1518,6 +1556,7 @@ async def ajouter_recette(
             "error": error,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
+            "base_options": BASE_OPTIONS,
         },
     )
 
@@ -1536,11 +1575,13 @@ async def api_alternatives(planning_id: int):
         # Toutes les recettes Notion
         recettes = await notion.get_all_recipes()
         alternatives = [
-            {"nom": r["nom"], "repas": recipe_types(r), "tags": r["tags"]}
+            {"nom": r["nom"], "repas": recipe_types(r), "base": recipe_base(r), "tags": r["tags"]}
             for r in recettes
             if r["nom"] not in used_names
+            and recipe_nature(r) == "Recette"
             and (not recipe_types(r)
-                 or set(recipe_types(r)) & {"Plat", "Entrée", "Accompagnement", "Légume"})
+                 or set(recipe_types(r)) & {"Plat", "Entrée"}
+                 or "Légume" in recipe_base(r))
         ]
 
         return {"alternatives": alternatives}

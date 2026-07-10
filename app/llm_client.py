@@ -16,7 +16,15 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from urllib.parse import urlparse
 
-from app.config import REPAS_OPTIONS, TAG_OPTIONS, recipe_types, settings
+from app.config import (
+    BASE_OPTIONS,
+    REPAS_OPTIONS,
+    TAG_OPTIONS,
+    recipe_base,
+    recipe_nature,
+    recipe_types,
+    settings,
+)
 from app.text_utils import clean_recipe_title
 
 logger = logging.getLogger(__name__)
@@ -43,6 +51,7 @@ class RecipeExtraction(BaseModel):
     nom: str = ""
     type_repas: str = ""
     tags: list[str] = Field(default_factory=list)
+    base: list[str] = Field(default_factory=list)
     ingredients: list[str] = Field(default_factory=list)
     instructions: str = ""
 
@@ -64,7 +73,7 @@ class RecipeExtraction(BaseModel):
             return [str(x).strip() for x in v if str(x).strip()]
         return []
 
-    @field_validator("tags", mode="before")
+    @field_validator("tags", "base", mode="before")
     @classmethod
     def _coerce_tags(cls, v: Any) -> list[str]:
         if isinstance(v, list):
@@ -103,16 +112,17 @@ class IngredientsResponse(BaseModel):
 
 
 class ClassifyResponse(BaseModel):
-    """Sortie de classification type_repas + tags."""
+    """Sortie de classification type_repas + tags + base."""
     type_repas: str = ""
     tags: list[str] = Field(default_factory=list)
+    base: list[str] = Field(default_factory=list)
 
     @field_validator("type_repas", mode="before")
     @classmethod
     def _coerce_str(cls, v: Any) -> str:
         return "" if v is None else str(v)
 
-    @field_validator("tags", mode="before")
+    @field_validator("tags", "base", mode="before")
     @classmethod
     def _coerce_tags(cls, v: Any) -> list[str]:
         if isinstance(v, list):
@@ -864,8 +874,10 @@ class LLMClient:
 
     @staticmethod
     def _is_side(r: dict[str, Any]) -> bool:
-        """Recette utilisable comme accompagnement (légume / garniture)."""
-        return bool(set(recipe_types(r)) & {"Légume", "Accompagnement"})
+        """Recette utilisable comme accompagnement (garniture de légume) :
+        Base contient « Légume » et Nature = Recette (une brique « Ingrédient »
+        n'est pas un accompagnement servable tel quel)."""
+        return "Légume" in recipe_base(r) and recipe_nature(r) == "Recette"
 
     @staticmethod
     def _is_complete(r: dict[str, Any]) -> bool:
@@ -970,6 +982,7 @@ class LLMClient:
         weather = self._weather(temperature)
         mains = [r for r in recettes
                  if not self._is_side(r)
+                 and recipe_nature(r) == "Recette"
                  and (not recipe_types(r) or set(recipe_types(r)) & {"Plat", "Entrée"})]
         # Saison = filtre dur (autre saison écartée) ; météo = tri souple.
         eligibles = sorted(
@@ -1345,12 +1358,26 @@ Donne les ingrédients pour {nb_personnes} personnes, en quantités adaptées.""
         "sucre", "chocolat", "vanille", "framboise", "fraise", "caramel", "miel",
         "gâteau", "gateau", "biscuit", "compote", "confiture", "tiramisu", "crêpe",
     }
+    # Indices lexicaux pour deviner la Base (ingrédient principal). Ordre non
+    # significatif : plusieurs bases peuvent coexister (ex. viande + féculent).
+    _BASE_WORDS = {
+        "Viande": ("poulet", "boeuf", "bœuf", "porc", "veau", "jambon", "lardon",
+                   "agneau", "dinde", "canard", "saucisse", "steak", "viande"),
+        "Poisson": ("saumon", "thon", "cabillaud", "poisson", "crevette", "colin",
+                    "truite", "sardine", "merlu", "lieu", "crustac"),
+        "Œuf": ("oeuf", "œuf"),
+        "Légume": ("courgette", "épinard", "epinard", "poireau", "carotte",
+                   "tomate", "légume", "legume", "brocoli", "aubergine", "haricot"),
+        "Féculent": ("pâtes", "pates", "riz", "pomme de terre", "semoule",
+                     "quinoa", "lentille", "blé", "boulgour", "gnocchi", "polenta"),
+        "Végé": ("tofu", "pois chiche", "seitan", "tempeh"),
+    }
 
     def _keyword_guess(
         self, nom: str, ingredients: list[str], keywords: list[str],
-    ) -> tuple[str, list[str], bool, bool]:
-        """Heuristique sans LLM : (type_repas deviné, tags par mots-clés,
-        savory?, sweet?). Sert de repli ET de garde-fou contre le LLM."""
+    ) -> tuple[str, list[str], list[str], bool, bool]:
+        """Heuristique sans LLM : (type_repas deviné, tags par mots-clés, base
+        devinée, savory?, sweet?). Sert de repli ET de garde-fou contre le LLM."""
         text = (nom + " " + " ".join(ingredients[:15]) + " " + " ".join(keywords)).lower()
         savory = any(w in text for w in self._SAVORY_WORDS)
         sweet = any(w in text for w in self._SWEET_WORDS)
@@ -1368,32 +1395,38 @@ Donne les ingrédients pour {nb_personnes} personnes, en quantités adaptées.""
             t = "Plat"
         kw_lower = {k.lower() for k in keywords}
         tags = [tag for tag in TAG_OPTIONS if tag.lower() in kw_lower]
-        return t, tags, savory, sweet
+        # Détection par MOT ENTIER (\b) : « boeuf » ne doit pas déclencher « Œuf ».
+        base = [
+            b for b, words in self._BASE_WORDS.items()
+            if any(re.search(r"\b" + re.escape(w) + r"\b", text) for w in words)
+        ]
+        return t, tags, base, savory, sweet
 
     async def _classify_type_tags(
         self, nom: str, ingredients: list[str], keywords: list[str],
-    ) -> tuple[str, list[str]]:
-        """Choisit type_repas + tags parmi les valeurs Notion autorisées.
+    ) -> tuple[str, list[str], list[str]]:
+        """Choisit type_repas + tags + base parmi les valeurs Notion autorisées.
 
         Petit appel LLM (cheap) : ne touche PAS au contenu (nom/ingrédients/
         instructions restent ceux de la page), juste le classement. Un garde-fou
         lexical corrige les erreurs flagrantes (ex. cheesecake salé → pas Dessert)
-        et complète les tags manquants."""
-        guess_type, kw_tags, savory, sweet = self._keyword_guess(nom, ingredients, keywords)
+        et complète les tags/base manquants."""
+        guess_type, kw_tags, kw_base, savory, sweet = self._keyword_guess(nom, ingredients, keywords)
         ing_sample = ", ".join(ingredients[:12])
         prompt = f"""Recette : "{nom}"
 Ingrédients : {ing_sample or "inconnus"}
 Mots-clés du site : {", ".join(keywords) or "aucun"}
 
-Classe cette recette :
-- type_repas : EXACTEMENT une valeur parmi {REPAS_OPTIONS}
-- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+Classe cette recette selon TROIS dimensions distinctes :
+- type_repas (cours du repas) : EXACTEMENT une valeur parmi {REPAS_OPTIONS}
+- base (ingrédient principal) : 0 à 3 valeurs parmi {BASE_OPTIONS}
+- tags (attributs) : 0 à 4 valeurs parmi {TAG_OPTIONS}
 
-Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
+Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "base": ["..."], "tags": ["..."]}}"""
         try:
             resp: ClassifyResponse = await self._complete(
                 "", prompt, response_model=ClassifyResponse,
-                label="classify", temperature=0.0, max_tokens=150,
+                label="classify", temperature=0.0, max_tokens=180,
             )
             type_repas = resp.type_repas if resp.type_repas in REPAS_OPTIONS else ""
             # Garde-fou : un plat clairement salé ne peut pas être un Dessert.
@@ -1407,10 +1440,15 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
             for t in kw_tags:
                 if t not in tags:
                     tags.append(t)
-            return type_repas, tags[:4]
+            # Union base LLM (filtrée) + base devinée par mots-clés.
+            base = [b for b in resp.base if b in BASE_OPTIONS]
+            for b in kw_base:
+                if b not in base:
+                    base.append(b)
+            return type_repas, tags[:4], base
         except Exception as e:  # inclut LLMError : repli déterministe sur les mots-clés
             logger.warning(f"Classification échouée ({e}), repli sur mots-clés")
-            return guess_type, kw_tags[:4]
+            return guess_type, kw_tags[:4], kw_base
 
     @staticmethod
     def _parse_json(raw: str) -> dict[str, Any]:
@@ -1456,13 +1494,14 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
         ld_ings = (ld.get("ingredients") if ld else []) or scraped
         if ld and ld_ings:
             logger.info("Recette extraite via JSON-LD/scrape (exact, sans LLM pour les ingrédients)")
-            type_repas, tags = await self._classify_type_tags(
+            type_repas, tags, base = await self._classify_type_tags(
                 ld["nom"], ld_ings, ld.get("keywords", []),
             )
             return {
                 "nom": ld["nom"],
                 "type_repas": type_repas,
                 "tags": tags,
+                "base": base,
                 "ingredients": ld_ings,                    # list[str], lignes brutes
                 "instructions": ld["instructions"],
                 "image_url": ld.get("image_url") or og_image,
@@ -1481,13 +1520,14 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
                 h = None
             if h and h.get("ingredients"):
                 logger.info("Recette extraite via handler de domaine")
-                type_repas, tags = await self._classify_type_tags(
+                type_repas, tags, base = await self._classify_type_tags(
                     h.get("nom", ""), h["ingredients"], h.get("keywords", []),
                 )
                 return {
                     "nom": h.get("nom", ""),
                     "type_repas": type_repas,
                     "tags": tags,
+                    "base": base,
                     "ingredients": h["ingredients"],
                     "instructions": h.get("instructions", ""),
                     "image_url": h.get("image_url") or og_image,
@@ -1506,13 +1546,14 @@ Réponds UNIQUEMENT ce JSON : {{"type_repas": "...", "tags": ["..."]}}"""
 
 Extrais sans rien inventer ni reformuler :
 - nom : titre exact de la recette
-- type_repas : une valeur parmi {REPAS_OPTIONS}
-- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+- type_repas (cours du repas) : une valeur parmi {REPAS_OPTIONS}
+- base (ingrédient principal) : 0 à 3 valeurs parmi {BASE_OPTIONS}
+- tags (attributs) : 0 à 4 valeurs parmi {TAG_OPTIONS}
 - ingredients : liste des ingrédients avec quantités, recopiés tels quels (un par entrée)
 - instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
 
 Réponds UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+{{"nom": "...", "type_repas": "...", "base": ["..."], "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
 
         try:
             r: RecipeExtraction = await self._complete(
@@ -1522,7 +1563,7 @@ Réponds UNIQUEMENT ce JSON :
         except LLMError as e:
             logger.warning(f"Extraction LLM (URL) indisponible : {e}")
             # Dégradation : rien d'inventé, saisie manuelle possible côté /ajouter.
-            return {"nom": "", "type_repas": "", "tags": [],
+            return {"nom": "", "type_repas": "", "tags": [], "base": [],
                     "ingredients": scraped or [], "instructions": "",
                     "image_url": og_image, "source": "error"}
         type_repas = r.type_repas if r.type_repas in REPAS_OPTIONS else ""
@@ -1532,6 +1573,7 @@ Réponds UNIQUEMENT ce JSON :
             "nom": clean_recipe_title(r.nom),
             "type_repas": type_repas,
             "tags": [t for t in r.tags if t in TAG_OPTIONS],
+            "base": [b for b in r.base if b in BASE_OPTIONS],
             "ingredients": [str(i) for i in ingredients],
             "instructions": r.instructions,
             "image_url": og_image,
@@ -1545,7 +1587,7 @@ Réponds UNIQUEMENT ce JSON :
         Recopie sans inventer — utile quand il n'y a pas d'URL source."""
         raw_text = (text or "").strip()[:6000]
         if not raw_text:
-            return {"nom": "", "type_repas": "", "tags": [], "ingredients": [], "instructions": "", "source": "llm-text"}
+            return {"nom": "", "type_repas": "", "tags": [], "base": [], "ingredients": [], "instructions": "", "source": "llm-text"}
 
         user_prompt = f"""Texte d'une recette (collé par l'utilisateur) :
 
@@ -1553,13 +1595,14 @@ Réponds UNIQUEMENT ce JSON :
 
 Structure-le sans rien inventer ni reformuler :
 - nom : titre de la recette
-- type_repas : une valeur parmi {REPAS_OPTIONS}
-- tags : 0 à 4 valeurs parmi {TAG_OPTIONS}
+- type_repas (cours du repas) : une valeur parmi {REPAS_OPTIONS}
+- base (ingrédient principal) : 0 à 3 valeurs parmi {BASE_OPTIONS}
+- tags (attributs) : 0 à 4 valeurs parmi {TAG_OPTIONS}
 - ingredients : liste des ingrédients avec quantités, recopiés tels quels (un par entrée)
 - instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
 
 Réponds UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+{{"nom": "...", "type_repas": "...", "base": ["..."], "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
 
         try:
             r: RecipeExtraction = await self._complete(
@@ -1568,13 +1611,14 @@ Réponds UNIQUEMENT ce JSON :
             )
         except LLMError as e:
             logger.warning(f"Structuration LLM (texte) indisponible : {e}")
-            return {"nom": "", "type_repas": "", "tags": [], "ingredients": [],
+            return {"nom": "", "type_repas": "", "tags": [], "base": [], "ingredients": [],
                     "instructions": "", "image_url": "", "source": "error"}
         type_repas = r.type_repas if r.type_repas in REPAS_OPTIONS else ""
         return {
             "nom": clean_recipe_title(r.nom),
             "type_repas": type_repas,
             "tags": [t for t in r.tags if t in TAG_OPTIONS],
+            "base": [b for b in r.base if b in BASE_OPTIONS],
             "ingredients": [str(i) for i in r.ingredients],
             "instructions": r.instructions,
             "image_url": "",

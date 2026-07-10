@@ -70,50 +70,86 @@ def recipe_types(recette: dict) -> list[str]:
     return [v] if v else []
 
 
+def recipe_base(recette: dict) -> list[str]:
+    """Base (ingrédient principal) d'une recette, toujours sous forme de liste."""
+    v = recette.get("base")
+    if isinstance(v, list):
+        return [b for b in v if b]
+    return [v] if v else []
+
+
+def recipe_nature(recette: dict) -> str:
+    """Nature d'une recette : « Recette » (défaut) ou « Ingrédient » (brique)."""
+    return recette.get("nature") or "Recette"
+
+
+def derive_base_from_legacy(tags, repas) -> list[str]:
+    """Dérive la Base (nouvelle taxo) à partir de l'ANCIENNE taxo, pour que
+    l'app fonctionne AVANT la migration data. Signaux hérités :
+    - tag « Viande » → Base « Viande » ; tag « Poisson » → Base « Poisson » ;
+    - tag « Légumes » OU repas « Légume »/« Accompagnement » → Base « Légume ».
+    Les autres bases (Œuf/Féculent/Végé) ne sont pas dérivables de l'ancien."""
+    tagset = {t for t in (tags or [])}
+    repasset = {r for r in (repas or [])}
+    base: list[str] = []
+    if "Viande" in tagset:
+        base.append("Viande")
+    if "Poisson" in tagset:
+        base.append("Poisson")
+    if "Légumes" in tagset or "Légume" in repasset or "Accompagnement" in repasset:
+        base.append("Légume")
+    return base
+
+
 # Valeurs autorisées des champs Notion (source unique, partagée par l'app et le
 # client LLM pour la classification). Doivent correspondre EXACTEMENT aux options
 # de la base Notion.
+#
+# Taxonomie « une dimension = une propriété » :
+#   Nature (select)        : Recette | Ingrédient          (défaut Recette)
+#   Repas (multi_select)   : cours du repas                 (REPAS_OPTIONS)
+#   Base (multi_select)    : ingrédient principal           (BASE_OPTIONS)
+#   Moment (select)        : Midi | Soir | Les deux
+#   Tag (multi_select)     : attributs libres               (TAG_OPTIONS)
+NATURE_OPTIONS = ["Recette", "Ingrédient"]
+
 REPAS_OPTIONS = [
     "Plat",
-    "Dessert",
     "Entrée",
+    "Dessert",
     "Goûter",
-    "Accompagnement",
     "Apéro",
-    "Boisson",
     "Petit dej",
-    "Légume",
+    "Boisson",
 ]
+
+BASE_OPTIONS = ["Viande", "Poisson", "Œuf", "Légume", "Féculent", "Végé"]
+
 TAG_OPTIONS = [
-    "Viande",
-    "Poisson",
-    "Légumes",
     "Soupe",
     "Salade",
-    "Diet",
-    "Fun",
     "Quiche/tarte",
     "Tartines",
+    "Diet",
+    "Végétarien",
+    "Fun",
     "Invités",
     "Sur le pouce",
-    "Végétarien proténiné",
     "1 personne",
+    # Effort/temps (rapide en semaine, mijoté le week-end)
+    "Rapide",
+    "Mijoté",
+    # Légèreté (léger plutôt le soir, copieux plutôt le midi)
+    "Léger",
+    "Copieux",
+    # Météo du plat (croise avec la température)
+    "Plat chaud",
+    "Plat froid",
+    # Saison
     "Printemps",
     "Été",
     "Automne",
     "Hiver",
-    # Moment de repas (oriente l'attribution midi/soir)
-    "Midi",
-    "Soir",
-    # Légèreté (léger plutôt le soir, copieux plutôt le midi)
-    "Léger",
-    "Copieux",
-    # Effort/temps (rapide en semaine, mijoté le week-end)
-    "Rapide",
-    "Mijoté",
-    # Météo du plat (croise avec la température)
-    "Plat chaud",
-    "Plat froid",
 ]
 
 # Tags de saison (sous-ensemble de TAG_OPTIONS). Une recette sans aucun de ces
@@ -121,15 +157,14 @@ TAG_OPTIONS = [
 SAISON_TAGS = ["Printemps", "Été", "Automne", "Hiver"]
 
 # Regroupement des tags par catégorie pour l'affichage des formulaires.
-# Doit couvrir l'ensemble de TAG_OPTIONS.
+# Doit couvrir l'ensemble de TAG_OPTIONS (l'ingrédient principal est désormais
+# la propriété Base, et le moment la propriété Moment — plus des tags).
 TAG_GROUPS = [
-    {"label": "🥩 Ingrédient principal", "tags": ["Viande", "Poisson", "Légumes"]},
     {"label": "🍽️ Type de plat", "tags": ["Soupe", "Salade", "Quiche/tarte", "Tartines"]},
-    {"label": "🥗 Régime", "tags": ["Diet", "Végétarien proténiné"]},
+    {"label": "🥗 Régime", "tags": ["Diet", "Végétarien"]},
     {"label": "👥 Occasion", "tags": ["Fun", "Invités", "Sur le pouce", "1 personne"]},
-    {"label": "🕑 Moment", "tags": ["Midi", "Soir"]},
-    {"label": "⚖️ Légèreté", "tags": ["Léger", "Copieux"]},
     {"label": "⏱️ Effort", "tags": ["Rapide", "Mijoté"]},
+    {"label": "⚖️ Légèreté", "tags": ["Léger", "Copieux"]},
     {"label": "🌡️ Météo du plat", "tags": ["Plat chaud", "Plat froid"]},
     {"label": "🗓️ Saison", "tags": SAISON_TAGS},
 ]

@@ -8,6 +8,7 @@
         <div class="detail-chips">
             {% if duree %}<span class="chip chip-duree">⏱ {{ duree }} min</span>{% endif %}
             {% for t in recette.repas %}<span class="chip chip-repas">{{ t }}</span>{% endfor %}
+            {% for b in recette.base %}<span class="chip chip-base">{{ b }}</span>{% endfor %}
             {% if recette.etat %}<span class="chip chip-etat">{{ recette.etat }}</span>{% endif %}
             {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
             {% for t in recette.tags %}<span class="tag">{{ t }}</span>{% endfor %}

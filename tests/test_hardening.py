@@ -35,20 +35,21 @@ def test_safe_fetch_rejects_internal():
 
 # ── Classification lexicale ──────────────────────────────────
 def test_keyword_guess_savory_sweet():
-    t, _, sav, sw = client._keyword_guess("Cheesecake salé au saumon", ["saumon"], [])
+    t, _, base, sav, sw = client._keyword_guess("Cheesecake salé au saumon", ["saumon"], [])
     assert t == "Plat" and sav and not sw
-    t, _, _, _ = client._keyword_guess("Tiramisu framboises", ["mascarpone", "sucre"], ["dessert"])
+    assert "Poisson" in base  # saumon → base Poisson devinée
+    t, _, _, _, _ = client._keyword_guess("Tiramisu framboises", ["mascarpone", "sucre"], ["dessert"])
     assert t == "Dessert"
-    t, _, _, _ = client._keyword_guess("Smoothie banane", ["banane"], ["boisson"])
+    t, _, _, _, _ = client._keyword_guess("Smoothie banane", ["banane"], ["boisson"])
     assert t == "Boisson"
 
 
 def test_classify_corrects_savory_dessert(monkeypatch):
     # Le LLM renvoie 'Dessert' à tort pour un plat salé -> corrigé.
     async def _fake_chat(*a, **k):
-        return '{"type_repas": "Dessert", "tags": []}'
+        return '{"type_repas": "Dessert", "base": [], "tags": []}'
     monkeypatch.setattr(client, "_chat", _fake_chat)
-    t, _ = asyncio.run(client._classify_type_tags("Cheesecake salé au saumon", ["saumon fumé"], []))
+    t, _, _ = asyncio.run(client._classify_type_tags("Cheesecake salé au saumon", ["saumon fumé"], []))
     assert t != "Dessert"
 
 
@@ -56,8 +57,9 @@ def test_classify_fallback_on_llm_error(monkeypatch):
     async def _boom(*a, **k):
         raise RuntimeError("LLM down")
     monkeypatch.setattr(client, "_chat", _boom)
-    t, tags = asyncio.run(client._classify_type_tags("Curry de lentilles", ["lentille", "curry"], ["plat"]))
+    t, tags, base = asyncio.run(client._classify_type_tags("Curry de lentilles", ["lentille", "curry"], ["plat"]))
     assert t == "Plat"  # repli heuristique, pas d'exception
+    assert "Féculent" in base  # lentille → base Féculent devinée
 
 
 # ── Pipeline extract_recipe_from_url (fetch mocké, sans réseau) ──
@@ -76,7 +78,7 @@ def test_extract_recipe_from_url_jsonld(monkeypatch):
         return html
 
     async def _fake_classify(nom, ings, kw):
-        return "Dessert", ["Quiche/tarte"]
+        return "Dessert", ["Quiche/tarte"], []
 
     monkeypatch.setattr(llm_client, "_safe_fetch_html", _fake_fetch)
     monkeypatch.setattr(client, "_classify_type_tags", _fake_classify)

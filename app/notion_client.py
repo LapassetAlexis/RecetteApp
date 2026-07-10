@@ -5,7 +5,7 @@ import logging
 import time
 from typing import Any
 
-from app.config import settings
+from app.config import derive_base_from_legacy, settings
 
 logger = logging.getLogger(__name__)
 NOTION_VERSION = "2022-06-28"
@@ -134,6 +134,21 @@ class NotionClient:
         # Tag (multi_select)
         tags = [t.get("name", "") for t in (p.get("Tag", {}).get("multi_select") or [])]
 
+        # Nature (select) : « Recette » par défaut si la propriété n'existe pas
+        # encore (avant la migration) ou est vide.
+        nature = "Recette"
+        sel = p.get("Nature", {}).get("select")
+        if sel and sel.get("name"):
+            nature = sel.get("name", "")
+
+        # Base (multi_select) : ingrédient principal. Lecture TOLÉRANTE : si la
+        # propriété est absente ou vide (avant la migration data), on dérive la
+        # Base à la volée depuis l'ancienne taxo (tags Viande/Poisson/Légumes,
+        # repas Légume/Accompagnement) pour que l'app fonctionne dès maintenant.
+        base = [b.get("name", "") for b in (p.get("Base", {}).get("multi_select") or []) if b.get("name")]
+        if not base:
+            base = derive_base_from_legacy(tags, repas)
+
         # Note (select)
         note = ""
         sel = p.get("Note", {}).get("select")
@@ -164,6 +179,8 @@ class NotionClient:
             "url": url,
             "notion_url": page.get("url", ""),
             "repas": repas,
+            "base": base,
+            "nature": nature,
             "tags": tags,
             "note": note,
             "etat": etat,
@@ -181,6 +198,8 @@ class NotionClient:
         tags: list[str] | None = None,
         etat: str = "À essayer",
         moment: str = "",
+        nature: str = "",
+        base: list[str] | str = "",
     ) -> dict[str, Any]:
         """Crée une nouvelle page dans la base de recettes."""
         properties: dict[str, Any] = {
@@ -194,12 +213,18 @@ class NotionClient:
         repas_names = [n for n in repas_names if n]
         if repas_names:
             properties["Repas"] = {"multi_select": [{"name": n} for n in repas_names]}
+        base_names = [base] if isinstance(base, str) else list(base)
+        base_names = [n for n in base_names if n]
+        if base_names:
+            properties["Base"] = {"multi_select": [{"name": n} for n in base_names]}
         if tags:
             properties["Tag"] = {
                 "multi_select": [{"name": t} for t in tags]
             }
         if moment:
             properties["Moment"] = {"select": {"name": moment}}
+        if nature:
+            properties["Nature"] = {"select": {"name": nature}}
 
         body = {
             "parent": {"database_id": self.database_id},
@@ -439,8 +464,10 @@ class NotionClient:
 
     async def update_recipe_meta(
         self, page_id: str, repas: list[str] | str = "", tags: list[str] | None = None,
+        nature: str = "", base: list[str] | str | None = None,
     ) -> dict[str, Any]:
-        """Met à jour le type (Repas) et les tags d'une recette existante."""
+        """Met à jour le type (Repas), les tags, la Nature et la Base d'une
+        recette existante. Seuls les champs fournis sont écrits."""
         properties: dict[str, Any] = {}
         repas_names = [repas] if isinstance(repas, str) else list(repas)
         repas_names = [n for n in repas_names if n]
@@ -448,6 +475,12 @@ class NotionClient:
             properties["Repas"] = {"multi_select": [{"name": n} for n in repas_names]}
         if tags is not None:
             properties["Tag"] = {"multi_select": [{"name": t} for t in tags]}
+        if base is not None:
+            base_names = [base] if isinstance(base, str) else list(base)
+            base_names = [n for n in base_names if n]
+            properties["Base"] = {"multi_select": [{"name": n} for n in base_names]}
+        if nature:
+            properties["Nature"] = {"select": {"name": nature}}
         if not properties:
             return {}
         async with httpx.AsyncClient() as client:
