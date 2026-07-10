@@ -5,7 +5,7 @@ import logging
 import time
 from typing import Any
 
-from app.config import derive_base_from_legacy, settings
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 NOTION_VERSION = "2022-06-28"
@@ -121,33 +121,20 @@ class NotionClient:
         # URL
         url = p.get("URL", {}).get("url") or ""
 
-        # Repas : multi_select en priorité, repli sur select mono (rétro-compat).
-        # Toujours renvoyé sous forme de liste de str.
-        repas_prop = p.get("Repas", {})
-        multi = repas_prop.get("multi_select")
-        if multi is not None:
-            repas = [t.get("name", "") for t in multi if t.get("name")]
-        else:
-            sel = repas_prop.get("select")
-            repas = [sel.get("name", "")] if sel and sel.get("name") else []
+        # Repas (multi_select) : cours du repas, liste de str.
+        repas = [t.get("name", "") for t in (p.get("Repas", {}).get("multi_select") or []) if t.get("name")]
 
         # Tag (multi_select)
-        tags = [t.get("name", "") for t in (p.get("Tag", {}).get("multi_select") or [])]
+        tags = [t.get("name", "") for t in (p.get("Tag", {}).get("multi_select") or []) if t.get("name")]
 
-        # Nature (select) : « Recette » par défaut si la propriété n'existe pas
-        # encore (avant la migration) ou est vide.
+        # Nature (select) : « Recette » par défaut si vide.
         nature = "Recette"
         sel = p.get("Nature", {}).get("select")
         if sel and sel.get("name"):
             nature = sel.get("name", "")
 
-        # Base (multi_select) : ingrédient principal. Lecture TOLÉRANTE : si la
-        # propriété est absente ou vide (avant la migration data), on dérive la
-        # Base à la volée depuis l'ancienne taxo (tags Viande/Poisson/Légumes,
-        # repas Légume/Accompagnement) pour que l'app fonctionne dès maintenant.
+        # Base (multi_select) : ingrédient principal.
         base = [b.get("name", "") for b in (p.get("Base", {}).get("multi_select") or []) if b.get("name")]
-        if not base:
-            base = derive_base_from_legacy(tags, repas)
 
         # Note (select)
         note = ""

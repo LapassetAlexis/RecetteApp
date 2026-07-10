@@ -34,7 +34,7 @@ def test_parse_full_page():
     page = _page({
         "Nom": {"type": "title", "title": [{"plain_text": "Tarte"}]},
         "URL": {"type": "url", "url": "https://x.fr"},
-        "Repas": {"select": {"name": "Dessert"}},
+        "Repas": {"multi_select": [{"name": "Dessert"}]},
         "Tag": {"multi_select": [{"name": "Fun"}, {"name": "Diet"}]},
         "Note": {"select": {"name": "⭐⭐⭐"}},
         "État": {"status": {"name": "À essayer"}},
@@ -43,7 +43,6 @@ def test_parse_full_page():
     r = notion._parse_page(page)
     assert r["nom"] == "Tarte"
     assert r["url"] == "https://x.fr"
-    # Repli sur select mono : liste à 1 élément.
     assert r["repas"] == ["Dessert"]
     assert r["tags"] == ["Fun", "Diet"]
     assert r["note"] == "⭐⭐⭐"
@@ -112,23 +111,16 @@ def test_parse_nature_defaults_recette():
     assert r["base"] == []
 
 
-def test_parse_base_derived_from_legacy_tags():
-    # Lecture TOLÉRANTE : avant la migration data, Base absente est dérivée de
-    # l'ancienne taxo (tag « Viande » + repas « Accompagnement »).
-    page = _page({
-        "Nom": {"type": "title", "title": [{"plain_text": "Poulet frites"}]},
-        "Repas": {"multi_select": [{"name": "Plat"}, {"name": "Accompagnement"}]},
-        "Tag": {"multi_select": [{"name": "Viande"}]},
-    })
-    r = notion._parse_page(page)
-    assert r["base"] == ["Viande", "Légume"]  # Viande (tag) + Légume (repas Accompagnement)
-
-
-def test_parse_explicit_base_wins_over_legacy():
-    # Si Base est renseignée, on ne dérive PAS depuis l'ancien.
+def test_parse_base_read_directly():
+    # Base lue telle quelle depuis Notion (plus de dérivation legacy).
     page = _page({
         "Nom": {"type": "title", "title": [{"plain_text": "X"}]},
         "Tag": {"multi_select": [{"name": "Viande"}]},
         "Base": {"multi_select": [{"name": "Poisson"}]},
     })
-    assert notion._parse_page(page)["base"] == ["Poisson"]
+    r = notion._parse_page(page)
+    assert r["base"] == ["Poisson"]  # le tag Viande n'influe plus
+    # Base absente → vide (aucune dérivation).
+    page2 = _page({"Nom": {"type": "title", "title": [{"plain_text": "Y"}]},
+                   "Tag": {"multi_select": [{"name": "Viande"}]}})
+    assert notion._parse_page(page2)["base"] == []

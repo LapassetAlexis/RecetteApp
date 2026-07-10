@@ -319,10 +319,62 @@ async def _migrate_data(client: httpx.AsyncClient, apply: bool) -> dict[str, int
     return counters
 
 
-async def run(apply: bool) -> None:
+# Options devenues mortes après migration data (plus portées par aucune recette).
+# `--cleanup` les retire de la base Notion.
+_DEAD_OPTIONS: dict[str, list[str]] = {
+    "Repas": ["Légume", "Accompagnement"],
+    "Tag": ["Midi", "Soir", "Végétarien proténiné"],
+}
+
+
+async def _cleanup_schema(client: httpx.AsyncClient, apply: bool) -> None:
+    """Supprime les options mortes (post-migration) sans toucher aux autres.
+
+    À ne lancer QU'APRÈS la migration data (--apply), quand plus aucune recette
+    ne porte ces valeurs."""
+    resp = await client.get(
+        f"{BASE_URL}/databases/{settings.notion_database_id}",
+        headers=_headers(), timeout=30,
+    )
+    resp.raise_for_status()
+    props = resp.json().get("properties", {})
+
+    update: dict[str, Any] = {}
+    for prop_name, dead in _DEAD_OPTIONS.items():
+        ms = props.get(prop_name, {}).get("multi_select")
+        if not ms:
+            continue
+        options = ms.get("options", [])
+        removed = [o["name"] for o in options if o.get("name") in dead]
+        if removed:
+            kept = [o for o in options if o.get("name") not in dead]  # préserve id/couleur
+            update[prop_name] = {"multi_select": {"options": kept}}
+            logger.info("Nettoyage %s : retire %s", prop_name, removed)
+
+    if not update:
+        logger.info("Nettoyage : aucune option morte à retirer.")
+        return
+    if not apply:
+        logger.info("[dry-run] Nettoyage : %s propriété(s) seraient modifiées : %s",
+                    len(update), list(update.keys()))
+        return
+    patch = await client.patch(
+        f"{BASE_URL}/databases/{settings.notion_database_id}",
+        headers=_headers(), json={"properties": update}, timeout=30,
+    )
+    patch.raise_for_status()
+    logger.info("Options mortes supprimées : %s", list(update.keys()))
+
+
+async def run(apply: bool, cleanup: bool = False) -> None:
     if not settings.notion_token:
         raise SystemExit("NOTION_TOKEN manquant : configure l'environnement avant de lancer la migration.")
     mode = "APPLY (écriture réelle)" if apply else "DRY-RUN (aucune écriture)"
+    if cleanup:
+        logger.info("=== Nettoyage options mortes — %s ===", mode)
+        async with httpx.AsyncClient() as client:
+            await _cleanup_schema(client, apply)
+        return
     logger.info("=== Migration taxonomie — %s ===", mode)
     async with httpx.AsyncClient() as client:
         await _ensure_schema(client, apply)
@@ -340,8 +392,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Migration de la taxonomie Notion (PR A).")
     parser.add_argument("--apply", action="store_true",
                         help="Applique réellement les changements (sinon dry-run).")
+    parser.add_argument("--cleanup", action="store_true",
+                        help="Supprime les options mortes post-migration (au lieu de migrer).")
     args = parser.parse_args()
-    asyncio.run(run(args.apply))
+    asyncio.run(run(args.apply, args.cleanup))
 
 
 if __name__ == "__main__":
