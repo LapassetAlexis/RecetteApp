@@ -83,24 +83,6 @@ def recipe_nature(recette: dict) -> str:
     return recette.get("nature") or "Recette"
 
 
-def derive_base_from_legacy(tags, repas) -> list[str]:
-    """Dérive la Base (nouvelle taxo) à partir de l'ANCIENNE taxo, pour que
-    l'app fonctionne AVANT la migration data. Signaux hérités :
-    - tag « Viande » → Base « Viande » ; tag « Poisson » → Base « Poisson » ;
-    - tag « Légumes » OU repas « Légume »/« Accompagnement » → Base « Légume ».
-    Les autres bases (Œuf/Féculent/Végé) ne sont pas dérivables de l'ancien."""
-    tagset = {t for t in (tags or [])}
-    repasset = {r for r in (repas or [])}
-    base: list[str] = []
-    if "Viande" in tagset:
-        base.append("Viande")
-    if "Poisson" in tagset:
-        base.append("Poisson")
-    if "Légumes" in tagset or "Légume" in repasset or "Accompagnement" in repasset:
-        base.append("Légume")
-    return base
-
-
 # Valeurs autorisées des champs Notion (source unique, partagée par l'app et le
 # client LLM pour la classification). Doivent correspondre EXACTEMENT aux options
 # de la base Notion.
