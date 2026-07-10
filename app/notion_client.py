@@ -489,3 +489,16 @@ class NotionClient:
             resp.raise_for_status()
             self.invalidate_cache()  # note à jour dans la liste
             return resp.json()
+
+    async def update_status(self, page_id: str, etat: str) -> dict[str, Any]:
+        """Met à jour l'état (propriété `status`) d'une recette."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={"properties": {"État": {"status": {"name": etat}}}},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            self.invalidate_cache()  # état à jour dans la liste
+            return resp.json()
