@@ -169,6 +169,7 @@ document.querySelectorAll('.recipe-stars').forEach(container => {
                     current = idx + 1; paint(current);
                     clearBtn.style.display = '';
                     toast('Noté ' + val, 'success');
+                    if (d.warning) toast(d.warning, 'error');
                 } else { toast(d.error || 'Erreur', 'error'); }
             } catch(e) { toast('Erreur réseau', 'error'); }
             finally { container.classList.remove('saving'); }
