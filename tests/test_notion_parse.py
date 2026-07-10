@@ -43,7 +43,8 @@ def test_parse_full_page():
     r = notion._parse_page(page)
     assert r["nom"] == "Tarte"
     assert r["url"] == "https://x.fr"
-    assert r["repas"] == "Dessert"
+    # Repli sur select mono : liste à 1 élément.
+    assert r["repas"] == ["Dessert"]
     assert r["tags"] == ["Fun", "Diet"]
     assert r["note"] == "⭐⭐⭐"
     assert r["etat"] == "À essayer"
@@ -54,7 +55,7 @@ def test_parse_missing_columns_does_not_crash():
     # Régression : colonnes absentes/renommées faisaient un KeyError.
     r = notion._parse_page(_page({"Nom": {"type": "title", "title": [{"plain_text": "X"}]}}))
     assert r["nom"] == "X"
-    assert r["url"] == "" and r["repas"] == "" and r["tags"] == []
+    assert r["url"] == "" and r["repas"] == [] and r["tags"] == []
     assert r["note"] == "" and r["etat"] == "" and r["moment"] == ""
 
 
@@ -78,4 +79,14 @@ def test_parse_empty_selects():
         "État": {"status": None},
     })
     r = notion._parse_page(page)
-    assert r["nom"] == "" and r["repas"] == "" and r["tags"] == []
+    assert r["nom"] == "" and r["repas"] == [] and r["tags"] == []
+
+
+def test_parse_repas_multi_select():
+    # Nouveau format : Repas en multi_select (plusieurs types).
+    page = _page({
+        "Nom": {"type": "title", "title": [{"plain_text": "Cookie"}]},
+        "Repas": {"multi_select": [{"name": "Goûter"}, {"name": "Dessert"}]},
+    })
+    r = notion._parse_page(page)
+    assert r["repas"] == ["Goûter", "Dessert"]

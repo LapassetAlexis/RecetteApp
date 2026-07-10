@@ -58,16 +58,16 @@
 } %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-type="{{ recette.repas or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get(recette.repas, '#d8d2cb') }};">
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
         {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
         <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
             {% if recette.duree %}
             <span class="chip chip-duree">⏱ {{ recette.duree }} min</span>
             {% endif %}
-            {% if recette.repas %}
-            <span class="chip chip-repas">{{ recette.repas }}</span>
-            {% endif %}
+            {% for t in recette.repas %}
+            <span class="chip chip-repas">{{ t }}</span>
+            {% endfor %}
             {% if recette.etat %}
             <span class="chip chip-etat">{{ recette.etat }}</span>
             {% endif %}
@@ -118,7 +118,7 @@ function applyFilters() {
     document.querySelectorAll('.recipe-card').forEach(card => {
         const hay = card.dataset.name + ' ' + (card.dataset.ings || '');
         const okName = !terms.length || terms.every(t => hay.includes(t));
-        const okType = !active.type || card.dataset.type === active.type;
+        const okType = !active.type || (card.dataset.type || '').split('|').includes(active.type);
         const okEtat = !active.etat || card.dataset.etat === active.etat;
         const okTag = !active.tag || (card.dataset.tags || '').split('|').includes(active.tag.toLowerCase());
         const duree = parseInt(card.dataset.duree || '0', 10);

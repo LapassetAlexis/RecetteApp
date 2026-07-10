@@ -69,7 +69,7 @@
     </div>
     {% if plat.repas or plat.tags %}
     <div class="meal-chips">
-        {% if plat.repas %}<span class="chip chip-repas">{{ plat.repas }}</span>{% endif %}
+        {% for t in plat.repas %}<span class="chip chip-repas">{{ t }}</span>{% endfor %}
         {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
     </div>
     {% endif %}
@@ -425,10 +425,10 @@ async function la() {
     resetFree();
     const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
     let alts=d.alternatives||[];
-    if(sideMode) alts=alts.filter(a=>a.repas==='Légume'||a.repas==='Accompagnement');
+    if(sideMode) alts=alts.filter(a=>(a.repas||[]).includes('Légume')||(a.repas||[]).includes('Accompagnement'));
     const el=document.getElementById('alt-list');
     if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
-    el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${a.repas?`<span class="chip chip-r">${a.repas}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');
+    el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${(a.repas||[]).length?`<span class="chip chip-r">${a.repas.join('/')}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');
     document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>{ if(sideMode){ setSide(sideSlot,b.dataset.n); } else { rpl(b.dataset.n); } });
     document.getElementById('flt').oninput=function(){const q=this.value.toLowerCase();document.querySelectorAll('.alt').forEach(e=>e.style.display=e.dataset.n.includes(q)?'flex':'none');};
 }

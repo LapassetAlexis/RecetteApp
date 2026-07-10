@@ -16,7 +16,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from urllib.parse import urlparse
 
-from app.config import REPAS_OPTIONS, TAG_OPTIONS, settings
+from app.config import REPAS_OPTIONS, TAG_OPTIONS, recipe_types, settings
 from app.text_utils import clean_recipe_title
 
 logger = logging.getLogger(__name__)
@@ -865,13 +865,13 @@ class LLMClient:
     @staticmethod
     def _is_side(r: dict[str, Any]) -> bool:
         """Recette utilisable comme accompagnement (légume / garniture)."""
-        return r.get("repas") in ("Légume", "Accompagnement")
+        return bool(set(recipe_types(r)) & {"Légume", "Accompagnement"})
 
     @staticmethod
     def _is_complete(r: dict[str, Any]) -> bool:
         """Plat complet : type « Plat » ou tag « plat ». Se suffit à lui-même,
         donc pas d'accompagnement."""
-        if r.get("repas") == "Plat":
+        if "Plat" in recipe_types(r):
             return True
         return any(str(t).strip().lower() == "plat" for t in (r.get("tags") or []))
 
@@ -969,7 +969,8 @@ class LLMClient:
         saison_n = self._norm(saison)
         weather = self._weather(temperature)
         mains = [r for r in recettes
-                 if not self._is_side(r) and r["repas"] in ("Plat", "Entrée", "")]
+                 if not self._is_side(r)
+                 and (not recipe_types(r) or set(recipe_types(r)) & {"Plat", "Entrée"})]
         # Saison = filtre dur (autre saison écartée) ; météo = tri souple.
         eligibles = sorted(
             (r for r in mains if self._season_rank(r, saison_n) < 2),
@@ -979,8 +980,9 @@ class LLMClient:
         lignes = []
         for r in eligibles:
             parts = [r["nom"]]
-            if r["repas"]:
-                parts.append(r["repas"])
+            types = recipe_types(r)
+            if types:
+                parts.append("/".join(types))
             if r.get("moment"):
                 parts.append(r["moment"])
             if r["tags"]:

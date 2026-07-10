@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import REPAS_OPTIONS, TAG_GROUPS, TAG_OPTIONS, settings
+from app.config import REPAS_OPTIONS, TAG_GROUPS, TAG_OPTIONS, recipe_types, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
@@ -179,7 +179,7 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["notion_id"] = r["id"]
     plat["url"] = r.get("url", "")
     plat["notion_url"] = r.get("notion_url", "")
-    plat["repas"] = r.get("repas", "")
+    plat["repas"] = r.get("repas", [])
     plat["tags"] = r.get("tags", [])
 
 
@@ -465,7 +465,9 @@ async def liste_recettes(request: Request):
     for r in recettes:
         r["ingredients_search"] = ings_by_id.get(r["id"], "")
         r["duree"] = duree_by_id.get(r["id"], 0)
-        par_type[r["repas"] or "Non classé"] = par_type.get(r["repas"] or "Non classé", 0) + 1
+        types = recipe_types(r) or ["Non classé"]
+        for t in types:
+            par_type[t] = par_type.get(t, 0) + 1
         if r["etat"]:
             par_etat[r["etat"]] = par_etat.get(r["etat"], 0) + 1
         for t in r["tags"]:
@@ -691,7 +693,7 @@ async def enrichir_submit(
     request: Request,
     page_id: str,
     nom: str = Form(""),
-    repas: str = Form(""),
+    repas: list[str] = Form([]),
     tags: list[str] = Form([]),
     ingredients_text: str = Form(""),
     steps: list[str] = Form([]),
@@ -770,7 +772,7 @@ async def enrichir_submit(
         msg += " Rien n'a été validé : corrige puis re-valide."
         # On reflète la saisie dans la recette pour re-cocher type/tags/nom.
         recette["nom"] = nom_norm
-        recette["repas"] = repas
+        recette["repas"] = repas or []
         recette["tags"] = tags or []
         return templates.TemplateResponse(
             "enrichir.html",
@@ -890,7 +892,9 @@ async def generer(
         # 1. Récupérer toutes les recettes Notion
         recettes = await notion.get_all_recipes()
         recettes = [
-            r for r in recettes if r["repas"] in ("Plat", "Entrée", "Accompagnement", "Légume", "")
+            r for r in recettes
+            if not recipe_types(r)
+            or set(recipe_types(r)) & {"Plat", "Entrée", "Accompagnement", "Légume"}
         ]
 
         if not recettes:
@@ -1415,7 +1419,7 @@ async def ajouter_recette(
     request: Request,
     url: str = Form(""),
     nom: str = Form(""),
-    repas: str = Form(""),
+    repas: list[str] = Form([]),
     tags: list[str] = Form([]),
     moment: str = Form(""),
     ingredients_manual: str = Form(""),
@@ -1432,8 +1436,8 @@ async def ajouter_recette(
             # Extraction automatique via LLM
             extracted = await llm.extract_recipe_from_url(url)
             nom = extracted.get("nom", "")
-            if not repas:
-                repas = extracted.get("type_repas", "")
+            if not repas and extracted.get("type_repas"):
+                repas = [extracted["type_repas"]]
             if not tags:
                 tags = extracted.get("tags", [])
         elif not nom:
@@ -1520,9 +1524,11 @@ async def api_alternatives(planning_id: int):
         # Toutes les recettes Notion
         recettes = await notion.get_all_recipes()
         alternatives = [
-            {"nom": r["nom"], "repas": r["repas"], "tags": r["tags"]}
+            {"nom": r["nom"], "repas": recipe_types(r), "tags": r["tags"]}
             for r in recettes
-            if r["nom"] not in used_names and r["repas"] in ("Plat", "Entrée", "Accompagnement", "Légume", "")
+            if r["nom"] not in used_names
+            and (not recipe_types(r)
+                 or set(recipe_types(r)) & {"Plat", "Entrée", "Accompagnement", "Légume"})
         ]
 
         return {"alternatives": alternatives}

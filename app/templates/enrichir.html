@@ -34,13 +34,12 @@
 
         <div class="form-r">
             <div class="form-g">
-                <label for="repas">🍽️ Type</label>
-                <select id="repas" name="repas">
-                    <option value="">— Aucun —</option>
+                <label>🍽️ Type</label>
+                <div class="tag-group-chips">
                     {% for opt in repas_options %}
-                    <option value="{{ opt }}" {% if recette.repas == opt %}selected{% endif %}>{{ opt }}</option>
+                    <label class="tgl"><input type="checkbox" name="repas" value="{{ opt }}" {% if opt in recette.repas %}checked{% endif %}><span>{{ opt }}</span></label>
                     {% endfor %}
-                </select>
+                </div>
             </div>
         </div>
 
