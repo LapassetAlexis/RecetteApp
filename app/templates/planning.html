@@ -20,6 +20,12 @@
 </div>
 {% endif %}
 
+{% if briques_manquantes %}
+<div class="alert alert-warn">
+    ⚠ {{ briques_manquantes }}
+</div>
+{% endif %}
+
 {% if not valide %}
 <div class="card validate-bar">
     <span>📝 <strong>Brouillon</strong> — pas encore enregistré dans l'historique. Ajuste si besoin, puis valide.</span>

@@ -208,6 +208,66 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["tags"] = r.get("tags", [])
 
 
+# Bases considérées comme « protéine » pour l'assemblage d'un repas simple.
+_PROTEIN_BASES = {"Viande", "Poisson", "Œuf", "Végé"}
+
+
+def _brique_acc(b: dict) -> dict:
+    """Accompagnement (dict standard) construit depuis une brique."""
+    return {
+        "nom_recette": b["nom"],
+        "notion_id": b.get("id", ""),
+        "url": b.get("url", ""),
+        "notion_url": b.get("notion_url", ""),
+    }
+
+
+def _assemble_simple_meals(
+    briques: list[dict], n: int, rng: random.Random | None = None,
+) -> tuple[list[dict], int]:
+    """Assemble jusqu'à `n` repas simples DÉTERMINISTES à partir des briques.
+
+    Un repas simple = 1 brique protéine (le plat) + [1 brique féculent,
+    1 brique légume] en accompagnements. On pioche sans répéter la même brique
+    dans un même pool sur la semaine (variété). Les pools sont mélangés (`rng`,
+    par défaut le module `random` — injectable/seedable pour les tests) pour
+    équilibrer le choix plutôt que toujours prendre la première brique.
+
+    L'exclusion « déjà vu 4 semaines » ne s'applique PAS aux briques (basiques).
+
+    Retourne (repas, nb_complets) où chaque repas est un dict
+    {"prot": brique, "accompagnements": [dict, ...]} et nb_complets = nombre de
+    repas ayant protéine + féculent + légume. Si un pool manque, le repas est
+    produit avec ce qui existe (au minimum la protéine)."""
+    rng = rng or random
+
+    def _pool(pred) -> list[dict]:
+        items = [b for b in briques if pred(b)]
+        rng.shuffle(items)
+        return items
+
+    prots = _pool(lambda b: bool(set(recipe_base(b)) & _PROTEIN_BASES))
+    fecs = _pool(lambda b: "Féculent" in recipe_base(b))
+    legs = _pool(lambda b: "Légume" in recipe_base(b))
+
+    meals: list[dict] = []
+    complete = 0
+    # Un repas simple exige au moins une protéine (le plat) : le nombre de repas
+    # produits est borné par le pool de protéines (jamais de répétition).
+    for i in range(min(n, len(prots))):
+        fec = fecs[i] if i < len(fecs) else None
+        leg = legs[i] if i < len(legs) else None
+        accs: list[dict] = []
+        if fec:
+            accs.append(_brique_acc(fec))
+        if leg:
+            accs.append(_brique_acc(leg))
+        if fec and leg:
+            complete += 1
+        meals.append({"prot": prots[i], "accompagnements": accs})
+    return meals, complete
+
+
 def _pick_replacement(
     recettes_pool: list[dict], used_names: set[str], exclues: set[str],
 ) -> dict | None:
@@ -431,6 +491,7 @@ async def voir_planning(request: Request, planning_id: int):
             "per_day": per_day,
             "off_meals": data.get("off_meals", []),
             "creneaux_non_resolus": data.get("creneaux_non_resolus", []),
+            "briques_manquantes": data.get("briques_manquantes", ""),
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
             "base_options": BASE_OPTIONS,
@@ -950,6 +1011,7 @@ async def generer(
     custom_prompt: str = Form(""),
     midi_groups: str = Form("1,1,2,2,2,3,4"),
     off_meals: str = Form(""),
+    nb_simple: int = Form(0),
 ):
     """Génère un planning via le LLM et sauvegarde."""
     # Calculer le nb de personnes moyen pour les ingrédients
@@ -981,16 +1043,21 @@ async def generer(
             "ingredients_force": ingredients_force,
             "custom_prompt": custom_prompt,
             "off_meals": off_meals,
+            "nb_simple": nb_simple,
         }
 
     try:
         # 1. Récupérer toutes les recettes Notion
-        recettes = await notion.get_all_recipes()
+        recettes_all = await notion.get_all_recipes()
+        # Briques (Nature = Ingrédient) : servent à assembler les repas simples
+        # de façon déterministe (sans LLM). Capturées AVANT le filtrage du pool
+        # de recettes complexes.
+        briques = [r for r in recettes_all if recipe_nature(r) == "Ingrédient"]
         # On garde les recettes utilisables au menu : plats/entrées, ou
         # accompagnements (Base = Légume). On exclut les briques (Nature =
         # Ingrédient). Les recettes sans type restent éligibles.
         recettes = [
-            r for r in recettes
+            r for r in recettes_all
             if recipe_nature(r) == "Recette"
             and (not recipe_types(r)
                  or set(recipe_types(r)) & {"Plat", "Entrée"}
@@ -1049,6 +1116,32 @@ async def generer(
             if r:
                 _apply_recipe_info(plat, r)
 
+        # 4ter. Repas simples (assemblés DÉTERMINISTES à partir des briques).
+        # `nb_simple` est borné au nombre de créneaux actifs (= len(plats)).
+        # On convertit ce nombre de créneaux (choisis au hasard parmi les actifs)
+        # en repas simples ; les autres restent des recettes complexes. On le fait
+        # AVANT la validation : les créneaux « brique » portent un notion_id et
+        # sont donc considérés valides (pas de re-tir).
+        briques_manquantes = ""
+        nb_simple = max(0, min(nb_simple, len(plats)))
+        if nb_simple:
+            meals, complets = _assemble_simple_meals(briques, nb_simple)
+            slots = list(range(len(plats)))
+            random.shuffle(slots)
+            for slot_i, meal in zip(slots, meals):
+                plat = plats[slot_i]
+                prot = meal["prot"]
+                plat["nom_recette"] = prot["nom"]
+                _apply_recipe_info(plat, prot)  # notion_id + nature=Ingrédient
+                plat["type_repas"] = "Plat"
+                plat["accompagnements"] = meal["accompagnements"]
+            if complets < nb_simple:
+                briques_manquantes = (
+                    f"{nb_simple} repas simples demandés, {complets} produits — "
+                    f"crée plus de briques (protéine/féculent/légume)."
+                )
+                logger.warning(briques_manquantes)
+
         # 4bis. Valider le planning généré (créneaux ACTIFS uniquement) :
         #   - une recette réellement dans le catalogue Notion (notion_id non vide,
         #     sinon le LLM l'a inventée) ;
@@ -1106,6 +1199,7 @@ async def generer(
             "per_day": per_day,
             "off_meals": sorted(f"{d}:{m}" for d, m in off_set),
             "creneaux_non_resolus": creneaux_non_resolus,
+            "briques_manquantes": briques_manquantes,
         }
         planning_id = await db.save_planning(
             week_start=week_start,
