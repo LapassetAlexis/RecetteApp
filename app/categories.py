@@ -28,6 +28,10 @@ _RAYON_KEYWORDS: dict[str, list[str]] = {
         "coriandre", "menthe", "gingembre", "celeri", "navet", "potiron", "courge",
         "radis", "betterave", "fenouil", "endive", "orange", "poire", "raisin",
         "abricot", "peche", "ananas", "mangue", "patate douce", "legume",
+        "roquette", "melon", "pasteque", "clementine", "mandarine", "kiwi",
+        "cerise", "myrtille", "cassis", "rhubarbe", "artichaut", "asperge",
+        "epinard", "mache", "cresson", "ciboulette", "estragon", "aneth", "thym",
+        "romarin", "laurier", "cebette", "shiitake",
     ],
     "Viande & poisson": [
         "boeuf", "porc", "poulet", "dinde", "veau", "agneau", "lardon", "jambon",
@@ -39,13 +43,15 @@ _RAYON_KEYWORDS: dict[str, list[str]] = {
         "oeuf", "lait", "creme", "beurre", "fromage", "yaourt", "parmesan", "mozzarella",
         "chevre", "feta", "emmental", "gruyere", "ricotta", "mascarpone", "comte",
         "cheddar", "boursin", "fromage blanc", "petit suisse", "margarine",
+        "toastinette", "kiri", "raclette", "burrata", "skyr", "creme fraiche",
     ],
     "Épicerie salée": [
         "pates", "riz", "farine", "huile", "vinaigre", "sel", "poivre", "epice",
         "conserve", "tomate concassee", "concentre", "bouillon", "moutarde", "ketchup",
         "mayonnaise", "lentille", "pois chiche", "haricot sec", "semoule", "quinoa",
         "boulgour", "couscous", "sauce soja", "curry", "cumin", "paprika", "olive",
-        "cornichon", "cube", "levure", "maizena", "polenta",
+        "cornichon", "cube", "levure", "maizena", "polenta", "pesto", "tapenade",
+        "sauce tomate", "passata", "chapelure", "gnocchi", "nouille",
     ],
     "Épicerie sucrée": [
         "sucre", "chocolat", "vanille", "miel", "confiture", "caramel", "compote",
@@ -65,7 +71,8 @@ _RAYON_KEYWORDS: dict[str, list[str]] = {
 
 
 def _norm(s: str) -> str:
-    s = s.lower().strip()
+    # Replie les ligatures AVANT NFD (qui ne décompose pas œ/æ) → « œuf » = « oeuf ».
+    s = s.lower().strip().replace("œ", "oe").replace("æ", "ae")
     s = "".join(c for c in unicodedata.normalize("NFD", s)
                 if unicodedata.category(c) != "Mn")
     return s

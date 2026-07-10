@@ -117,6 +117,46 @@ def _match_unit(rest: str) -> tuple[str, str]:
     return "", rest
 
 
+# Mots de préparation à retirer du nom (n'importe où) — pour que « Ail haché »
+# et « Ail » se regroupent. On garde les qualificatifs porteurs de SENS
+# (frais, surgelé, rouge, fraîche…) : « crème fraîche » ≠ « crème ».
+_PREP_WORDS = {
+    "hache", "hachee", "hachees", "haches", "emince", "emincee", "emincees",
+    "eminces", "rape", "rapee", "rapees", "rapes", "essore", "essoree",
+    "essorees", "essores", "coupe", "coupee", "coupees", "coupes", "cisele",
+    "ciselee", "ciselees", "ciseles", "cuit", "cuite", "cuites", "cuits",
+    "fondu", "fondue", "fondus", "fondues", "egoutte", "egouttee", "egouttees",
+    "egouttes", "prealablement",
+}
+_ARTICLE_RE = re.compile(r"^(?:un|une|le|la|les|des|du|de|d['’])\s+", re.IGNORECASE)
+
+
+def _fold_word(w: str) -> str:
+    """Minuscule sans accents ni ligature (pour comparer aux mots de préparation)."""
+    w = w.lower().replace("œ", "oe").replace("æ", "ae")
+    w = unicodedata.normalize("NFD", w)
+    return "".join(c for c in w if unicodedata.category(c) != "Mn")
+
+
+def _clean_ingredient_name(nom: str) -> str:
+    """Nettoie un libellé d'ingrédient pour l'affichage ET le regroupement :
+    retire parenthèses/commentaires, article de tête, « al dente » et les mots
+    de préparation. Ne vide jamais le nom (repli sur l'original si besoin)."""
+    s = (nom or "").strip()
+    if not s:
+        return s
+    original = s
+    s = re.sub(r"\([^)]*\)", " ", s)          # « Mozzarella (ou feta) » → « Mozzarella »
+    s = s.replace("...", " ").replace("(", " ").replace(")", " ")
+    s = re.sub(r"\bal dente\b", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip(" ,.;:")
+    s = _ARTICLE_RE.sub("", s)                # « Un poireaux » → « poireaux »
+    tokens = s.split()
+    kept = [t for t in tokens if _fold_word(t) not in _PREP_WORDS]
+    s = " ".join(kept).strip(" ,.;:")
+    return s or original.strip()
+
+
 def parse_ingredient_line(line: str) -> dict | None:
     """Transforme une ligne en {nom, quantite, unite} NORMALISÉ (en amont).
 
@@ -150,7 +190,7 @@ def parse_ingredient_line(line: str) -> dict | None:
     else:
         qty, rest = "", s
     unite, nom = _match_unit(rest)
-    return {"nom": nom, "quantite": qty, "unite": unite}
+    return {"nom": _clean_ingredient_name(nom), "quantite": qty, "unite": unite}
 
 
 # Séparateurs de listes de condiments (« sel, poivre », « sel et poivre »).
@@ -167,9 +207,9 @@ def _split_condiments(nom: str) -> list[str]:
     """
     if any(c.isdigit() for c in nom):
         return [nom]
-    parts = [p.strip(" .").strip() for p in _CONDIMENT_SPLIT_RE.split(nom)]
+    parts = [_clean_ingredient_name(p) for p in _CONDIMENT_SPLIT_RE.split(nom)]
     parts = [p for p in parts if p]
-    if len(parts) >= 2 and all(len(p.split()) <= 3 for p in parts):
+    if len(parts) >= 2 and all(len(p.split()) <= 4 for p in parts):
         return parts
     return [nom]
 
@@ -246,10 +286,15 @@ def _normalize_form(s: str) -> str:
     « oignon », mais PAS « oignon rouge » et « oignon jaune » (qualificatif
     différent), ni « tomate » et « tomate cerise ».
     """
-    s = unicodedata.normalize("NFD", s.strip().lower())
+    # Replie les ligatures AVANT NFD (œufs/oeufs), retire accents PUIS
+    # ponctuation (« 0 % » = « 0% », « d'olive » = « d olive ») pour que ces
+    # variantes tombent sur la même clé de regroupement.
+    s = s.strip().lower().replace("œ", "oe").replace("æ", "ae")
+    s = unicodedata.normalize("NFD", s)
     s = "".join(c for c in s if unicodedata.category(c) != "Mn")  # retire accents
-    s = re.sub(r"\s+", " ", s)
-    words = [re.sub(r"(?<=\w{3})[sx]$", "", w) for w in s.split(" ")]
+    s = re.sub(r"[^\w\s]", " ", s)  # retire ponctuation (%, (), ', ., ...)
+    s = re.sub(r"\s+", " ", s).strip()
+    words = [re.sub(r"(?<=\w{3})[sx]$", "", w) for w in s.split(" ") if w]
     return " ".join(words)
 
 

@@ -112,6 +112,46 @@ def test_plain_titles_unchanged():
     assert clean_recipe_title("") == ""
 
 
+def test_clean_ingredient_name():
+    # parenthèses/commentaires retirés
+    assert parse_ingredient_line("Mozzarella (ou feta)")["nom"] == "Mozzarella"
+    assert parse_ingredient_line("Ketchup ...)")["nom"] == "Ketchup"
+    # article de tête retiré
+    assert parse_ingredient_line("Un poireau")["nom"] == "poireau"
+    # mot de préparation retiré (regroupement)
+    assert parse_ingredient_line("Ail haché")["nom"] == "Ail"
+    assert parse_ingredient_line("Salade essorée")["nom"] == "Salade"
+    assert parse_ingredient_line("Pâtes cuites al dente")["nom"] == "Pâtes"
+    # qualificatifs porteurs de sens conservés
+    assert parse_ingredient_line("crème fraîche")["nom"] == "crème fraîche"
+    assert parse_ingredient_line("oignon rouge")["nom"] == "oignon rouge"
+
+
+def test_normalize_form_merges_ligature_and_punct():
+    # œ/oe, espace avant %, préparation → même clé de fusion
+    oeufs = normalize_cached_ingredient({"nom": "Œufs", "quantite": "4", "unite": ""})
+    oeufs += normalize_cached_ingredient({"nom": "Oeufs", "quantite": "3", "unite": ""})
+    r = merge_ingredients(oeufs)
+    assert len(r) == 1 and r[0]["quantite"] == "7"
+
+    fb = normalize_cached_ingredient({"nom": "Fromage blanc 0 %", "quantite": "150", "unite": "g"})
+    fb += normalize_cached_ingredient({"nom": "Fromage blanc 0%", "quantite": "100", "unite": "g"})
+    r = merge_ingredients(fb)
+    assert len(r) == 1 and r[0]["quantite"] == "250"
+
+    ail = normalize_cached_ingredient({"nom": "Ail", "quantite": "2", "unite": "gousse"})
+    ail += normalize_cached_ingredient({"nom": "Ail hachées", "quantite": "1.5", "unite": "gousse"})
+    r = merge_ingredients(ail)
+    assert len(r) == 1 and r[0]["quantite"] == "3.5"
+
+
+def test_split_condiments_compound_line():
+    parts = normalize_cached_ingredient(
+        {"nom": "Le jus d'un citron, huile d'olive, sel, poivre", "quantite": "", "unite": ""})
+    noms = {p["nom"] for p in parts}
+    assert "huile d'olive" in noms and "sel" in noms and "poivre" in noms
+
+
 # ── Fusion des ingrédients ──────────────────────────────────────────
 
 def _by_nom(items):
@@ -189,3 +229,15 @@ def test_merge_skips_empty_names_and_sorts():
         {"nom": "ail", "quantite": "1", "unite": "gousse"},
     ])
     assert [i["nom"] for i in r] == ["ail", "Tomate"]
+
+
+# ── Catégorisation par rayon ─────────────────────────────────────────
+
+def test_categorize_ligature_and_new_items():
+    from app.categories import categorize
+    assert categorize("Œufs") == "Crémerie & œufs"      # ligature œ repliée
+    assert categorize("Pesto verde") == "Épicerie salée"
+    assert categorize("Melon bien mûr") == "Fruits & légumes"
+    assert categorize("Roquette") == "Fruits & légumes"
+    assert categorize("Toastinette") == "Crémerie & œufs"
+    assert categorize("crème fraîche") == "Crémerie & œufs"
