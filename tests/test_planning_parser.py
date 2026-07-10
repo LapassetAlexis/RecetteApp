@@ -39,9 +39,9 @@ def test_attach_sides_skips_complete_plat():
         client._make_plat(2, "soir", "Riz pilaf"),
     ]
     client._attach_sides(plats, meta, sides)
-    assert plats[0]["accompagnement"] is None  # plat complet -> aucun
-    assert plats[1]["accompagnement"]["nom_recette"] == "Haricots verts"  # nature -> côté
-    assert plats[2]["accompagnement"] is None  # accompagnement (Base=Légume) -> aucun
+    assert plats[0]["accompagnements"] == []  # plat complet -> aucun
+    assert plats[1]["accompagnements"][0]["nom_recette"] == "Haricots verts"  # nature -> côté
+    assert plats[2]["accompagnements"] == []  # accompagnement (Base=Légume) -> aucun
 
 
 def test_attach_sides_same_plat_same_side():
@@ -61,8 +61,8 @@ def test_attach_sides_same_plat_same_side():
         client._make_plat(3, "midi", "Poisson"),
     ]
     client._attach_sides(plats, meta, sides)
-    assert plats[0]["accompagnement"]["nom_recette"] == plats[1]["accompagnement"]["nom_recette"]
-    assert plats[2]["accompagnement"]["nom_recette"] != plats[0]["accompagnement"]["nom_recette"]
+    assert plats[0]["accompagnements"][0]["nom_recette"] == plats[1]["accompagnements"][0]["nom_recette"]
+    assert plats[2]["accompagnements"][0]["nom_recette"] != plats[0]["accompagnements"][0]["nom_recette"]
 
 
 def test_season_rank_and_recipe_seasons():

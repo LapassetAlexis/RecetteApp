@@ -55,17 +55,17 @@
     {% else %}<span class="meal-warn" title="Recette pas terminée : aucun ingrédient enregistré.">⚠ À compléter</span>{% endif %}
     {% endif %}
     <div class="meal-side" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}">
-    {% if plat.accompagnement %}
-        {% set acc = plat.accompagnement %}
+    {% for acc in plat.accompagnements %}
         {% set acclink = ('/recette/' ~ acc.notion_id) if acc.notion_id else acc.url %}
-        <span class="side-txt">+
-        {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
-        {% else %}{{ acc.nom_recette | clean_title }}{% endif %}{% if acc.non_enrichi %} <span class="side-warn" title="Accompagnement pas terminé : aucun ingrédient enregistré.">⚠</span>{% endif %}</span>
-        <button class="side-ch" title="Changer l'accompagnement">↻</button>
-        <button class="side-rm" title="Retirer l'accompagnement">✕</button>
-    {% else %}
-        <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
-    {% endif %}
+        <span class="side-item">
+            <span class="side-txt">+
+            {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
+            {% else %}{{ acc.nom_recette | clean_title }}{% endif %}{% if acc.non_enrichi %} <span class="side-warn" title="Accompagnement pas terminé : aucun ingrédient enregistré.">⚠</span>{% endif %}</span>
+            <button class="side-ch" data-nom="{{ acc.nom_recette }}" title="Changer cet accompagnement">↻</button>
+            <button class="side-rm" data-nom="{{ acc.nom_recette }}" title="Retirer cet accompagnement">✕</button>
+        </span>
+    {% endfor %}
+        <button class="side-add" title="Ajouter un accompagnement">➕ accompagnement</button>
     </div>
     {% if plat.repas or plat.base or plat.tags %}
     <div class="meal-chips">
@@ -413,26 +413,46 @@ document.querySelectorAll('.meal-ch').forEach(b=>b.onclick=function(){
     la();
 });
 
-// ── Accompagnements : changer / retirer / ajouter ──────
-let sideMode=false, sideSlot=null;  // sideSlot={jours:[...],m}
-function openSidePicker(slot){
-    sideMode=true; sideSlot=slot;
+// ── Accompagnements (multiples) : ajouter / changer / retirer ──────
+// sideSlot={jours:[...],m} ; sideReplace = nom de l'accompagnement à remplacer
+// (mode ↻) ou null (mode ➕ ajout).
+let sideMode=false, sideSlot=null, sideReplace=null;
+function openSidePicker(slot, replace){
+    sideMode=true; sideSlot=slot; sideReplace=replace||null;
     document.getElementById('modal-ctx').textContent=slotLabel(slot)+' — accompagnement';
-    document.querySelector('#modal h3').textContent='🥦 Accompagnement';
+    document.querySelector('#modal h3').textContent = replace ? '🥦 Changer l\'accompagnement' : '🥦 Ajouter un accompagnement';
     document.getElementById('modal').style.display='flex';
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 }
-document.querySelectorAll('.side-add,.side-ch').forEach(b=>b.onclick=function(){
+document.querySelectorAll('.side-add').forEach(b=>b.onclick=function(){
     const s=this.closest('.meal-side'); openSidePicker({jours:parseJours(s),m:s.dataset.moment});
 });
-document.querySelectorAll('.side-rm').forEach(b=>b.onclick=function(){
-    const s=this.closest('.meal-side'); setSide({jours:parseJours(s),m:s.dataset.moment},'');
+document.querySelectorAll('.side-ch').forEach(b=>b.onclick=function(){
+    const s=this.closest('.meal-side'); openSidePicker({jours:parseJours(s),m:s.dataset.moment}, this.dataset.nom);
 });
+document.querySelectorAll('.side-rm').forEach(b=>b.onclick=function(){
+    const s=this.closest('.meal-side'); removeSide({jours:parseJours(s),m:s.dataset.moment}, this.dataset.nom);
+});
+async function _postSide(url, body){
+    const r=await fetch(`${url}/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    return r.json();
+}
+// Depuis le picker : ➕ append ; ↻ remplace (retire l'ancien puis ajoute).
 async function setSide(slot,nom){
     for(const j of slot.jours){
-        const r=await fetch(`/api/update-side/${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jour:j,moment:slot.m,nouvelle_recette:nom})});
-        const d=await r.json();
+        if(sideReplace){
+            const d0=await _postSide('/api/remove-side',{jour:j,moment:slot.m,nom:sideReplace});
+            if(!d0.success){ toast(d0.error||'Erreur accompagnement','error'); return; }
+        }
+        const d=await _postSide('/api/add-side',{jour:j,moment:slot.m,nom});
+        if(!d.success){ toast(d.error||'Erreur accompagnement','error'); return; }
+    }
+    window.location.reload();
+}
+async function removeSide(slot,nom){
+    for(const j of slot.jours){
+        const d=await _postSide('/api/remove-side',{jour:j,moment:slot.m,nom});
         if(!d.success){ toast(d.error||'Erreur accompagnement','error'); return; }
     }
     window.location.reload();
@@ -579,9 +599,10 @@ function copyMenu() {
         const jours = (cell.dataset.jours || '').split(',').filter(Boolean).map(Number);
         const nameEl = cell.querySelector('.meal-name');
         let txt = nameEl ? nameEl.textContent.trim() : '';
-        const side = cell.querySelector('.meal-side .side-txt');
-        if (side) txt += ' ' + side.textContent.trim().replace(/\s+/g, ' ');
-        jours.forEach(j => { (days[j] = days[j] || {})[moment] = txt; });
+        cell.querySelectorAll('.meal-side .side-txt').forEach(side => {
+            txt += ' ' + side.textContent.trim().replace(/\s+/g, ' ');
+        });
+        jours.forEach(j => { (days[j] = days[j] || {})[moment] = txt.trim(); });
     });
     const lines = ['🍽️ Menu de la semaine', ''];
     for (let j = 1; j <= 7; j++) {
