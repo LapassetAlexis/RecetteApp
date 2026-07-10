@@ -413,6 +413,7 @@ async def voir_planning(request: Request, planning_id: int):
             "creneaux_non_resolus": data.get("creneaux_non_resolus", []),
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
+            "base_options": BASE_OPTIONS,
         },
     )
 
@@ -587,6 +588,41 @@ async def _collect_shopping(
     return collected, non_enrichis
 
 
+async def _refresh_shopping_and_save(
+    planning: dict, planning_id: int, planning_data: dict, plats: list[dict],
+) -> dict:
+    """Régénère la liste de courses (ancrée sur le cache DB), la range dans le
+    planning, persiste et renvoie la réponse standard des endpoints planning.
+
+    Mutualise la fin de /api/update-meal, /api/free-meal et /api/brique :
+    mêmes règles (pas d'extraction LLM à l'aveugle, mise à l'échelle par jour,
+    titre de recette par ingrédient, catégorisation par rayon)."""
+    per_day = _per_day_list(planning, planning_data)
+    collected, _ = await _collect_shopping(
+        plats, per_day, planning.get("nb_personnes", 4),
+    )
+    liste_courses = merge_ingredients(collected)
+    for it in liste_courses:
+        it["rayon"] = categorize(it.get("nom", ""))
+    planning_data["liste_courses"] = liste_courses
+
+    await db.update_planning(
+        planning_id=planning_id,
+        data_json=json.dumps(planning_data, ensure_ascii=False),
+        recipes=[
+            {
+                "notion_id": p.get("notion_id", ""),
+                "recipe_name": p["nom_recette"],
+                "repas_type": p.get("type_repas", ""),
+                "jour": p["jour"],
+                "moment": p["moment"],
+            }
+            for p in plats
+        ],
+    )
+    return {"success": True, "liste_courses": liste_courses, "plats": plats}
+
+
 @app.get("/recette/{page_id}", response_class=HTMLResponse)
 async def detail_recette(request: Request, page_id: str):
     """Fiche détail : ingrédients (Cooklang, portions ajustables) + instructions."""
@@ -709,6 +745,7 @@ async def enrichir_page(request: Request, page_id: str, url: str = ""):
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
             "base_options": BASE_OPTIONS,
+            "nature_options": NATURE_OPTIONS,
             "source_url": source_url,
             "needs_url": needs_url,
         },
@@ -819,6 +856,7 @@ async def enrichir_submit(
                 "repas_options": REPAS_OPTIONS,
                 "tag_options": TAG_OPTIONS,
                 "base_options": BASE_OPTIONS,
+                "nature_options": NATURE_OPTIONS,
                 "source_url": source_url,
                 "needs_url": not recette.get("url"),
                 "error": msg,
@@ -851,6 +889,7 @@ async def ajouter_page(request: Request):
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
             "base_options": BASE_OPTIONS,
+            "nature_options": NATURE_OPTIONS,
             "success": None,
             "error": None,
         },
@@ -1557,6 +1596,7 @@ async def ajouter_recette(
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
             "base_options": BASE_OPTIONS,
+            "nature_options": NATURE_OPTIONS,
         },
     )
 
@@ -1572,16 +1612,22 @@ async def api_alternatives(planning_id: int):
         # Recettes déjà dans le planning
         used_names = {r["recipe_name"] for r in planning.get("recipes", [])}
 
-        # Toutes les recettes Notion
+        # Toutes les recettes Notion. On expose la Nature pour que le picker
+        # distingue les recettes des « briques » (composants simples). On garde
+        # aussi les briques (Nature=Ingrédient) dans la liste : réutilisables en
+        # plat (n'importe quelle Base) comme en accompagnement (Base=Légume).
         recettes = await notion.get_all_recipes()
         alternatives = [
-            {"nom": r["nom"], "repas": recipe_types(r), "base": recipe_base(r), "tags": r["tags"]}
+            {"nom": r["nom"], "repas": recipe_types(r), "base": recipe_base(r),
+             "tags": r["tags"], "nature": recipe_nature(r)}
             for r in recettes
             if r["nom"] not in used_names
-            and recipe_nature(r) == "Recette"
-            and (not recipe_types(r)
-                 or set(recipe_types(r)) & {"Plat", "Entrée"}
-                 or "Légume" in recipe_base(r))
+            and (
+                recipe_nature(r) == "Ingrédient"
+                or not recipe_types(r)
+                or set(recipe_types(r)) & {"Plat", "Entrée"}
+                or "Légume" in recipe_base(r)
+            )
         ]
 
         return {"alternatives": alternatives}
@@ -1624,26 +1670,10 @@ async def api_update_meal(
         if r:
             _apply_recipe_info(target, r)
 
-        # Regénérer la liste de courses, ANCRÉE sur le cache DB (mêmes règles
+        # Regénérer la liste de courses + persister le planning (mêmes règles
         # que /generate-shopping : pas d'extraction LLM à l'aveugle, mise à
         # l'échelle par jour, titre de recette par ingrédient).
-        per_day = _per_day_list(planning, planning_data)
-        collected, _ = await _collect_shopping(
-            plats, per_day, planning.get("nb_personnes", 4),
-        )
-        liste_courses = merge_ingredients(collected)
-        for it in liste_courses:
-            it["rayon"] = categorize(it.get("nom", ""))
-        planning_data["liste_courses"] = liste_courses
-
-        # Mettre à jour le planning existant (ne pas en créer un nouveau)
-        await db.update_planning(
-            planning_id=planning_id,
-            data_json=json.dumps(planning_data, ensure_ascii=False),
-            recipes=[{"notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"], "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"]} for p in plats],
-        )
-
-        return {"success": True, "liste_courses": liste_courses, "plats": plats}
+        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
 
     except Exception as e:
         logger.exception("Erreur update meal")
@@ -1713,23 +1743,8 @@ async def api_free_meal(planning_id: int, request: Request):
             "tags": [],
         })
 
-        # Régénérer la liste de courses EXACTEMENT comme /api/update-meal.
-        per_day = _per_day_list(planning, planning_data)
-        collected, _ = await _collect_shopping(
-            plats, per_day, planning.get("nb_personnes", 4),
-        )
-        liste_courses = merge_ingredients(collected)
-        for it in liste_courses:
-            it["rayon"] = categorize(it.get("nom", ""))
-        planning_data["liste_courses"] = liste_courses
-
-        await db.update_planning(
-            planning_id=planning_id,
-            data_json=json.dumps(planning_data, ensure_ascii=False),
-            recipes=[{"notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"], "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"]} for p in plats],
-        )
-
-        return {"success": True, "liste_courses": liste_courses, "plats": plats}
+        # Régénérer la liste de courses + persister EXACTEMENT comme /api/update-meal.
+        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
 
     except Exception as e:
         logger.exception("Erreur repas libre")
@@ -1773,6 +1788,99 @@ async def api_update_side(planning_id: int, request: Request):
 
     except Exception as e:
         logger.exception("Erreur update side")
+        return {"error": str(e)}
+
+
+@app.post("/api/brique/{planning_id}")
+async def api_brique(planning_id: int, request: Request):
+    """Crée une « brique » (composant simple : steak, œuf, riz…) et la place
+    dans un créneau du planning, en plat OU en accompagnement.
+
+    Une brique = recette de Nature « Ingrédient » + une/des Base(s), dont
+    l'ingrédient de courses est elle-même (son propre nom). Exclue de la
+    génération auto mais réutilisable manuellement.
+
+    JSON attendu : {jour:int, moment:str, slot:"plat"|"accompagnement",
+    nom:str, base:list[str], quantite:str, unite:str}.
+    """
+    data = await request.json()
+    jour = data.get("jour")
+    moment = data.get("moment")  # "midi" ou "soir"
+    slot = data.get("slot")      # "plat" ou "accompagnement"
+    nom = (data.get("nom") or "").strip()
+    base = data.get("base") or []
+    if isinstance(base, str):
+        base = [base]
+    base = [b for b in base if b]
+    quantite = (str(data.get("quantite") or "")).strip()
+    unite = (str(data.get("unite") or "")).strip()
+
+    if jour not in range(1, 8) or moment not in ("midi", "soir"):
+        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir)"}
+    if slot not in ("plat", "accompagnement") or not nom:
+        return {"error": "Paramètres invalides (slot plat/accompagnement, nom)"}
+
+    try:
+        # Repérer le créneau cible AVANT de créer la recette (évite une page
+        # Notion orpheline si le créneau n'existe pas).
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        plats = planning_data["plats"]
+        target = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
+        if not target:
+            return {"error": "Repas non trouvé dans le planning"}
+
+        # Créer la recette brique (Nature=Ingrédient + Base, sans repas forcé).
+        result = await notion.create_recipe(nom=nom, nature="Ingrédient", base=base)
+        page_id = result.get("id", "")
+        if not page_id:
+            return {"error": "Création de la brique impossible"}
+
+        # L'ingrédient de courses de la brique est elle-même. On normalise via
+        # parse_ingredient_line pour découper qté/unité proprement, avec repli
+        # sur les valeurs saisies si le parsing ne renvoie rien d'exploitable.
+        parsed = parse_ingredient_line(" ".join(p for p in (quantite, unite, nom) if p))
+        if parsed and parsed.get("nom"):
+            structured = [parsed]
+        else:
+            structured = [{"nom": nom, "quantite": quantite, "unite": unite}]
+
+        await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+        await db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
+
+        recette = {
+            "id": page_id,
+            "url": "",
+            "notion_url": result.get("url", ""),
+            "nature": "Ingrédient",
+            "base": base,
+            "repas": [],
+            "tags": [],
+        }
+
+        if slot == "plat":
+            # Même logique que /api/free-meal : la brique devient le plat.
+            target["nom_recette"] = nom
+            target["notion_id"] = target["url"] = target["notion_url"] = ""
+            _apply_recipe_info(target, recette)
+        else:
+            # Même logique que /api/update-side : la brique devient l'accompagnement.
+            target["accompagnement"] = {
+                "nom_recette": nom,
+                "notion_id": page_id,
+                "url": "",
+                "notion_url": result.get("url", ""),
+                "nature": "Ingrédient",
+                "base": base,
+            }
+
+        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
+
+    except Exception as e:
+        logger.exception("Erreur brique")
         return {"error": str(e)}
 
 

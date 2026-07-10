@@ -67,9 +67,10 @@
         <button class="side-add" title="Ajouter un accompagnement">+ accompagnement</button>
     {% endif %}
     </div>
-    {% if plat.repas or plat.tags %}
+    {% if plat.repas or plat.base or plat.tags %}
     <div class="meal-chips">
         {% for t in plat.repas %}<span class="chip chip-repas">{{ t }}</span>{% endfor %}
+        {% if plat.nature == 'Ingrédient' %}{% for b in plat.base %}<span class="chip chip-repas">🧱 {{ b }}</span>{% endfor %}{% endif %}
         {% if plat.tags %}<span class="tag">{{ plat.tags[0] }}</span>{% endif %}
     </div>
     {% endif %}
@@ -157,6 +158,22 @@
                     <input type="text" id="free-nom" placeholder="Nom du repas (ex. Steak + haricots verts)" class="inp">
                     <textarea id="free-ings" placeholder="Un ingrédient par ligne&#10;200 g de haricots verts&#10;2 steaks" class="inp" rows="4" style="margin-top:.4rem"></textarea>
                     <button type="button" class="btn btn-sm btn-primary" id="free-go" style="margin-top:.4rem">Créer et placer</button>
+                </div>
+            </div>
+            <div id="brique-box" style="display:none">
+                <button type="button" class="btn btn-ghost btn-sm" id="brique-toggle">➕ Nouvelle brique</button>
+                <div id="brique-form" style="display:none;margin-top:.6rem">
+                    <input type="text" id="brique-nom" placeholder="Nom (ex. Riz, Steak, Brocolis)" class="inp">
+                    <div class="tag-group-chips" style="margin-top:.4rem">
+                        {% for opt in base_options %}
+                        <label class="tgl"><input type="checkbox" class="brique-base" value="{{ opt }}"><span>{{ opt }}</span></label>
+                        {% endfor %}
+                    </div>
+                    <div style="display:flex;gap:.4rem;margin-top:.4rem">
+                        <input type="text" id="brique-qte" placeholder="Qté (option.)" class="inp" style="flex:1">
+                        <input type="text" id="brique-unite" placeholder="Unité (option.)" class="inp" style="flex:1">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary" id="brique-go" style="margin-top:.4rem">Créer et placer</button>
                 </div>
             </div>
         </div>
@@ -425,10 +442,17 @@ async function la() {
     resetFree();
     const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
     let alts=d.alternatives||[];
+    // Accompagnement : recettes ET briques dont la Base contient Légume.
     if(sideMode) alts=alts.filter(a=>(a.base||[]).includes('Légume'));
     const el=document.getElementById('alt-list');
     if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
-    el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${(a.repas||[]).length?`<span class="chip chip-r">${a.repas.join('/')}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');
+    el.innerHTML=alts.map(a=>{
+        const brique = a.nature==='Ingrédient';
+        let chip='';
+        if(brique) chip=`<span class="chip chip-r">🧱 ${((a.base||[]).join('/'))||'brique'}</span>`;
+        else if((a.repas||[]).length) chip=`<span class="chip chip-r">${a.repas.join('/')}</span>`;
+        return `<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${chip}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`;
+    }).join('');
     document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>{ if(sideMode){ setSide(sideSlot,b.dataset.n); } else { rpl(b.dataset.n); } });
     document.getElementById('flt').oninput=function(){const q=this.value.toLowerCase();document.querySelectorAll('.alt').forEach(e=>e.style.display=e.dataset.n.includes(q)?'flex':'none');};
 }
@@ -445,11 +469,19 @@ async function rpl(n) {
 
 // ── Repas libre : crée une recette minimale et la place dans le(s) créneau(x) ──
 function resetFree(){
-    // Disponible seulement en mode « changer recette » (pas pour un accompagnement).
+    // Repas libre : seulement en mode « changer recette » (pas en accompagnement).
     document.getElementById('free-meal').style.display = sideMode ? 'none' : 'block';
     document.getElementById('free-form').style.display = 'none';
     document.getElementById('free-nom').value = '';
     document.getElementById('free-ings').value = '';
+    // Brique : disponible dans les deux modes (plat ou accompagnement).
+    document.getElementById('brique-box').style.display = 'block';
+    document.getElementById('brique-form').style.display = 'none';
+    document.getElementById('brique-nom').value = '';
+    document.getElementById('brique-qte').value = '';
+    document.getElementById('brique-unite').value = '';
+    // En accompagnement, la Base pertinente est « Légume » (pré-cochée).
+    document.querySelectorAll('.brique-base').forEach(cb=>{ cb.checked = (sideMode && cb.value==='Légume'); });
 }
 document.getElementById('free-toggle').onclick = function(){
     const f = document.getElementById('free-form');
@@ -471,6 +503,34 @@ document.getElementById('free-go').onclick = async function(){
         if(!d.success){ ok=false; toast(d.error||'Erreur repas libre', 'error'); break; }
     }
     if(ok){ toast('Repas libre créé ✓', 'success'); window.location.reload(); }
+    else { this.disabled = false; this.textContent = 'Créer et placer'; }
+};
+
+// ── Brique : crée un composant simple (Nature=Ingrédient) et le place ──
+document.getElementById('brique-toggle').onclick = function(){
+    const f = document.getElementById('brique-form');
+    const open = f.style.display !== 'none';
+    f.style.display = open ? 'none' : 'block';
+    if(!open) document.getElementById('brique-nom').focus();
+};
+document.getElementById('brique-go').onclick = async function(){
+    const nom = document.getElementById('brique-nom').value.trim();
+    const base = [...document.querySelectorAll('.brique-base:checked')].map(cb=>cb.value);
+    const quantite = document.getElementById('brique-qte').value.trim();
+    const unite = document.getElementById('brique-unite').value.trim();
+    if(!nom){ toast('Donne un nom à la brique', 'error'); return; }
+    const slots = sideMode ? [sideSlot] : bul;
+    if(!slots.length){ toast('Aucun créneau sélectionné', 'error'); return; }
+    const slot = sideMode ? 'accompagnement' : 'plat';
+    this.disabled = true; this.textContent = '⏳ Création...';
+    let ok = true;
+    for(const s of slots) for(const j of s.jours){
+        const r = await fetch(`/api/brique/${pid}`, {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({jour:j, moment:s.m, slot, nom, base, quantite, unite})});
+        const d = await r.json();
+        if(!d.success){ ok=false; toast(d.error||'Erreur brique', 'error'); break; }
+    }
+    if(ok){ toast('Brique créée ✓', 'success'); window.location.reload(); }
     else { this.disabled = false; this.textContent = 'Créer et placer'; }
 };
 
