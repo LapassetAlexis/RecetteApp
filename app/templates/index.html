@@ -27,6 +27,12 @@
 .g-type { background: var(--bg3, #eee); }
 .g-group { color: #fff; }
 .group-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: .82rem; }
+.group-picker { position: absolute; z-index: 50; display: flex; gap: 6px; padding: 6px;
+    background: var(--card, #fff); border: 1px solid var(--bo, #ddd); border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.group-sw { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent;
+    cursor: pointer; padding: 0; }
+.group-sw.sel { border-color: var(--t1, #333); box-shadow: 0 0 0 2px #fff inset; }
 </style>
 
 <div class="hero">
@@ -86,7 +92,7 @@
                 {% for i in range(7) %}
                 <div class="g-cell" data-jour="{{ i + 1 }}" data-moment="midi">
                     <div><span class="g-pers-lbl">👤</span> <input type="number" class="g-pers" min="0" max="20" value="{{ pers[i] }}" title="Personnes (0 = absent)"></div>
-                    <button type="button" class="g-type" data-type="recette" title="Type : Recette (IA) / Simple (briques)">🍲 Recette</button>
+                    <button type="button" class="g-type" data-type="simple" title="Type : Recette (IA) / Simple (briques)">🧱 Simple</button>
                     <button type="button" class="g-group" data-group="{{ groups[i] }}" title="Groupe : même couleur = même plat">G{{ groups[i] }}</button>
                 </div>
                 {% endfor %}
@@ -95,7 +101,7 @@
                 {% for i in range(7) %}
                 <div class="g-cell" data-jour="{{ i + 1 }}" data-moment="soir">
                     <div><span class="g-pers-lbl">👤</span> <input type="number" class="g-pers" min="0" max="20" value="{{ pers[i] }}" title="Personnes (0 = absent)"></div>
-                    <button type="button" class="g-type" data-type="recette" title="Type : Recette (IA) / Simple (briques)">🍲 Recette</button>
+                    <button type="button" class="g-type" data-type="simple" title="Type : Recette (IA) / Simple (briques)">🧱 Simple</button>
                 </div>
                 {% endfor %}
             </div>
@@ -143,7 +149,7 @@
 
 <script>
 const JOURS_COURT = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
-const GROUP_COLORS = ['#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b','#f39c12','#1abc9c'];
+const GROUP_COLORS = ['#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b'];  // 5 couleurs max
 const DEFAULT_PERS = [2,2,2,2,2,4,4];
 const DEFAULT_GROUPS = [1,1,2,2,2,3,4];
 
@@ -196,15 +202,41 @@ function bindCell(c) {
         paintCell(c);
     });
     const gb = groupBtn(c);
-    if (gb) gb.addEventListener('click', () => {
-        const groups = midiCells().map(x => parseInt(groupBtn(x).dataset.group) || 1);
-        const maxG = Math.max(...groups);
-        let g = parseInt(gb.dataset.group) || 1;
-        g = g >= maxG + 1 ? 1 : g + 1;   // cycle 1..maxG+1 puis retour à 1
-        gb.dataset.group = g;
-        paintCell(c);
-        renderLegend();
+    if (gb) gb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openGroupPicker(gb, c);
     });
+}
+
+// Sélecteur de couleur : clic sur le badge G → choix parmi les 5 couleurs.
+// Même couleur (= même groupe) sur plusieurs midis => même plat.
+let _picker = null;
+function closeGroupPicker() { if (_picker) { _picker.remove(); _picker = null; } }
+document.addEventListener('click', closeGroupPicker);
+function openGroupPicker(gb, c) {
+    closeGroupPicker();
+    const pop = document.createElement('div');
+    pop.className = 'group-picker';
+    GROUP_COLORS.forEach((col, idx) => {
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'group-sw';
+        sw.style.background = col;
+        sw.title = 'Groupe ' + (idx + 1);
+        if ((parseInt(gb.dataset.group) || 1) === idx + 1) sw.classList.add('sel');
+        sw.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            gb.dataset.group = idx + 1;
+            paintCell(c);
+            renderLegend();
+            closeGroupPicker();
+        });
+        pop.appendChild(sw);
+    });
+    document.body.appendChild(pop);
+    const r = gb.getBoundingClientRect();
+    pop.style.left = (window.scrollX + r.left) + 'px';
+    pop.style.top = (window.scrollY + r.bottom + 4) + 'px';
 }
 
 // ── Hydratation depuis le champ `meals` (re-rendu après erreur) ──────
@@ -246,7 +278,7 @@ function resetGrille() {
     cells().forEach(c => {
         const i = parseInt(c.dataset.jour) - 1;
         persInput(c).value = DEFAULT_PERS[i];
-        typeBtn(c).dataset.type = 'recette';
+        typeBtn(c).dataset.type = 'simple';
         const gb = groupBtn(c);
         if (gb) gb.dataset.group = DEFAULT_GROUPS[i];
     });
