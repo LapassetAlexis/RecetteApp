@@ -1591,6 +1591,92 @@ async def api_update_meal(
         return {"error": str(e)}
 
 
+@app.post("/api/free-meal/{planning_id}")
+async def api_free_meal(planning_id: int, request: Request):
+    """Crée une recette minimale « repas libre » (nom + quelques ingrédients)
+    puis la place dans un créneau du planning. Utile pour un plat qui n'existe
+    pas encore en base (ex. « Steak + haricots verts »).
+
+    JSON attendu : {jour:int, moment:str, nom:str, ingredients:str}
+    (ingredients = texte multi-lignes, une ligne par ingrédient).
+    """
+    data = await request.json()
+    jour = data.get("jour")
+    moment = data.get("moment")  # "midi" ou "soir"
+    nom = (data.get("nom") or "").strip()
+    ingredients_text = data.get("ingredients") or ""
+
+    if jour not in range(1, 8) or moment not in ("midi", "soir") or not nom:
+        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir, nom)"}
+
+    try:
+        # Récupérer le planning et repérer le créneau cible AVANT de créer la
+        # recette (évite de créer une page Notion orpheline si le créneau
+        # n'existe pas).
+        planning = await db.get_planning_with_recipes(planning_id)
+        if not planning:
+            return {"error": "Planning introuvable"}
+
+        planning_data = json.loads(planning["data_json"])
+        plats = planning_data["plats"]
+        target = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
+        if not target:
+            return {"error": "Repas non trouvé dans le planning"}
+
+        # Parser les ingrédients saisis (une ligne → {nom, quantite, unite}).
+        structured = [
+            i for i in (parse_ingredient_line(l) for l in ingredients_text.split("\n"))
+            if i and i["nom"]
+        ]
+
+        # Créer la VRAIE recette minimale réutilisable dans Notion.
+        result = await notion.create_recipe(nom=nom, repas="Plat")
+        page_id = result.get("id", "")
+        if not page_id:
+            return {"error": "Création de la recette impossible"}
+
+        # Écrire les ingrédients : Notion + cache local structuré (pour scaling,
+        # nutrition et reconstruction de la liste de courses).
+        if structured:
+            await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+            await db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
+
+        # Placer la recette fraîchement créée dans le créneau : on construit le
+        # dict recette nous-mêmes (on a déjà son id/url via create_recipe) plutôt
+        # que de re-fetch tout le catalogue.
+        target["nom_recette"] = nom
+        target["notion_id"] = target["url"] = target["notion_url"] = ""
+        _apply_recipe_info(target, {
+            "id": page_id,
+            "url": "",                        # pas d'URL source pour un repas libre
+            "notion_url": result.get("url", ""),
+            "repas": "Plat",
+            "tags": [],
+        })
+
+        # Régénérer la liste de courses EXACTEMENT comme /api/update-meal.
+        per_day = _per_day_list(planning, planning_data)
+        collected, _ = await _collect_shopping(
+            plats, per_day, planning.get("nb_personnes", 4),
+        )
+        liste_courses = merge_ingredients(collected)
+        for it in liste_courses:
+            it["rayon"] = categorize(it.get("nom", ""))
+        planning_data["liste_courses"] = liste_courses
+
+        await db.update_planning(
+            planning_id=planning_id,
+            data_json=json.dumps(planning_data, ensure_ascii=False),
+            recipes=[{"notion_id": p.get("notion_id", ""), "recipe_name": p["nom_recette"], "repas_type": p.get("type_repas", ""), "jour": p["jour"], "moment": p["moment"]} for p in plats],
+        )
+
+        return {"success": True, "liste_courses": liste_courses, "plats": plats}
+
+    except Exception as e:
+        logger.exception("Erreur repas libre")
+        return {"error": str(e)}
+
+
 @app.post("/api/update-side/{planning_id}")
 async def api_update_side(planning_id: int, request: Request):
     """Change ou retire l'accompagnement d'un repas. nouvelle_recette vide = retirer."""
