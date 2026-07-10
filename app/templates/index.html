@@ -79,6 +79,12 @@
     </div>
 
     <div class="form-g">
+        <label for="nb_simple">🧱 Repas simples cette semaine</label>
+        <input type="number" id="nb_simple" name="nb_simple" value="{{ nb_simple or 0 }}" min="0" class="inp">
+        <small class="hint">Assemblés depuis les briques (1 protéine + féculent + légume), sans IA.</small>
+    </div>
+
+    <div class="form-g">
         <label for="custom_prompt">✏️ Mes consignes pour l'IA</label>
         <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, un soir par semaine restes du midi...">{{ custom_prompt or "" }}</textarea>
         <div class="preview-row">

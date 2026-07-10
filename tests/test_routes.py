@@ -1129,3 +1129,94 @@ def test_brique_creneau_introuvable(client, monkeypatch):
         "jour": 1, "moment": "soir", "slot": "plat", "nom": "Riz", "base": ["Féculent"]})
     assert resp.json().get("error")
     assert appels["create"] == 0  # pas de page Notion orpheline
+
+
+def _brique(nom, base, **kw):
+    """Brique = recette Nature=Ingrédient portant une Base."""
+    return _recipe(nom, repas="", base=[base], nature="Ingrédient",
+                   id=kw.get("id", nom.lower()))
+
+
+def test_generer_repas_simples(client, monkeypatch):
+    """nb_simple=2 → 2 créneaux deviennent des repas simples (brique protéine +
+    accompagnements féculent + légume), le reste reste des recettes, et la liste
+    de courses inclut les ingrédients des briques."""
+    import asyncio
+
+    async def _all():
+        return [
+            _recipe("Plat A", id="a"), _recipe("Plat B", id="b"),
+            _recipe("Plat C", id="c"), _recipe("Plat D", id="d"),
+            _brique("Steak", "Viande"), _brique("Saumon", "Poisson"),
+            _brique("Riz", "Féculent"), _brique("Pâtes", "Féculent"),
+            _brique("Brocoli", "Légume"), _brique("Carottes", "Légume"),
+        ]
+
+    async def _gen(**kw):
+        noms = ["Plat A", "Plat B", "Plat C", "Plat D"]
+        return [{"jour": i + 1, "moment": "midi", "nom_recette": n, "type_repas": "Plat"}
+                for i, n in enumerate(noms)]
+
+    # Ingrédient de courses d'une brique = son nom (ici l'id, = nom en minuscule).
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    pid = int(client.post("/generer", data={
+        "week_start": "2026-01-05", "saison": "Hiver", "nb_simple": "2",
+    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    planning = asyncio.run(main.db.get_planning_with_recipes(pid))
+    data = json.loads(planning["data_json"])
+    plats = data["plats"]
+
+    briques = [p for p in plats if p.get("nature") == "Ingrédient"]
+    assert len(briques) == 2
+    for b in briques:
+        accs = b["accompagnements"]
+        assert len(accs) == 2
+        noms = {a["nom_recette"] for a in accs}
+        assert noms & {"Riz", "Pâtes"}      # un féculent
+        assert noms & {"Brocoli", "Carottes"}  # un légume
+        assert b["nom_recette"] in {"Steak", "Saumon"}
+
+    recettes_plats = [p for p in plats if p.get("nature") != "Ingrédient"]
+    assert len(recettes_plats) == 2                 # le reste = recettes
+    assert not data.get("briques_manquantes")       # 2 repas complets produits
+
+    shop = client.post(f"/generate-shopping/{pid}").json()
+    noms_courses = {i["nom"] for i in shop["liste_courses"]}
+    assert {"steak", "saumon"} <= noms_courses       # protéines des 2 repas simples
+
+
+def test_generer_repas_simples_briques_insuffisantes(client, monkeypatch):
+    """Pas assez de briques → bannière briques_manquantes présente."""
+    import asyncio
+
+    async def _all():
+        return [_recipe("Plat A", id="a"), _recipe("Plat B", id="b"),
+                _brique("Steak", "Viande")]  # 1 protéine, 0 féculent, 0 légume
+
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Plat A", "type_repas": "Plat"},
+                {"jour": 1, "moment": "soir", "nom_recette": "Plat B", "type_repas": "Plat"}]
+
+    async def _enriched(nid):
+        return None
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    pid = int(client.post("/generer", data={
+        "week_start": "2026-01-05", "saison": "Hiver", "nb_simple": "2",
+    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    planning = asyncio.run(main.db.get_planning_with_recipes(pid))
+    data = json.loads(planning["data_json"])
+    assert data.get("briques_manquantes")            # bannière présente
+    page = client.get(f"/planning/{pid}").text
+    assert "repas simples demandés" in page
