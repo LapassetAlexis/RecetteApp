@@ -615,6 +615,106 @@ def test_update_side_invalid_params(client):
     assert "error" in bad2
 
 
+# ── Accompagnements MULTIPLES ──────────────────────────────────────
+
+def _side_planning(client, monkeypatch):
+    """Planning à un repas (Poulet, midi jour 1) + catalogue de 2 légumes
+    (Haricots, Carottes), chacun avec ses ingrédients en cache."""
+    async def _all():
+        return [_recipe("Poulet", id="p1"),
+                _recipe("Haricots", id="h1", base=["Légume"]),
+                _recipe("Carottes", id="c1", base=["Légume"])]
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "notion_id": "p1"}]
+    _INGS = {
+        "p1": [{"nom": "poulet", "quantite": "200", "unite": "g"}],
+        "h1": [{"nom": "haricots", "quantite": "150", "unite": "g"}],
+        "c1": [{"nom": "carottes", "quantite": "100", "unite": "g"}],
+    }
+    async def _enriched(nid):
+        return {"ingredients": json.dumps(_INGS[nid])} if nid in _INGS else None
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    return int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                           follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+
+def test_add_side_appends_multiple(client, monkeypatch):
+    """add-side ajoute (APPEND) : deux accompagnements coexistent, doublon ignoré,
+    et leurs ingrédients figurent tous dans la liste de courses."""
+    pid = _side_planning(client, monkeypatch)
+    assert client.post(f"/api/add-side/{pid}",
+                       json={"jour": 1, "moment": "midi", "nom": "Haricots"}).json()["success"]
+    d = client.post(f"/api/add-side/{pid}",
+                    json={"jour": 1, "moment": "midi", "nom": "Carottes"}).json()
+    assert d["success"]
+    midi = next(p for p in d["plats"] if p["jour"] == 1 and p["moment"] == "midi")
+    assert [a["nom_recette"] for a in midi["accompagnements"]] == ["Haricots", "Carottes"]
+
+    # Doublon (même nom) : ignoré, toujours 2 accompagnements.
+    d3 = client.post(f"/api/add-side/{pid}",
+                     json={"jour": 1, "moment": "midi", "nom": "Haricots"}).json()
+    midi = next(p for p in d3["plats"] if p["jour"] == 1 and p["moment"] == "midi")
+    assert len(midi["accompagnements"]) == 2
+
+    # Les ingrédients des DEUX accompagnements sont dans les courses.
+    noms = {i["nom"].lower() for i in d3["liste_courses"]}
+    assert {"haricots", "carottes"} <= noms
+
+
+def test_remove_side_removes_the_right_one(client, monkeypatch):
+    """remove-side retire l'accompagnement ciblé (par nom), garde les autres,
+    et met à jour la liste de courses en conséquence."""
+    pid = _side_planning(client, monkeypatch)
+    client.post(f"/api/add-side/{pid}", json={"jour": 1, "moment": "midi", "nom": "Haricots"})
+    client.post(f"/api/add-side/{pid}", json={"jour": 1, "moment": "midi", "nom": "Carottes"})
+    d = client.post(f"/api/remove-side/{pid}",
+                    json={"jour": 1, "moment": "midi", "nom": "Haricots"}).json()
+    assert d["success"]
+    midi = next(p for p in d["plats"] if p["jour"] == 1 and p["moment"] == "midi")
+    assert [a["nom_recette"] for a in midi["accompagnements"]] == ["Carottes"]
+    noms = {i["nom"].lower() for i in d["liste_courses"]}
+    assert "carottes" in noms and "haricots" not in noms
+
+
+def test_update_meal_clears_sides(client, monkeypatch):
+    """Remplacer le plat principal réinitialise ses accompagnements."""
+    pid = _side_planning(client, monkeypatch)
+    client.post(f"/api/add-side/{pid}", json={"jour": 1, "moment": "midi", "nom": "Haricots"})
+    d = client.post(f"/api/update-meal/{pid}",
+                    json={"jour": 1, "moment": "midi", "nouvelle_recette": "Carottes"}).json()
+    assert d["success"]
+    midi = next(p for p in d["plats"] if p["jour"] == 1 and p["moment"] == "midi")
+    assert midi["nom_recette"] == "Carottes"
+    assert midi["accompagnements"] == []
+
+
+def test_legacy_accompagnement_read_as_list(client, monkeypatch):
+    """Ancien planning stockant `accompagnement` (dict) : lu comme liste à 1
+    (affichage + helper) et inclus dans les courses via plat_accompagnements."""
+    import asyncio
+    legacy = {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "notion_id": "p1",
+              "accompagnement": {"nom_recette": "Haricots", "notion_id": "h1",
+                                 "url": "", "notion_url": ""}}
+    # Helper tolérant : le dict singulier devient une liste à 1.
+    assert len(main.plat_accompagnements(legacy)) == 1
+    assert main.plat_accompagnements(legacy)[0]["nom_recette"] == "Haricots"
+    # accompagnement absent / None -> liste vide.
+    assert main.plat_accompagnements({"nom_recette": "X"}) == []
+    assert main.plat_accompagnements({"accompagnement": None}) == []
+
+    data = {"plats": [legacy], "liste_courses": [], "per_day": "4,4,4,4,4,4,4"}
+    pid = asyncio.run(main.db.save_planning(
+        week_start="2026-01-05", saison="Hiver", nb_personnes=4, ingredients_force="",
+        data_json=json.dumps(data, ensure_ascii=False),
+        recipes=[{"notion_id": "p1", "recipe_name": "Poulet", "repas_type": "Plat",
+                  "jour": 1, "moment": "midi"}],
+    ))
+    # L'accompagnement legacy est bien rendu dans la page.
+    assert "Haricots" in client.get(f"/planning/{pid}").text
+
+
 def test_enrich_all_stream(client, monkeypatch):
     async def _all():
         return [_recipe("Poulet", id="p1", url="http://r"), _recipe("SansUrl", id="p2")]
@@ -996,8 +1096,10 @@ def test_brique_accompagnement_creates_and_places(client, monkeypatch):
     # La brique est posée comme accompagnement (pas comme plat).
     midi = next(p for p in data["plats"] if p["jour"] == 1 and p["moment"] == "midi")
     assert midi["nom_recette"] == "Poulet"  # plat inchangé
-    acc = midi["accompagnement"]
-    assert acc and acc["nom_recette"] == "Brocolis"
+    accs = midi["accompagnements"]
+    assert len(accs) == 1
+    acc = accs[0]
+    assert acc["nom_recette"] == "Brocolis"
     assert acc["notion_id"] == "brique1"
     assert acc["base"] == ["Légume"]
 

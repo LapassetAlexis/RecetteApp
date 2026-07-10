@@ -109,6 +109,7 @@ a.meal-name:hover { text-decoration:underline; }
 .meal-side { display:flex; align-items:center; gap:3px; flex-wrap:wrap; font-size:0.7rem; line-height:1.25; color:var(--t2); margin:1px 0 3px; word-break:break-word; }
 .meal-side a { color:var(--t2); text-decoration:none; }
 .meal-side a:hover { text-decoration:underline; }
+.meal-side .side-item { display:flex; align-items:center; gap:3px; width:100%; }
 .meal-side .side-txt { flex:1; min-width:0; }
 .side-ch, .side-rm, .side-add { background:none; border:1px solid var(--bo); border-radius:6px; color:var(--t2); cursor:pointer; padding:0 5px; font-size:0.65rem; line-height:1.5; }
 .side-ch:hover, .side-rm:hover, .side-add:hover { background:var(--bg2); color:var(--text); }

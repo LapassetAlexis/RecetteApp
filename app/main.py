@@ -184,6 +184,19 @@ def _index_by_name(recettes: list[dict]) -> dict[str, dict]:
     return {r["nom"].lower().strip(): r for r in recettes}
 
 
+def plat_accompagnements(plat: dict) -> list[dict]:
+    """Lecture TOLÉRANTE des accompagnements d'un plat.
+
+    Nouveau modèle : liste `accompagnements` (0..N). Ancien modèle (anciens
+    plannings) : `accompagnement` (dict | None) → traité comme liste à 0/1.
+    Filtre les entrées vides (sans nom_recette)."""
+    accs = plat.get("accompagnements")
+    if accs is not None:
+        return [a for a in accs if a and a.get("nom_recette")]
+    acc = plat.get("accompagnement")
+    return [acc] if acc and acc.get("nom_recette") else []
+
+
 def _apply_recipe_info(plat: dict, r: dict) -> None:
     """Reporte les infos Notion d'une recette sur un plat du planning."""
     plat["notion_id"] = r["id"]
@@ -217,9 +230,9 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
     for p in plats:
         if p.get("notion_id"):
             ids.add(p["notion_id"])
-        acc = p.get("accompagnement") or {}
-        if acc.get("notion_id"):
-            ids.add(acc["notion_id"])
+        for acc in plat_accompagnements(p):
+            if acc.get("notion_id"):
+                ids.add(acc["notion_id"])
     if not ids:
         return None
 
@@ -255,11 +268,12 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
     _KEYS = ("calories", "proteines", "glucides", "lipides")
 
     def _meal_nut(p: dict) -> dict | None:
-        """Somme nutrition d'un repas (plat + accompagnement) ou None si non estimable."""
+        """Somme nutrition d'un repas (plat + tous ses accompagnements) ou None
+        si non estimable."""
         recs = [p.get("notion_id")]
-        acc = p.get("accompagnement") or {}
-        if acc.get("notion_id"):
-            recs.append(acc["notion_id"])
+        for acc in plat_accompagnements(p):
+            if acc.get("notion_id"):
+                recs.append(acc["notion_id"])
         parts = [per_recipe[n] for n in recs if n in per_recipe]
         if not parts:
             return None
@@ -350,8 +364,11 @@ def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
             if not plat:
                 run = None
                 continue
-            acc = plat.get("accompagnement") or {}
-            key = (plat.get("nom_recette", ""), acc.get("nom_recette", ""))
+            accs = plat_accompagnements(plat)
+            key = (
+                plat.get("nom_recette", ""),
+                tuple(a.get("nom_recette", "") for a in accs),
+            )
             if run and run["key"] == key and run["start"] + run["span"] == jour:
                 run["span"] += 1
                 run["jours"].append(jour)
@@ -391,10 +408,13 @@ async def voir_planning(request: Request, planning_id: int):
         p["repas"] = recipe_types(p)
         nid = p.get("notion_id")
         p["non_enrichi"] = not (nid and nid in enriched_ids)
-        acc = p.get("accompagnement")
-        if acc:
+        # Normalise vers le modèle liste (tolère les anciens plannings en
+        # `accompagnement` singulier) et marque chaque accompagnement non enrichi.
+        accs = plat_accompagnements(p)
+        for acc in accs:
             aid = acc.get("notion_id")
             acc["non_enrichi"] = not (aid and aid in enriched_ids)
+        p["accompagnements"] = accs
 
     return templates.TemplateResponse(
         "planning.html",
@@ -556,12 +576,11 @@ async def _collect_shopping(
             return per_day[j - 1]
         return nb_personnes
 
-    # Plats + accompagnements (l'accompagnement hérite du jour de son plat).
+    # Plats + accompagnements (chaque accompagnement hérite du jour de son plat).
     sources: list[dict] = []
     for p in plats:
         sources.append(p)
-        acc = p.get("accompagnement")
-        if acc and acc.get("nom_recette"):
+        for acc in plat_accompagnements(p):
             sources.append({**acc, "jour": p.get("jour")})
 
     collected: list[dict] = []
@@ -1458,7 +1477,7 @@ async def api_enrich_week(planning_id: int):
         seen: set[str] = set()
         recettes: list[dict] = []
         for p in plats:
-            for src in (p, p.get("accompagnement") or {}):
+            for src in (p, *plat_accompagnements(p)):
                 nid = src.get("notion_id")
                 if nid and nid not in seen:
                     seen.add(nid)
@@ -1672,6 +1691,10 @@ async def api_update_meal(
         r = _index_by_name(await notion.get_all_recipes()).get(nouvelle_recette.lower().strip())
         if r:
             _apply_recipe_info(target, r)
+        # Le plat principal change : ses accompagnements ne le concernent plus,
+        # on repart d'une assiette vide (l'utilisateur les recompose ensuite).
+        target["accompagnements"] = []
+        target.pop("accompagnement", None)
 
         # Regénérer la liste de courses + persister le planning (mêmes règles
         # que /generate-shopping : pas d'extraction LLM à l'aveugle, mise à
@@ -1745,6 +1768,9 @@ async def api_free_meal(planning_id: int, request: Request):
             "repas": ["Plat"],
             "tags": [],
         })
+        # Nouveau plat principal : on réinitialise les accompagnements.
+        target["accompagnements"] = []
+        target.pop("accompagnement", None)
 
         # Régénérer la liste de courses + persister EXACTEMENT comme /api/update-meal.
         return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
@@ -1754,17 +1780,22 @@ async def api_free_meal(planning_id: int, request: Request):
         return {"error": str(e)}
 
 
-@app.post("/api/update-side/{planning_id}")
-async def api_update_side(planning_id: int, request: Request):
-    """Change ou retire l'accompagnement d'un repas. nouvelle_recette vide = retirer."""
-    data = await request.json()
-    jour = data.get("jour")
-    moment = data.get("moment")
-    nouvelle_recette = (data.get("nouvelle_recette") or "").strip()
+async def _resolve_side(nom: str) -> dict:
+    """Construit le dict accompagnement pour un nom de recette, en reliant à
+    Notion si la recette y existe (sinon accompagnement « libre » sans id)."""
+    acc = {"nom_recette": nom, "notion_id": "", "url": "", "notion_url": ""}
+    r = _index_by_name(await notion.get_all_recipes()).get(nom.lower().strip())
+    if r:
+        acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
+    return acc
 
+
+async def _mutate_sides(planning_id: int, jour, moment, mutate):
+    """Charge le planning, applique `mutate(cible)` sur la liste d'accompagnements
+    du repas ciblé, régénère la liste de courses et persiste. Renvoie la réponse
+    standard des endpoints planning (success/liste_courses/plats)."""
     if jour not in range(1, 8) or moment not in ("midi", "soir"):
         return {"error": "Paramètres invalides (jour 1-7, moment midi/soir)"}
-
     try:
         planning = await db.get_planning_with_recipes(planning_id)
         if not planning:
@@ -1772,26 +1803,68 @@ async def api_update_side(planning_id: int, request: Request):
 
         planning_data = json.loads(planning["data_json"])
         plats = planning_data["plats"]
-
         cible = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
         if not cible:
             return {"error": "Repas non trouvé dans le planning"}
 
-        if not nouvelle_recette:
-            cible["accompagnement"] = None
-        else:
-            acc = {"nom_recette": nouvelle_recette, "notion_id": "", "url": "", "notion_url": ""}
-            r = _index_by_name(await notion.get_all_recipes()).get(nouvelle_recette.lower().strip())
-            if r:
-                acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
-            cible["accompagnement"] = acc
+        accs = plat_accompagnements(cible)
+        accs = await mutate(accs)
+        cible["accompagnements"] = accs
+        cible.pop("accompagnement", None)  # migre l'ancien champ singulier
 
-        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
-        return {"success": True, "accompagnement": cible["accompagnement"]}
-
+        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
     except Exception as e:
-        logger.exception("Erreur update side")
+        logger.exception("Erreur mutation accompagnements")
         return {"error": str(e)}
+
+
+@app.post("/api/add-side/{planning_id}")
+async def api_add_side(planning_id: int, request: Request):
+    """Ajoute (APPEND) un accompagnement au repas ciblé. Doublon (même nom)
+    ignoré. JSON attendu : {jour:int, moment:str, nom:str}."""
+    data = await request.json()
+    nom = (data.get("nom") or data.get("nouvelle_recette") or "").strip()
+    if not nom:
+        return {"error": "Nom d'accompagnement manquant"}
+
+    async def mutate(accs: list[dict]) -> list[dict]:
+        if any(a.get("nom_recette", "").lower().strip() == nom.lower().strip() for a in accs):
+            return accs
+        accs.append(await _resolve_side(nom))
+        return accs
+
+    return await _mutate_sides(planning_id, data.get("jour"), data.get("moment"), mutate)
+
+
+@app.post("/api/remove-side/{planning_id}")
+async def api_remove_side(planning_id: int, request: Request):
+    """Retire UN accompagnement du repas ciblé (par nom).
+    JSON attendu : {jour:int, moment:str, nom:str}."""
+    data = await request.json()
+    nom = (data.get("nom") or "").strip().lower()
+    if not nom:
+        return {"error": "Nom d'accompagnement manquant"}
+
+    async def mutate(accs: list[dict]) -> list[dict]:
+        return [a for a in accs if a.get("nom_recette", "").lower().strip() != nom]
+
+    return await _mutate_sides(planning_id, data.get("jour"), data.get("moment"), mutate)
+
+
+@app.post("/api/update-side/{planning_id}")
+async def api_update_side(planning_id: int, request: Request):
+    """Remplace TOUTE la liste d'accompagnements d'un repas par un seul (ou la
+    vide si nouvelle_recette est vide). Le modèle est désormais une liste ;
+    préférer /api/add-side et /api/remove-side pour composer plusieurs sides."""
+    data = await request.json()
+    nouvelle_recette = (data.get("nouvelle_recette") or "").strip()
+
+    async def mutate(_accs: list[dict]) -> list[dict]:
+        if not nouvelle_recette:
+            return []
+        return [await _resolve_side(nouvelle_recette)]
+
+    return await _mutate_sides(planning_id, data.get("jour"), data.get("moment"), mutate)
 
 
 @app.post("/api/brique/{planning_id}")
@@ -1869,16 +1942,21 @@ async def api_brique(planning_id: int, request: Request):
             target["nom_recette"] = nom
             target["notion_id"] = target["url"] = target["notion_url"] = ""
             _apply_recipe_info(target, recette)
+            target["accompagnements"] = []
+            target.pop("accompagnement", None)
         else:
-            # Même logique que /api/update-side : la brique devient l'accompagnement.
-            target["accompagnement"] = {
+            # La brique s'AJOUTE aux accompagnements (append, pas d'écrasement).
+            accs = plat_accompagnements(target)
+            accs.append({
                 "nom_recette": nom,
                 "notion_id": page_id,
                 "url": "",
                 "notion_url": result.get("url", ""),
                 "nature": "Ingrédient",
                 "base": base,
-            }
+            })
+            target["accompagnements"] = accs
+            target.pop("accompagnement", None)
 
         return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
 

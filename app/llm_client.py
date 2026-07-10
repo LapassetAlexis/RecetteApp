@@ -1203,7 +1203,9 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
                     "url": s.get("url", ""),
                     "notion_url": s.get("notion_url", ""),
                 }
-            plat["accompagnement"] = assigned[nom_key]
+            # Modèle liste : l'appariement auto produit une liste à 1 élément
+            # (protéine + 1 légume). L'utilisateur peut en ajouter d'autres.
+            plat["accompagnements"] = [assigned[nom_key]]
 
     def _parse_planning(self, raw: str) -> list[dict[str, Any]]:
         """Parse la réponse du LLM (liste numérotée, markdown ou JSON)."""
@@ -1299,7 +1301,7 @@ Donne {n_needed} lignes, une par recette, au format « N - Nom exact »."""
             "notion_id": "",
             "url": "",
             "notion_url": "",
-            "accompagnement": None,
+            "accompagnements": [],
         }
 
     # ── Extraction ingrédients ───────────────────────────────────
