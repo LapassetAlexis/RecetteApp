@@ -425,7 +425,7 @@ async function la() {
     resetFree();
     const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
     let alts=d.alternatives||[];
-    if(sideMode) alts=alts.filter(a=>(a.repas||[]).includes('Légume')||(a.repas||[]).includes('Accompagnement'));
+    if(sideMode) alts=alts.filter(a=>(a.base||[]).includes('Légume'));
     const el=document.getElementById('alt-list');
     if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
     el.innerHTML=alts.map(a=>`<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${(a.repas||[]).length?`<span class="chip chip-r">${a.repas.join('/')}</span>`:''}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`).join('');

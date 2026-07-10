@@ -16,6 +16,7 @@ def _recipe(nom, repas="Plat", **kw):
     return {
         "id": kw.get("id", nom.lower()), "nom": nom, "url": kw.get("url", ""),
         "notion_url": "", "repas": repas, "tags": kw.get("tags", []),
+        "base": kw.get("base", []), "nature": kw.get("nature", "Recette"),
         "note": "", "etat": kw.get("etat", ""), "moment": kw.get("moment", ""),
     }
 
@@ -196,7 +197,7 @@ def test_detail_recette(client, monkeypatch):
 
 def test_ajouter_recette_manuel(client, monkeypatch):
     created = {}
-    async def _create(nom, url="", repas="", tags=None, moment=""):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
         created["nom"] = nom
         return {"id": "newid", "url": "https://notion/newid"}
     async def _noop(*a, **k):
@@ -216,7 +217,7 @@ def test_ajouter_recette_manuel(client, monkeypatch):
 def test_ajouter_recette_types_multiples(client, monkeypatch):
     # Deux types cochés -> create_recipe reçoit la liste des deux.
     created = {}
-    async def _create(nom, url="", repas="", tags=None, moment=""):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
         created["repas"] = repas
         return {"id": "newid", "url": "https://notion/newid"}
     async def _noop(*a, **k):
@@ -231,6 +232,61 @@ def test_ajouter_recette_types_multiples(client, monkeypatch):
     })
     assert r.status_code == 200 and "succès" in r.text
     assert created["repas"] == ["Goûter", "Dessert"]
+
+
+def test_ajouter_recette_ecrit_base(client, monkeypatch):
+    # Les cases Base cochées -> create_recipe reçoit la liste des bases.
+    created = {}
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
+        created["base"] = base
+        created["nature"] = nature
+        return {"id": "newid", "url": "https://notion/newid"}
+    async def _noop(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "append_instructions", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    r = client.post("/ajouter-recette", data={
+        "nom": "Saumon grillé", "repas": "Plat", "base": ["Poisson", "Légume"],
+        "ingredients_manual": "1 pavé de saumon",
+    })
+    assert r.status_code == 200 and "succès" in r.text
+    assert created["base"] == ["Poisson", "Légume"]
+    assert created["nature"] == "Recette"
+
+
+def test_enrichir_submit_ecrit_base(client, monkeypatch):
+    # Les cases Base cochées -> update_recipe_meta reçoit la liste des bases.
+    async def _get(pid):
+        return _recipe("Saumon", id="abc", url="http://r")
+    async def _enriched(nid):
+        return None
+    async def _instr(pid):
+        return []
+    meta = {}
+    async def _meta(page_id, repas="", tags=None, nature="Recette", base=None):
+        meta["base"] = base
+        meta["nature"] = nature
+        return {}
+    async def _noop(*a, **k):
+        return {}
+    async def _save(*a, **k):
+        return None
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _meta)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    r = client.post("/recette/abc/enrichir", data={
+        "repas": "Plat", "base": ["Poisson"], "ingredients_text": "1 pavé de saumon",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert meta["base"] == ["Poisson"]
+    assert meta["nature"] == "Recette"
 
 
 def test_alternatives_and_shopping(client, monkeypatch):
@@ -401,8 +457,9 @@ def test_enrichir_submit_types_multiples(client, monkeypatch):
     async def _instr(pid):
         return []
     meta = {}
-    async def _meta(page_id, repas="", tags=None):
+    async def _meta(page_id, repas="", tags=None, nature="Recette", base=None):
         meta["repas"] = repas
+        meta["base"] = base
         return {}
     async def _noop(*a, **k):
         return {}
@@ -718,7 +775,7 @@ def test_enrichir_submit_notion_echec(client, monkeypatch):
 def test_ajouter_recette_echec_ingredients(client, monkeypatch):
     """Échec de save ingrédients → error listant l'étape ; page créée signalée,
     pas de « succès » nu."""
-    async def _create(nom, url="", repas="", tags=None, moment=""):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
         return {"id": "newid", "url": "https://notion/newid"}
     async def _noop(*a, **k):
         return {}
@@ -775,7 +832,7 @@ def test_free_meal_creates_and_places(client, monkeypatch):
         ]
 
     created = {}
-    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment=""):
+    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="Recette", base=None):
         created["nom"] = nom
         created["repas"] = repas
         return {"id": "free1", "url": "https://notion.so/free1"}

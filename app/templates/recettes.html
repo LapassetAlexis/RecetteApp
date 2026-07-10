@@ -27,6 +27,17 @@
             <span class="stat-chip chip-rapide" id="chip-rapide" title="Recettes de 30 min ou moins">⏱ ≤ 30 min</span>
         </div>
     </div>
+    {% if par_base %}
+    <div class="filter-row">
+        <span class="filter-label">Base</span>
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="base" data-value="">Toutes</span>
+            {% for b, count in par_base %}
+            <span class="stat-chip" data-filter="base" data-value="{{ b }}">{{ b }} ({{ count }})</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
     {% if par_etat %}
     <div class="filter-row">
         <span class="filter-label">État</span>
@@ -53,12 +64,11 @@
 
 {% set type_colors = {
     'Plat': '#e67e22', 'Dessert': '#8e44ad', 'Entrée': '#27ae60', 'Apéro': '#c0392b',
-    'Goûter': '#e84393', 'Accompagnement': '#2980b9', 'Boisson': '#16a085',
-    'Légume': '#16a085', 'Petit dej': '#f39c12'
+    'Goûter': '#e84393', 'Boisson': '#16a085', 'Petit dej': '#f39c12'
 } %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-base="{{ recette.base|join('|') }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
         {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
         <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
@@ -67,6 +77,9 @@
             {% endif %}
             {% for t in recette.repas %}
             <span class="chip chip-repas">{{ t }}</span>
+            {% endfor %}
+            {% for b in recette.base %}
+            <span class="chip chip-base">{{ b }}</span>
             {% endfor %}
             {% if recette.etat %}
             <span class="chip chip-etat">{{ recette.etat }}</span>
@@ -109,7 +122,7 @@ document.querySelectorAll('.recipe-card').forEach(card => {
 // (le bouton « Enrichir » est un lien vers la page d'enrichissement en 2 temps)
 
 // ── Recherche + filtres combinés (type / état / tag) ─
-const active = {type: '', etat: '', tag: '', rapide: false};
+const active = {type: '', base: '', etat: '', tag: '', rapide: false};
 function applyFilters() {
     const q = document.getElementById('recipe-search').value.trim().toLowerCase();
     let visible = 0;
@@ -119,11 +132,12 @@ function applyFilters() {
         const hay = card.dataset.name + ' ' + (card.dataset.ings || '');
         const okName = !terms.length || terms.every(t => hay.includes(t));
         const okType = !active.type || (card.dataset.type || '').split('|').includes(active.type);
+        const okBase = !active.base || (card.dataset.base || '').split('|').includes(active.base);
         const okEtat = !active.etat || card.dataset.etat === active.etat;
         const okTag = !active.tag || (card.dataset.tags || '').split('|').includes(active.tag.toLowerCase());
         const duree = parseInt(card.dataset.duree || '0', 10);
         const okRapide = !active.rapide || (duree > 0 && duree <= 30);
-        const show = okName && okType && okEtat && okTag && okRapide;
+        const show = okName && okType && okBase && okEtat && okTag && okRapide;
         card.classList.toggle('hidden', !show);
         if (show) visible++;
     });

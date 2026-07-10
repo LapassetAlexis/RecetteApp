@@ -90,3 +90,45 @@ def test_parse_repas_multi_select():
     })
     r = notion._parse_page(page)
     assert r["repas"] == ["Goûter", "Dessert"]
+
+
+def test_parse_nature_and_base_explicit():
+    # Nouvelle taxo : Nature (select) + Base (multi_select) lus tels quels.
+    page = _page({
+        "Nom": {"type": "title", "title": [{"plain_text": "Curry"}]},
+        "Repas": {"multi_select": [{"name": "Plat"}]},
+        "Nature": {"select": {"name": "Ingrédient"}},
+        "Base": {"multi_select": [{"name": "Viande"}, {"name": "Légume"}]},
+    })
+    r = notion._parse_page(page)
+    assert r["nature"] == "Ingrédient"
+    assert r["base"] == ["Viande", "Légume"]
+
+
+def test_parse_nature_defaults_recette():
+    # Nature absente -> défaut « Recette ».
+    r = notion._parse_page(_page({"Nom": {"type": "title", "title": [{"plain_text": "X"}]}}))
+    assert r["nature"] == "Recette"
+    assert r["base"] == []
+
+
+def test_parse_base_derived_from_legacy_tags():
+    # Lecture TOLÉRANTE : avant la migration data, Base absente est dérivée de
+    # l'ancienne taxo (tag « Viande » + repas « Accompagnement »).
+    page = _page({
+        "Nom": {"type": "title", "title": [{"plain_text": "Poulet frites"}]},
+        "Repas": {"multi_select": [{"name": "Plat"}, {"name": "Accompagnement"}]},
+        "Tag": {"multi_select": [{"name": "Viande"}]},
+    })
+    r = notion._parse_page(page)
+    assert r["base"] == ["Viande", "Légume"]  # Viande (tag) + Légume (repas Accompagnement)
+
+
+def test_parse_explicit_base_wins_over_legacy():
+    # Si Base est renseignée, on ne dérive PAS depuis l'ancien.
+    page = _page({
+        "Nom": {"type": "title", "title": [{"plain_text": "X"}]},
+        "Tag": {"multi_select": [{"name": "Viande"}]},
+        "Base": {"multi_select": [{"name": "Poisson"}]},
+    })
+    assert notion._parse_page(page)["base"] == ["Poisson"]

@@ -45,6 +45,8 @@
 
 <form method="POST" action="/ajouter-recette" class="card" id="step2" style="display:none;">
     <input type="hidden" name="url" id="url-hidden">
+    <!-- Nature : pas de champ visible pour l'instant (défaut Recette). -->
+    <input type="hidden" name="nature" value="Recette">
 
     <div class="form-g">
         <label for="nom">📝 Nom de la recette</label>
@@ -67,6 +69,15 @@
                 <option value="Midi">Midi uniquement</option>
                 <option value="Soir">Soir uniquement</option>
             </select>
+        </div>
+    </div>
+
+    <div class="form-g">
+        <label>🥩 Base <small class="muted-sm">(ingrédient principal)</small></label>
+        <div class="tag-group-chips">
+            {% for opt in base_options %}
+            <label class="tgl"><input type="checkbox" name="base" value="{{ opt }}" class="base-cb"><span>{{ opt }}</span></label>
+            {% endfor %}
         </div>
     </div>
 
@@ -179,6 +190,9 @@ function fillForm(d, url) {
     refreshImgPreview();
     document.querySelectorAll('.tag-cb').forEach(cb => {
         cb.checked = (d.tags || []).includes(cb.value);
+    });
+    document.querySelectorAll('.base-cb').forEach(cb => {
+        cb.checked = (d.base || []).includes(cb.value);
     });
 }
 

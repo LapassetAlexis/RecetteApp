@@ -147,6 +147,7 @@ a.meal-warn:hover { background:#f9e0c4; }
 .chip-etat { background:#e8f8e8; color:var(--sc); }
 .chip-note { background:#f0e8ff; color:var(--ac); }
 .chip-moment { background:#e8f0fe; color:#2980b9; }
+.chip-base { background:#fdecef; color:#c0392b; }
 .chip-duree { background:#f3eafc; color:var(--ac); }
 
 /* ── Shopping ────────────────────────────────── */
