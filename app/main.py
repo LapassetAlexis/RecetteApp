@@ -1182,6 +1182,12 @@ async def api_rate(page_id: str, request: Request):
         if note != "" and note not in ("⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"):
             return {"error": "Note invalide"}
         await notion.update_rating(page_id, note)
+        # Noter une recette = elle a été testée → on la sort de « À essayer ».
+        if note:
+            try:
+                await notion.update_status(page_id, "Validée")
+            except Exception as e:
+                logger.warning(f"Passage à « Validée » échoué pour {page_id}: {e}")
         return {"success": True}
     except Exception as e:
         logger.exception("Erreur notation")

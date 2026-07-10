@@ -12,6 +12,13 @@
             {% if recette.moment %}<span class="chip chip-moment">{{ recette.moment }}</span>{% endif %}
             {% for t in recette.tags %}<span class="tag">{{ t }}</span>{% endfor %}
         </div>
+        {% set note_len = (recette.note or '')|length %}
+        <div class="recipe-stars" data-id="{{ recette.id }}" data-note="{{ recette.note }}" style="margin-top:6px;">
+            {% for s in range(5) %}
+            <span class="star {{ '' if s < note_len else 'empty' }}" data-val="{{ s+1 }}">★</span>
+            {% endfor %}
+            <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
+        </div>
         <div class="detail-links">
             {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
             {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
@@ -173,6 +180,46 @@ document.getElementById('del-confirm')?.addEventListener('click', async function
         toast('Erreur réseau', 'error');
         this.disabled = false; this.textContent = '🗑 Supprimer';
     }
+});
+
+// ── Notation (survol + clic + effacer) ──────────────
+document.querySelectorAll('.recipe-stars').forEach(container => {
+    const stars = container.querySelectorAll('.star');
+    const clearBtn = container.querySelector('.star-clear');
+    const pageId = container.dataset.id;
+    let current = (container.dataset.note || '').length;
+    const paint = (n) => stars.forEach((s, i) => s.classList.toggle('empty', i >= n));
+    stars.forEach((star, idx) => {
+        star.addEventListener('mouseenter', () => paint(idx + 1));
+        star.addEventListener('click', async () => {
+            const val = '⭐'.repeat(idx + 1);
+            container.classList.add('saving');
+            try {
+                const r = await fetch(`/api/rate/${pageId}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({note: val})
+                });
+                const d = await r.json();
+                if (d.success) { current = idx + 1; paint(current); clearBtn.style.display = ''; toast('Noté ' + val, 'success'); }
+                else { toast(d.error || 'Erreur', 'error'); }
+            } catch(e) { toast('Erreur réseau', 'error'); }
+            finally { container.classList.remove('saving'); }
+        });
+    });
+    container.addEventListener('mouseleave', () => paint(current));
+    clearBtn.addEventListener('click', async () => {
+        container.classList.add('saving');
+        try {
+            const r = await fetch(`/api/rate/${pageId}`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({note: ''})
+            });
+            const d = await r.json();
+            if (d.success) { current = 0; paint(0); clearBtn.style.display = 'none'; toast('Note retirée', 'info'); }
+            else { toast(d.error || 'Erreur', 'error'); }
+        } catch(e) { toast('Erreur réseau', 'error'); }
+        finally { container.classList.remove('saving'); }
+    });
 });
 </script>
 {% endblock %}

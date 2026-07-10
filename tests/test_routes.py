@@ -47,11 +47,18 @@ def test_recettes_lists(client, monkeypatch):
 
 
 def test_rate_valid_and_invalid(client, monkeypatch):
+    status = {"calls": []}
     async def _rate(pid, note):
         return {}
+    async def _status(pid, etat):
+        status["calls"].append(etat)
+        return {}
     monkeypatch.setattr(main.notion, "update_rating", _rate)
+    monkeypatch.setattr(main.notion, "update_status", _status)
     assert client.post("/api/rate/x", json={"note": "⭐⭐"}).json().get("success")
+    assert status["calls"] == ["Validée"]                          # notée → Validée
     assert client.post("/api/rate/x", json={"note": ""}).json().get("success")  # effacer
+    assert status["calls"] == ["Validée"]                          # effacer ne re-valide pas
     assert "error" in client.post("/api/rate/x", json={"note": "pas une note"}).json()
 
 
@@ -177,6 +184,7 @@ def test_detail_recette(client, monkeypatch):
     assert "Tarte" in r.text
     assert "farine" in r.text                 # ingrédient
     assert "Enfourner 30 min." in r.text      # instruction
+    assert "recipe-stars" in r.text           # widget de notation sur la fiche
     assert 'id="srv-n"' in r.text             # sélecteur de portions
     # recette inconnue -> 404
     assert client.get("/recette/zzz").status_code == 404
