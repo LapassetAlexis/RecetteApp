@@ -1656,7 +1656,7 @@ async def api_free_meal(planning_id: int, request: Request):
             "id": page_id,
             "url": "",                        # pas d'URL source pour un repas libre
             "notion_url": result.get("url", ""),
-            "repas": "Plat",
+            "repas": ["Plat"],
             "tags": [],
         })
 

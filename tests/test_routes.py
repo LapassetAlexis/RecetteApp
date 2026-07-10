@@ -793,6 +793,7 @@ def test_free_meal_creates_and_places(client, monkeypatch):
     soir = next(p for p in data["plats"] if p["jour"] == 1 and p["moment"] == "soir")
     assert soir["nom_recette"] == "Steak + haricots verts"
     assert soir["notion_id"] == "free1"
+    assert soir["repas"] == ["Plat"]  # type multi-valeurs : liste, pas string
 
     # La liste de courses inclut les ingrédients saisis.
     noms = {i["nom"] for i in data["liste_courses"]}
