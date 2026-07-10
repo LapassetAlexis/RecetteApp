@@ -477,18 +477,46 @@ def _parse_meals(raw: str) -> list[dict] | None:
     return grid or None
 
 
-def _convert_to_simple(targets: list[dict], briques: list[dict], demanded: int) -> str:
+def _apply_simple_meal(plat: dict, meal: dict) -> None:
+    """Applique une assiette simple assemblée (protéine + accompagnements) à un plat."""
+    prot = meal["prot"]
+    plat["nom_recette"] = prot["nom"]
+    _apply_recipe_info(plat, prot)  # notion_id + nature=Ingrédient
+    plat["type_repas"] = "Plat"
+    plat["accompagnements"] = meal["accompagnements"]
+
+
+def _convert_to_simple(targets: list[dict], briques: list[dict],
+                       day_groups: list[int] | None = None) -> str:
     """Transforme des créneaux en repas simples assemblés depuis les briques
     (protéine + féculent + légume, déterministe). Mute `targets` en place.
-    Retourne un message d'avertissement si moins de repas COMPLETS que
-    `demanded` ont pu être produits (briques insuffisantes), sinon ""."""
-    meals, complets = _assemble_simple_meals(briques, len(targets))
-    for plat, meal in zip(targets, meals):
-        prot = meal["prot"]
-        plat["nom_recette"] = prot["nom"]
-        _apply_recipe_info(plat, prot)  # notion_id + nature=Ingrédient
-        plat["type_repas"] = "Plat"
-        plat["accompagnements"] = meal["accompagnements"]
+
+    Si `day_groups` est fourni (chemin grille), les midis d'un même groupe
+    partagent la MÊME assiette (une seule unité) ; sinon chaque créneau est sa
+    propre unité (chemin legacy nb_simple aléatoire). Retourne un avertissement
+    si des unités n'ont pu être complétées (briques insuffisantes), sinon ""."""
+    # Unités d'assemblage : midis groupés = 1 unité partagée ; soirs = 1 chacun.
+    units: dict[tuple, list[dict]] = {}
+    order: list[tuple] = []
+    for p in targets:
+        if day_groups and p["moment"] == "midi":
+            g = day_groups[p["jour"] - 1] if 1 <= p["jour"] <= 7 else p["jour"]
+            key = ("midi", g)
+        else:
+            key = (p["moment"], p["jour"])
+        if key not in units:
+            units[key] = []
+            order.append(key)
+        units[key].append(p)
+
+    meals, complets = _assemble_simple_meals(briques, len(order))
+    for i, key in enumerate(order):
+        if i >= len(meals):
+            break  # plus de briques : les créneaux restants gardent leur recette
+        for plat in units[key]:
+            _apply_simple_meal(plat, meals[i])
+
+    demanded = len(order)
     if complets < demanded:
         msg = (f"{demanded} repas simples demandés, {complets} produits — "
                f"crée plus de briques (protéine/féculent/légume).")
@@ -1255,7 +1283,7 @@ async def generer(
                 slots = list(range(len(plats)))
                 random.shuffle(slots)
                 targets = [plats[i] for i in slots[:n]]
-                briques_manquantes = _convert_to_simple(targets, briques, n)
+                briques_manquantes = _convert_to_simple(targets, briques)  # sans groupes
         else:
             # Grille : les cases explicitement marquées « simple » (et actives).
             simple_keys = {
@@ -1264,7 +1292,7 @@ async def generer(
             }
             targets = [p for p in plats if (p["jour"], p["moment"]) in simple_keys]
             if targets:
-                briques_manquantes = _convert_to_simple(targets, briques, len(targets))
+                briques_manquantes = _convert_to_simple(targets, briques, day_groups)
 
         # 4bis. Valider le planning généré (créneaux ACTIFS uniquement) :
         #   - une recette réellement dans le catalogue Notion (notion_id non vide,
