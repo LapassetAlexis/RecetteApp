@@ -9,6 +9,10 @@ import app.main as main
 
 
 def _recipe(nom, repas="Plat", **kw):
+    # repas est désormais une liste de types (multi_select). On accepte une
+    # string en entrée par confort et on la normalise en liste.
+    if isinstance(repas, str):
+        repas = [repas] if repas else []
     return {
         "id": kw.get("id", nom.lower()), "nom": nom, "url": kw.get("url", ""),
         "notion_url": "", "repas": repas, "tags": kw.get("tags", []),
@@ -209,6 +213,26 @@ def test_ajouter_recette_manuel(client, monkeypatch):
     assert created["nom"] == "Gratin"
 
 
+def test_ajouter_recette_types_multiples(client, monkeypatch):
+    # Deux types cochés -> create_recipe reçoit la liste des deux.
+    created = {}
+    async def _create(nom, url="", repas="", tags=None, moment=""):
+        created["repas"] = repas
+        return {"id": "newid", "url": "https://notion/newid"}
+    async def _noop(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "append_instructions", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    r = client.post("/ajouter-recette", data={
+        "nom": "Cookie", "repas": ["Goûter", "Dessert"],
+        "ingredients_manual": "200 g farine",
+    })
+    assert r.status_code == 200 and "succès" in r.text
+    assert created["repas"] == ["Goûter", "Dessert"]
+
+
 def test_alternatives_and_shopping(client, monkeypatch):
     async def _all():
         return [_recipe("Poulet"), _recipe("Soupe"), _recipe("Curry")]
@@ -366,6 +390,37 @@ def test_enrichir_page_and_submit(client, monkeypatch):
         "steps": ["Cuire le riz.", "Ajouter l'oignon."],
     }, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/recette/abc"
+
+
+def test_enrichir_submit_types_multiples(client, monkeypatch):
+    # Deux types cochés (multi_select) -> update_recipe_meta reçoit la liste.
+    async def _get(pid):
+        return _recipe("Cookie", id="abc", url="http://r")
+    async def _enriched(nid):
+        return None
+    async def _instr(pid):
+        return []
+    meta = {}
+    async def _meta(page_id, repas="", tags=None):
+        meta["repas"] = repas
+        return {}
+    async def _noop(*a, **k):
+        return {}
+    async def _save(*a, **k):
+        return None
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _meta)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    r = client.post("/recette/abc/enrichir", data={
+        "repas": ["Goûter", "Dessert"], "ingredients_text": "200 g farine",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert meta["repas"] == ["Goûter", "Dessert"]
 
 
 def test_enrichir_renomme_librement(client, monkeypatch):
@@ -738,6 +793,7 @@ def test_free_meal_creates_and_places(client, monkeypatch):
     soir = next(p for p in data["plats"] if p["jour"] == 1 and p["moment"] == "soir")
     assert soir["nom_recette"] == "Steak + haricots verts"
     assert soir["notion_id"] == "free1"
+    assert soir["repas"] == ["Plat"]  # type multi-valeurs : liste, pas string
 
     # La liste de courses inclut les ingrédients saisis.
     noms = {i["nom"] for i in data["liste_courses"]}

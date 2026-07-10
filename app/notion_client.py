@@ -121,11 +121,15 @@ class NotionClient:
         # URL
         url = p.get("URL", {}).get("url") or ""
 
-        # Repas (select)
-        repas = ""
-        sel = p.get("Repas", {}).get("select")
-        if sel:
-            repas = sel.get("name", "")
+        # Repas : multi_select en priorité, repli sur select mono (rétro-compat).
+        # Toujours renvoyé sous forme de liste de str.
+        repas_prop = p.get("Repas", {})
+        multi = repas_prop.get("multi_select")
+        if multi is not None:
+            repas = [t.get("name", "") for t in multi if t.get("name")]
+        else:
+            sel = repas_prop.get("select")
+            repas = [sel.get("name", "")] if sel and sel.get("name") else []
 
         # Tag (multi_select)
         tags = [t.get("name", "") for t in (p.get("Tag", {}).get("multi_select") or [])]
@@ -173,7 +177,7 @@ class NotionClient:
         self,
         nom: str,
         url: str = "",
-        repas: str = "",
+        repas: list[str] | str = "",
         tags: list[str] | None = None,
         etat: str = "À essayer",
         moment: str = "",
@@ -186,8 +190,10 @@ class NotionClient:
             "État": {"status": {"name": etat}},
         }
 
-        if repas:
-            properties["Repas"] = {"select": {"name": repas}}
+        repas_names = [repas] if isinstance(repas, str) else list(repas)
+        repas_names = [n for n in repas_names if n]
+        if repas_names:
+            properties["Repas"] = {"multi_select": [{"name": n} for n in repas_names]}
         if tags:
             properties["Tag"] = {
                 "multi_select": [{"name": t} for t in tags]
@@ -432,12 +438,14 @@ class NotionClient:
             return resp.json()
 
     async def update_recipe_meta(
-        self, page_id: str, repas: str = "", tags: list[str] | None = None,
+        self, page_id: str, repas: list[str] | str = "", tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Met à jour le type (Repas) et les tags d'une recette existante."""
         properties: dict[str, Any] = {}
-        if repas:
-            properties["Repas"] = {"select": {"name": repas}}
+        repas_names = [repas] if isinstance(repas, str) else list(repas)
+        repas_names = [n for n in repas_names if n]
+        if repas_names:
+            properties["Repas"] = {"multi_select": [{"name": n} for n in repas_names]}
         if tags is not None:
             properties["Tag"] = {"multi_select": [{"name": t} for t in tags]}
         if not properties:

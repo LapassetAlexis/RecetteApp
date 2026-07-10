@@ -62,6 +62,14 @@ class Settings:
 settings = Settings()
 
 
+def recipe_types(recette: dict) -> list[str]:
+    """Types (Repas) d'une recette, toujours sous forme de liste."""
+    v = recette.get("repas")
+    if isinstance(v, list):
+        return [t for t in v if t]
+    return [v] if v else []
+
+
 # Valeurs autorisées des champs Notion (source unique, partagée par l'app et le
 # client LLM pour la classification). Doivent correspondre EXACTEMENT aux options
 # de la base Notion.
