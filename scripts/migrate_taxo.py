@@ -253,8 +253,9 @@ async def _ensure_schema(client: httpx.AsyncClient, apply: bool) -> None:
         existing = tag_ms.get("options", [])
         names = {o.get("name") for o in existing}
         if "Végétarien" not in names:
-            # On renvoie les options existantes (préservées) + la nouvelle.
-            merged = [{"name": o["name"]} for o in existing] + [{"name": "Végétarien"}]
+            # On renvoie les options existantes TELLES QUELLES (id + couleur
+            # préservés) + la nouvelle, pour ne pas réattribuer les couleurs.
+            merged = list(existing) + [{"name": "Végétarien"}]
             update["Tag"] = {"multi_select": {"options": merged}}
             logger.info("Schéma : ajouter l'option Tag « Végétarien » (options existantes préservées)")
 
