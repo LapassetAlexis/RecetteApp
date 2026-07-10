@@ -1220,3 +1220,107 @@ def test_generer_repas_simples_briques_insuffisantes(client, monkeypatch):
     assert data.get("briques_manquantes")            # bannière présente
     page = client.get(f"/planning/{pid}").text
     assert "repas simples demandés" in page
+
+
+def test_generer_grille_meals(client, monkeypatch):
+    """Contrat de la GRILLE (champ `meals`) : une case simple, une case absente
+    (persons=0), deux midis dans le même groupe. Vérifie que la case absente
+    n'est pas générée, que les midis groupés partagent la recette, que la case
+    simple devient une brique + accompagnements, que les personnes par repas
+    sont respectées et que les courses sont mises à l'échelle PAR REPAS."""
+    import asyncio
+
+    async def _all():
+        return [
+            _recipe("R1", id="r1"), _recipe("R2", id="r2"),
+            _brique("Steak", "Viande"), _brique("Riz", "Féculent"),
+            _brique("Brocoli", "Légume"),
+        ]
+
+    async def _gen(**kw):
+        # Émule generate_planning : 1 recette par groupe midi ACTIF + soirs
+        # actifs, en respectant les créneaux « off » (absent).
+        off = kw.get("off_meals") or set()
+        groups = [int(x) for x in kw["midi_groups"].split(",")]
+        names = iter(["R1", "R2", "R3", "R4", "R5", "R6", "R7"])
+        by_group = {}
+        for g in dict.fromkeys(groups):
+            days = [d for d, gg in enumerate(groups, 1)
+                    if gg == g and (d, "midi") not in off]
+            if days:
+                by_group[g] = next(names)
+        plats = []
+        for d in range(1, 8):
+            if (d, "midi") in off:
+                continue
+            g = groups[d - 1]
+            if g in by_group:
+                plats.append({"jour": d, "moment": "midi",
+                              "nom_recette": by_group[g], "type_repas": "Plat"})
+        for d in range(1, 8):
+            if (d, "soir") in off:
+                continue
+            plats.append({"jour": d, "moment": "soir",
+                          "nom_recette": next(names), "type_repas": "Plat"})
+        return plats
+
+    # Ingrédient de courses d'une recette/brique = son id, 100 g (base 4 pers).
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    # Grille : (1,midi) & (2,midi) même groupe 1 (2 pers) ; (1,soir) simple
+    # (4 pers) ; tout le reste absent (persons=0).
+    active = {(1, "midi"), (2, "midi"), (1, "soir")}
+    grid = []
+    for d in range(1, 8):
+        for m in ("midi", "soir"):
+            case = {"jour": d, "moment": m}
+            if (d, m) in active:
+                case["persons"] = 2 if m == "midi" else 4
+                case["type"] = "simple" if (d, m) == (1, "soir") else "recette"
+            else:
+                case["persons"] = 0
+                case["type"] = "recette"
+            if m == "midi":
+                case["group"] = 1 if d in (1, 2) else d
+            grid.append(case)
+
+    pid = int(client.post("/generer", data={
+        "week_start": "2026-01-05", "saison": "Hiver", "meals": json.dumps(grid),
+    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    planning = asyncio.run(main.db.get_planning_with_recipes(pid))
+    plats = json.loads(planning["data_json"])["plats"]
+    by_key = {(p["jour"], p["moment"]): p for p in plats}
+
+    # Seules les 3 cases actives sont générées (l'absente ne l'est pas).
+    assert set(by_key) == active
+    assert (3, "midi") not in by_key
+
+    # Les deux midis groupés partagent la même recette.
+    assert by_key[(1, "midi")]["nom_recette"] == by_key[(2, "midi")]["nom_recette"]
+
+    # La case simple est devenue une brique (Nature=Ingrédient) + 2 accompagnements.
+    soir = by_key[(1, "soir")]
+    assert soir.get("nature") == "Ingrédient"
+    assert soir["nom_recette"] == "Steak"
+    noms_acc = {a["nom_recette"] for a in soir["accompagnements"]}
+    assert noms_acc == {"Riz", "Brocoli"}
+
+    # Personnes PAR REPAS respectées (midi=2, soir=4).
+    assert by_key[(1, "midi")]["persons"] == 2
+    assert by_key[(2, "midi")]["persons"] == 2
+    assert soir["persons"] == 4
+
+    # Courses mises à l'échelle PAR REPAS.
+    shop = {i["nom"]: i for i in client.post(f"/generate-shopping/{pid}").json()["liste_courses"]}
+    # r1 : 2 midis (2 pers) × 100 g / 4 = 50 g chacun → fusionnés = 100 g.
+    assert shop["r1"]["quantite"] == "100"
+    # brique protéine + accompagnements du soir (4 pers) × 100 g / 4 = 100 g.
+    assert shop["steak"]["quantite"] == "100"
+    assert shop["riz"]["quantite"] == "100"
+    assert shop["brocoli"]["quantite"] == "100"

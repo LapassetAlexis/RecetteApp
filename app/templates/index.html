@@ -1,9 +1,37 @@
 {% extends "base.html" %}
 {% block title %}Générer un planning{% endblock %}
 {% block content %}
+<style>
+.grille-wrap { overflow-x: auto; }
+.grille {
+    display: grid;
+    grid-template-columns: auto repeat(7, minmax(84px, 1fr));
+    gap: 6px;
+    min-width: 640px;
+    align-items: stretch;
+}
+.g-dayhead { text-align: center; font-weight: 700; padding: 4px 0; }
+.g-rowlabel { display: flex; align-items: center; font-weight: 600; padding-right: 6px; white-space: nowrap; }
+.g-cell {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 8px 6px; border-radius: 10px;
+    border: 2px solid var(--bd, #ddd); background: var(--bg2, #fafafa);
+}
+.g-cell.off { opacity: .45; filter: grayscale(1); }
+.g-pers { width: 56px; text-align: center; }
+.g-pers-lbl { font-size: .8rem; color: var(--t2, #777); }
+.g-type, .g-group {
+    cursor: pointer; border: none; border-radius: 8px; padding: 4px 8px;
+    font-size: .95rem; font-weight: 700;
+}
+.g-type { background: var(--bg3, #eee); }
+.g-group { color: #fff; }
+.group-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: .82rem; }
+</style>
+
 <div class="hero">
     <h1>📅 Planning de la semaine</h1>
-    <p>Génère 7 jours de repas équilibrés pour toute la famille.</p>
+    <p>Configure chaque repas (midi / soir) de la semaine, puis génère.</p>
 </div>
 
 {% if error %}
@@ -40,35 +68,45 @@
         </div>
     </div>
 
-    <!-- Configuration fusionnée : groupes midi + personnes par jour -->
+    <!-- Grille des repas : 7 jours × 2 moments (midi / soir) -->
     <div class="card">
         <div class="row-between">
-            <strong>🍳 Organisation des midis</strong>
-            <button type="button" id="reset-groups" class="btn btn-ghost btn-sm btn-tiny">↺ Défaut</button>
+            <strong>🍽️ Grille des repas</strong>
+            <button type="button" id="reset-grille" class="btn btn-ghost btn-sm btn-tiny">↺ Défaut</button>
         </div>
-        <div id="midi-groups" class="midi-grid">
-            {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
-            {% set groups = day_groups or [1,1,2,2,2,3,4] %}
-            {% set pers = day_pers or [3,3,3,3,3,4,4] %}
-            {% for i in range(7) %}
-            <div class="day-group" data-idx="{{ i }}" data-group="{{ groups[i] }}">
-                <div class="day-name">{{ jours[i] }}</div>
-                <button type="button" class="group-label" data-idx="{{ i }}" title="Changer le groupe de plat">G{{ groups[i] }}</button>
-                <div class="nb-field">
-                    <label for="nb_{{ jours[i]|lower }}">👤</label>
-                    <input type="number" id="nb_{{ jours[i]|lower }}" name="nb_{{ jours[i]|lower }}" value="{{ pers[i] }}" min="1" max="20" class="nb-input" title="Nombre de personnes ce jour">
+        {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
+        {% set pers = day_pers or [2,2,2,2,2,4,4] %}
+        {% set groups = day_groups or [1,1,2,2,2,3,4] %}
+        <div class="grille-wrap">
+            <div class="grille" id="grille">
+                <div class="g-corner"></div>
+                {% for i in range(7) %}<div class="g-dayhead">{{ jours[i] }}</div>{% endfor %}
+
+                <div class="g-rowlabel">☀️ Midi</div>
+                {% for i in range(7) %}
+                <div class="g-cell" data-jour="{{ i + 1 }}" data-moment="midi">
+                    <div><span class="g-pers-lbl">👤</span> <input type="number" class="g-pers" min="0" max="20" value="{{ pers[i] }}" title="Personnes (0 = absent)"></div>
+                    <button type="button" class="g-type" data-type="recette" title="Type : Recette (IA) / Simple (briques)">🍲 Recette</button>
+                    <button type="button" class="g-group" data-group="{{ groups[i] }}" title="Groupe : même couleur = même plat">G{{ groups[i] }}</button>
                 </div>
-                <div class="meal-toggles">
-                    <button type="button" class="mt" data-day="{{ i + 1 }}" data-moment="midi" title="Activer/désactiver le midi (absent)">☀️</button>
-                    <button type="button" class="mt" data-day="{{ i + 1 }}" data-moment="soir" title="Activer/désactiver le soir (absent)">🌙</button>
+                {% endfor %}
+
+                <div class="g-rowlabel">🌙 Soir</div>
+                {% for i in range(7) %}
+                <div class="g-cell" data-jour="{{ i + 1 }}" data-moment="soir">
+                    <div><span class="g-pers-lbl">👤</span> <input type="number" class="g-pers" min="0" max="20" value="{{ pers[i] }}" title="Personnes (0 = absent)"></div>
+                    <button type="button" class="g-type" data-type="recette" title="Type : Recette (IA) / Simple (briques)">🍲 Recette</button>
                 </div>
+                {% endfor %}
             </div>
-            {% endfor %}
         </div>
         <div id="group-legend" class="group-legend"></div>
-        <input type="hidden" name="midi_groups" id="midi-groups-input" value="{{ midi_groups_value or '1,1,2,2,2,3,4' }}">
-        <input type="hidden" name="off_meals" id="off-meals-input" value="{{ off_meals or '' }}">
-        <small class="hint">🎨 Clique sur le badge <strong>G1/G2…</strong> pour regrouper les midis (même couleur = même plat). 👤 = personnes ce jour. Clique ☀️/🌙 pour <strong>désactiver</strong> un repas (absent, pas à la maison).</small>
+        <input type="hidden" name="meals" id="meals-input" value="{{ meals_value or '' }}">
+        <small class="hint">
+            👤 personnes par repas (<strong>0 = absent</strong>, case grisée).
+            🍲/🧱 bascule <strong>Recette</strong> (IA) ↔ <strong>Simple</strong> (briques : protéine + féculent + légume).
+            🎨 sur les midis, clique le badge <strong>G</strong> pour regrouper (même couleur = même plat).
+        </small>
     </div>
 
     <hr class="sep">
@@ -79,25 +117,11 @@
     </div>
 
     <div class="form-g">
-        <label for="nb_simple">🧱 Repas simples cette semaine</label>
-        <input type="number" id="nb_simple" name="nb_simple" value="{{ nb_simple or 0 }}" min="0" class="inp">
-        <small class="hint">Assemblés depuis les briques (1 protéine + féculent + légume), sans IA.</small>
-    </div>
-
-    <div class="form-g">
         <label for="custom_prompt">✏️ Mes consignes pour l'IA</label>
         <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, un soir par semaine restes du midi...">{{ custom_prompt or "" }}</textarea>
-        <div class="preview-row">
-            <button type="button" id="preview-btn" class="btn btn-ghost btn-sm">📝 Aperçu du prompt final</button>
-            <span id="preview-status" class="muted-sm"></span>
-        </div>
-        <div id="preview-box" class="preview-box">
-            <textarea id="preview-area" rows="12" class="inp preview-area" readonly></textarea>
-            <small class="hint">Lecture seule. Modifie les champs ci-dessus puis clique "Appliquer" pour mettre à jour.</small>
-        </div>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-lg" id="btn-g">🔄 Générer 7 jours de repas</button>
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-g">🔄 Générer les repas de la semaine</button>
 </form>
 
 <!-- Loading -->
@@ -118,197 +142,128 @@
 {% endif %}
 
 <script>
-const JOURS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const JOURS_COURT = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
-const GROUP_COLORS = [
-    '#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b','#f39c12','#1abc9c'
-];
+const GROUP_COLORS = ['#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b','#f39c12','#1abc9c'];
+const DEFAULT_PERS = [2,2,2,2,2,4,4];
+const DEFAULT_GROUPS = [1,1,2,2,2,3,4];
 
-// ── Gestion des groupes de midis ────────────────────
-function getGroups() {
-    return document.getElementById('midi-groups-input').value.split(',').map(Number);
+const cells = () => [...document.querySelectorAll('.g-cell')];
+const midiCells = () => cells().filter(c => c.dataset.moment === 'midi');
+const cellKey = c => c.dataset.jour + ':' + c.dataset.moment;
+
+function persInput(c) { return c.querySelector('.g-pers'); }
+function typeBtn(c) { return c.querySelector('.g-type'); }
+function groupBtn(c) { return c.querySelector('.g-group'); }
+
+// ── Rendu d'une case (couleurs, grisé, libellés) ────────────────────
+function paintCell(c) {
+    const persons = Math.max(0, parseInt(persInput(c).value) || 0);
+    c.classList.toggle('off', persons === 0);
+    const tb = typeBtn(c);
+    tb.textContent = tb.dataset.type === 'simple' ? '🧱 Simple' : '🍲 Recette';
+    const gb = groupBtn(c);
+    if (gb) {
+        const g = parseInt(gb.dataset.group) || 1;
+        const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
+        gb.style.background = col;
+        gb.textContent = 'G' + g;
+        c.style.borderColor = persons === 0 ? '' : col;
+    }
 }
 
-function setGroups(groups) {
-    document.getElementById('midi-groups-input').value = groups.join(',');
-    renderGroups();
-    updatePromptPreview();
-}
-
-function renderGroups() {
-    const groups = getGroups();
-    const els = document.querySelectorAll('.day-group');
+function renderLegend() {
+    const groups = midiCells().map(c => parseInt(groupBtn(c).dataset.group) || 1);
+    const uniq = [...new Set(groups)];
     const legend = document.getElementById('group-legend');
-    const uniqueGroups = [...new Set(groups)];
-    const used = new Set();
-
-    els.forEach((el, i) => {
-        const g = groups[i];
-        const color = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
-        el.style.background = color + '22';
-        el.style.border = '2px solid ' + color;
-        el.querySelector('.group-label').style.background = color;
-        el.querySelector('.group-label').style.color = '#fff';
-        el.querySelector('.group-label').textContent = g;
-    });
-
-    // Légende
-    legend.innerHTML = uniqueGroups.map(g => {
+    legend.innerHTML = uniq.map(g => {
         const days = groups.map((v, i) => v === g ? JOURS_COURT[i] : null).filter(Boolean);
-        const color = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
-        return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${color}22;border:1px solid ${color};">
-            <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>
-            ${days.join(' + ')} ${days.length > 0 ? '= même plat' : ''}
-        </span>`;
+        const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
+        return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${col}22;border:1px solid ${col};">
+            <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;"></span>
+            ${days.join(' + ')} ${days.length > 1 ? '= même plat midi' : ''}</span>`;
     }).join('');
     legend.innerHTML += '<span style="color:var(--t2)">· Soirs : tous différents</span>';
 }
 
-// Le sélecteur de groupe s'ouvre UNIQUEMENT au clic sur le badge G (pas sur
-// toute la tuile), pour ne pas gêner la saisie du nombre de personnes.
-document.querySelectorAll('.group-label').forEach(badge => {
-    badge.addEventListener('click', function(e) {
-        e.stopPropagation();
-        const tile = this.closest('.day-group');
-        const groups = getGroups();
-        const idx = parseInt(this.dataset.idx);
+function renderAll() { cells().forEach(paintCell); renderLegend(); }
+
+// ── Interactions ────────────────────────────────────────────────────
+function bindCell(c) {
+    persInput(c).addEventListener('input', () => paintCell(c));
+    typeBtn(c).addEventListener('click', () => {
+        const tb = typeBtn(c);
+        tb.dataset.type = tb.dataset.type === 'simple' ? 'recette' : 'simple';
+        paintCell(c);
+    });
+    const gb = groupBtn(c);
+    if (gb) gb.addEventListener('click', () => {
+        const groups = midiCells().map(x => parseInt(groupBtn(x).dataset.group) || 1);
         const maxG = Math.max(...groups);
-        const existing = document.querySelector('.group-picker');
-        if (existing) existing.remove();
-        if (tile.querySelector('.group-picker')) return;
-
-        const picker = document.createElement('div');
-        picker.className = 'group-picker';
-        for (let g = 1; g <= maxG + 1; g++) {
-            const dot = document.createElement('div');
-            const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
-            dot.style.cssText = `width:24px;height:24px;border-radius:50%;background:${col};cursor:pointer;border:2px solid ${g === groups[idx] ? '#333' : 'transparent'};display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;`;
-            dot.textContent = g;
-            dot.addEventListener('click', function(ev) {
-                ev.stopPropagation();
-                groups[idx] = g;
-                setGroups(groups);
-                picker.remove();
-            });
-            picker.appendChild(dot);
-        }
-        tile.style.position = 'relative';
-        tile.appendChild(picker);
-    });
-});
-
-// Fermer le picker au clic ailleurs
-document.addEventListener('click', function() {
-    document.querySelectorAll('.group-picker').forEach(p => p.remove());
-});
-
-
-document.getElementById('reset-groups')?.addEventListener('click', function() {
-    setGroups([1,1,2,2,2,3,4]);
-});
-
-// ── Repas désactivés (absent / pas à la maison) ─────
-const offInput = document.getElementById('off-meals-input');
-const offSet = new Set((offInput.value || '').split(',').map(s => s.trim()).filter(Boolean));
-function syncOff() {
-    offInput.value = [...offSet].sort().join(',');
-    document.querySelectorAll('.mt').forEach(b => {
-        b.classList.toggle('off', offSet.has(b.dataset.day + ':' + b.dataset.moment));
+        let g = parseInt(gb.dataset.group) || 1;
+        g = g >= maxG + 1 ? 1 : g + 1;   // cycle 1..maxG+1 puis retour à 1
+        gb.dataset.group = g;
+        paintCell(c);
+        renderLegend();
     });
 }
-document.querySelectorAll('.mt').forEach(b => {
-    b.addEventListener('click', () => {
-        const key = b.dataset.day + ':' + b.dataset.moment;
-        if (offSet.has(key)) offSet.delete(key); else offSet.add(key);
-        syncOff();
+
+// ── Hydratation depuis le champ `meals` (re-rendu après erreur) ──────
+function hydrateFromMeals() {
+    const raw = document.getElementById('meals-input').value;
+    if (!raw) return false;
+    let arr;
+    try { arr = JSON.parse(raw); } catch (e) { return false; }
+    if (!Array.isArray(arr) || !arr.length) return false;
+    const byKey = {};
+    arr.forEach(o => { byKey[o.jour + ':' + o.moment] = o; });
+    cells().forEach(c => {
+        const o = byKey[cellKey(c)];
+        if (!o) return;
+        persInput(c).value = Math.max(0, parseInt(o.persons) || 0);
+        typeBtn(c).dataset.type = o.type === 'simple' ? 'simple' : 'recette';
+        const gb = groupBtn(c);
+        if (gb && o.group != null) gb.dataset.group = parseInt(o.group) || 1;
     });
-});
-syncOff();
+    return true;
+}
 
-// ── Construction du prompt ─────────────────────────
-function buildMidiDesc(groups) {
-    const uniq = [...new Set(groups)];
-    const lines = [];
-    // Grouper par valeur
-    const byGroup = {};
-    groups.forEach((g, i) => { if (!byGroup[g]) byGroup[g] = []; byGroup[g].push(i); });
-    Object.entries(byGroup).forEach(([g, days]) => {
-        const names = days.map(d => JOURS[d]);
-        const count = days.length;
-        if (count === 1) {
-            lines.push(`- ${names[0]} midi : plat différent`);
-        } else {
-            lines.push(`- ${names.join(' + ')} midi : même plat (cuisiné pour ${count})`);
-        }
+// ── Sérialisation dans le champ caché `meals` avant submit ──────────
+function serialize() {
+    const arr = cells().map(c => {
+        const o = {
+            jour: parseInt(c.dataset.jour),
+            moment: c.dataset.moment,
+            persons: Math.max(0, parseInt(persInput(c).value) || 0),
+            type: typeBtn(c).dataset.type === 'simple' ? 'simple' : 'recette',
+        };
+        if (c.dataset.moment === 'midi') o.group = parseInt(groupBtn(c).dataset.group) || 1;
+        return o;
     });
-    return lines.join('\n');
+    document.getElementById('meals-input').value = JSON.stringify(arr);
 }
 
-function buildPrompt() {
-    const d = ['lun','mar','mer','jeu','ven','sam','dim'];
-    const days = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
-    const pers = d.map(id => document.getElementById('nb_'+id)?.value || '2');
-    const s = document.getElementById('saison')?.value || 'printemps';
-    const t = document.getElementById('temperature')?.value || 'tempérée';
-    const r = document.getElementById('ingredients_force')?.value || 'aucun';
-    const c = document.getElementById('custom_prompt')?.value || 'Aucune.';
-    const groups = getGroups();
-    const midiDesc = buildMidiDesc(groups);
-    const perDayStr = days.map((n,i) => `${n}=${pers[i]}`).join(', ');
-    return `Génère un planning de 7 jours pour une famille.
-
-CONTEXTE :
-- Saison : ${s}
-- Température : ${t}
-- Personnes par jour : ${perDayStr}
-- Restes à écouler : ${r}
-
-CONSIGNES DE LA FAMILLE :
-${c}
-
-BASE DE RECETTES : 30 recettes disponibles.
-
-RÉPARTITION DES MIDIS :
-${midiDesc}
-- Soirs : TOUS différents, repas sur le pouce (légers, rapides, un soir restes)`;
+function resetGrille() {
+    cells().forEach(c => {
+        const i = parseInt(c.dataset.jour) - 1;
+        persInput(c).value = DEFAULT_PERS[i];
+        typeBtn(c).dataset.type = 'recette';
+        const gb = groupBtn(c);
+        if (gb) gb.dataset.group = DEFAULT_GROUPS[i];
+    });
+    renderAll();
 }
 
-// ── Preview ─────────────────────────────────────────
-function updatePromptPreview() {
-    const area = document.getElementById('preview-area');
-    if (area && document.getElementById('preview-box').style.display !== 'none') {
-        area.value = buildPrompt();
-        document.getElementById('preview-status').textContent = '✅ Mis à jour';
-    }
-}
+document.getElementById('reset-grille').addEventListener('click', resetGrille);
+cells().forEach(bindCell);
+hydrateFromMeals();
+renderAll();
 
-document.getElementById('preview-btn')?.addEventListener('click', function() {
-    const box = document.getElementById('preview-box');
-    if (box.style.display === 'none') {
-        document.getElementById('preview-area').value = buildPrompt();
-        box.style.display = 'block';
-        this.textContent = '🙈 Cacher';
-        document.getElementById('preview-status').textContent = '✅ À jour';
-    } else {
-        box.style.display = 'none';
-        this.textContent = '📝 Aperçu du prompt final';
-    }
-});
-
-// Auto-rafraîchir l'aperçu
-['saison','temperature','nb_personnes','ingredients_force','custom_prompt'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', updatePromptPreview);
-});
-
-// Initialiser l'affichage
-renderGroups();
-
-// Loading
-document.getElementById('pf').addEventListener('submit', function() {
-    document.getElementById('load').style.display='flex';
-    document.getElementById('btn-g').disabled=true;
-    document.getElementById('btn-g').textContent='⏳ Génération...';
+// Loading + sérialisation au submit
+document.getElementById('pf').addEventListener('submit', function () {
+    serialize();
+    document.getElementById('load').style.display = 'flex';
+    document.getElementById('btn-g').disabled = true;
+    document.getElementById('btn-g').textContent = '⏳ Génération...';
 });
 </script>
 {% endblock %}
