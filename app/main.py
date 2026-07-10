@@ -374,6 +374,9 @@ async def voir_planning(request: Request, planning_id: int):
     # (« recette pas terminée ») pour afficher un avertissement dans le planning.
     enriched_ids = set(await db.get_all_enriched_ingredients())
     for p in plats:
+        # Normalise le type en liste (anciens plannings : « repas » stocké en
+        # string avant le passage au multi-valeurs) pour l'affichage en chips.
+        p["repas"] = recipe_types(p)
         nid = p.get("notion_id")
         p["non_enrichi"] = not (nid and nid in enriched_ids)
         acc = p.get("accompagnement")
@@ -489,6 +492,12 @@ async def liste_recettes(request: Request):
 
 
 BASE_SERVINGS = 4  # base d'extraction des ingrédients (cf. extract_ingredients)
+
+# État attribué à une recette dès qu'on la note (doit correspondre EXACTEMENT à
+# une option « status » de Notion : To-do « À essayer », In progress
+# « Prochaine recette », Complete « Réussie »/« Testée »). Noter = testé (pas
+# forcément réussi), donc « Testée ».
+RATED_STATUS = "Testée"
 
 
 def _per_day_list(planning: dict, data: dict) -> list[int]:
@@ -1187,12 +1196,15 @@ async def api_rate(page_id: str, request: Request):
             return {"error": "Note invalide"}
         await notion.update_rating(page_id, note)
         # Noter une recette = elle a été testée → on la sort de « À essayer ».
+        warning = ""
         if note:
             try:
-                await notion.update_status(page_id, "Validée")
+                await notion.update_status(page_id, RATED_STATUS)
             except Exception as e:
-                logger.warning(f"Passage à « Validée » échoué pour {page_id}: {e}")
-        return {"success": True}
+                logger.warning(f"Passage à « {RATED_STATUS} » échoué pour {page_id}: {e}")
+                warning = (f"Note enregistrée, mais l'état n'a pas pu passer à "
+                           f"« {RATED_STATUS} » (option Notion introuvable ?).")
+        return {"success": True, "warning": warning}
     except Exception as e:
         logger.exception("Erreur notation")
         return {"error": str(e)}

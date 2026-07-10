@@ -60,9 +60,9 @@ def test_rate_valid_and_invalid(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_rating", _rate)
     monkeypatch.setattr(main.notion, "update_status", _status)
     assert client.post("/api/rate/x", json={"note": "⭐⭐"}).json().get("success")
-    assert status["calls"] == ["Validée"]                          # notée → Validée
+    assert status["calls"] == ["Testée"]                          # notée → Testée
     assert client.post("/api/rate/x", json={"note": ""}).json().get("success")  # effacer
-    assert status["calls"] == ["Validée"]                          # effacer ne re-valide pas
+    assert status["calls"] == ["Testée"]                          # effacer ne re-valide pas
     assert "error" in client.post("/api/rate/x", json={"note": "pas une note"}).json()
 
 
@@ -614,6 +614,24 @@ def test_planning_warns_non_enrichi(client, monkeypatch):
     asyncio.run(main.db.save_enriched("n1", "Poulet", ingredients=json.dumps(
         [{"nom": "g de poulet", "quantite": "200", "unite": ""}])))
     assert "À compléter" not in client.get(f"/planning/{pid}").text
+
+
+def test_planning_repas_string_legacy_rendered_as_one_chip(client, monkeypatch):
+    """Ancien planning : « repas » stocké en string → coercé en liste à l'affichage
+    (sinon la boucle de chips l'éclaterait lettre par lettre : « P l a t »)."""
+    import asyncio, json
+    data = {"plats": [{"jour": 1, "moment": "midi", "nom_recette": "Truc maison",
+                       "repas": "Plat", "notion_id": "", "accompagnement": None}],
+            "liste_courses": [], "per_day": "4,4,4,4,4,4,4"}
+    pid = asyncio.run(main.db.save_planning(
+        week_start="2026-01-05", saison="Hiver", nb_personnes=4, ingredients_force="",
+        data_json=json.dumps(data, ensure_ascii=False),
+        recipes=[{"notion_id": "", "recipe_name": "Truc maison", "repas_type": "Plat",
+                  "jour": 1, "moment": "midi"}],
+    ))
+    html = client.get(f"/planning/{pid}").text
+    assert '<span class="chip chip-repas">Plat</span>' in html
+    assert '<span class="chip chip-repas">P</span>' not in html
 
 
 def test_parse_off_meals():
