@@ -686,3 +686,87 @@ def test_generer_valide_recette_inventee(client, monkeypatch):
     # la recette inventée a été remplacée par une recette réelle du catalogue
     assert "Inventée" not in page
     assert "Soupe" in page
+
+
+def test_free_meal_creates_and_places(client, monkeypatch):
+    """Un « repas libre » crée une recette minimale, la place dans le bon créneau
+    et régénère une liste de courses incluant les ingrédients saisis."""
+    import asyncio
+
+    async def _all():
+        return [_recipe("Poulet"), _recipe("Soupe")]
+    async def _gen(**kw):
+        return [
+            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
+            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
+        ]
+
+    created = {}
+    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment=""):
+        created["nom"] = nom
+        created["repas"] = repas
+        return {"id": "free1", "url": "https://notion.so/free1"}
+    ingredients_ecrits = {}
+    async def _upd_ings(page_id, text):
+        ingredients_ecrits["page_id"] = page_id
+        ingredients_ecrits["text"] = text
+        return {}
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+    monkeypatch.setattr(main.notion, "update_ingredients", _upd_ings)
+    # db.save_enriched / get_enriched : vrai cache (round-trip sur la db temporaire)
+
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+
+    resp = client.post(f"/api/free-meal/{pid}", json={
+        "jour": 1, "moment": "soir",
+        "nom": "Steak + haricots verts",
+        "ingredients": "2 steaks\n200 g de haricots verts",
+    })
+    data = resp.json()
+    assert data.get("success")
+
+    # La recette a bien été créée dans Notion (Plat) + ingrédients écrits.
+    assert created["nom"] == "Steak + haricots verts"
+    assert created["repas"] == "Plat"
+    assert ingredients_ecrits["page_id"] == "free1"
+
+    # Le bon créneau (soir) porte la nouvelle recette.
+    soir = next(p for p in data["plats"] if p["jour"] == 1 and p["moment"] == "soir")
+    assert soir["nom_recette"] == "Steak + haricots verts"
+    assert soir["notion_id"] == "free1"
+
+    # La liste de courses inclut les ingrédients saisis.
+    noms = {i["nom"] for i in data["liste_courses"]}
+    assert "steaks" in noms
+    assert "haricots verts" in noms
+
+    # Persisté : la recette figure dans le planning enregistré.
+    p = asyncio.run(main.db.get_planning_with_recipes(pid))
+    assert "Steak + haricots verts" in {r["recipe_name"] for r in p["recipes"]}
+
+
+def test_free_meal_creneau_introuvable(client, monkeypatch):
+    """Créneau inexistant → erreur, pas de recette créée."""
+    async def _all():
+        return [_recipe("Poulet")]
+    async def _gen(**kw):
+        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"}]
+    appels = {"create": 0}
+    async def _create(**kw):
+        appels["create"] += 1
+        return {"id": "x"}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.llm, "generate_planning", _gen)
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+
+    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    # jour 1 soir n'existe pas dans ce planning
+    resp = client.post(f"/api/free-meal/{pid}", json={
+        "jour": 1, "moment": "soir", "nom": "Test", "ingredients": ""})
+    assert resp.json().get("error")
+    assert appels["create"] == 0  # aucune page Notion orpheline

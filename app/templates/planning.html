@@ -151,6 +151,14 @@
             <p id="modal-ctx" class="modal-ctx"></p>
             <input type="text" id="flt" placeholder="Filtrer..." class="inp">
             <div id="alt-list"></div>
+            <div id="free-meal" style="display:none">
+                <button type="button" class="btn btn-ghost btn-sm" id="free-toggle">➕ Repas libre</button>
+                <div id="free-form" style="display:none;margin-top:.6rem">
+                    <input type="text" id="free-nom" placeholder="Nom du repas (ex. Steak + haricots verts)" class="inp">
+                    <textarea id="free-ings" placeholder="Un ingrédient par ligne&#10;200 g de haricots verts&#10;2 steaks" class="inp" rows="4" style="margin-top:.4rem"></textarea>
+                    <button type="button" class="btn btn-sm btn-primary" id="free-go" style="margin-top:.4rem">Créer et placer</button>
+                </div>
+            </div>
         </div>
         <div class="modal-foot">
             <button class="btn btn-ghost btn-sm" onclick="c()">Annuler</button>
@@ -414,6 +422,7 @@ async function setSide(slot,nom){
 }
 
 async function la() {
+    resetFree();
     const r=await fetch(`/api/alternatives/${pid}`); const d=await r.json();
     let alts=d.alternatives||[];
     if(sideMode) alts=alts.filter(a=>a.repas==='Légume'||a.repas==='Accompagnement');
@@ -433,6 +442,38 @@ async function rpl(n) {
     }
     if(ok) window.location.reload();
 }
+
+// ── Repas libre : crée une recette minimale et la place dans le(s) créneau(x) ──
+function resetFree(){
+    // Disponible seulement en mode « changer recette » (pas pour un accompagnement).
+    document.getElementById('free-meal').style.display = sideMode ? 'none' : 'block';
+    document.getElementById('free-form').style.display = 'none';
+    document.getElementById('free-nom').value = '';
+    document.getElementById('free-ings').value = '';
+}
+document.getElementById('free-toggle').onclick = function(){
+    const f = document.getElementById('free-form');
+    const open = f.style.display !== 'none';
+    f.style.display = open ? 'none' : 'block';
+    if(!open) document.getElementById('free-nom').focus();
+};
+document.getElementById('free-go').onclick = async function(){
+    const nom = document.getElementById('free-nom').value.trim();
+    const ingredients = document.getElementById('free-ings').value;
+    if(!nom){ toast('Donne un nom au repas', 'error'); return; }
+    if(!bul.length){ toast('Aucun créneau sélectionné', 'error'); return; }
+    this.disabled = true; this.textContent = '⏳ Création...';
+    let ok = true;
+    for(const s of bul) for(const j of s.jours){
+        const r = await fetch(`/api/free-meal/${pid}`, {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({jour:j, moment:s.m, nom, ingredients})});
+        const d = await r.json();
+        if(!d.success){ ok=false; toast(d.error||'Erreur repas libre', 'error'); break; }
+    }
+    if(ok){ toast('Repas libre créé ✓', 'success'); window.location.reload(); }
+    else { this.disabled = false; this.textContent = 'Créer et placer'; }
+};
+
 const cap = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
 function usl(items) {
     const g=document.getElementById('shop-g');
