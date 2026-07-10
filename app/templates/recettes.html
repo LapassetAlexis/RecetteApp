@@ -15,8 +15,16 @@
     <input type="search" id="recipe-search" class="inp" placeholder="🔍 Rechercher (nom ou ingrédient : « courgette thon »)...">
 </div>
 
-<!-- Filtres cliquables (type / état / tag) -->
+<!-- Filtres cliquables (nature / type / base / état / tag) -->
 <div class="filters">
+    <div class="filter-row">
+        <span class="filter-label">Nature</span>
+        <div class="filter-chips">
+            <span class="stat-chip active" data-filter="nature" data-value="Recette">Recettes ({{ par_nature.get('Recette', 0) }})</span>
+            <span class="stat-chip" data-filter="nature" data-value="Ingrédient">Ingrédients ({{ par_nature.get('Ingrédient', 0) }})</span>
+            <span class="stat-chip" data-filter="nature" data-value="">Toutes ({{ total }})</span>
+        </div>
+    </div>
     <div class="filter-row">
         <span class="filter-label">Type</span>
         <div class="filter-chips">
@@ -68,7 +76,7 @@
 } %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-base="{{ recette.base|join('|') }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-nature="{{ recette.nature or 'Recette' }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-base="{{ recette.base|join('|') }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-href="/recette/{{ recette.id }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
         {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% endif %}
         <h3 class="recipe-title">{{ recette.nom | clean_title }}</h3>
         <div class="recipe-meta">
@@ -121,8 +129,9 @@ document.querySelectorAll('.recipe-card').forEach(card => {
 
 // (le bouton « Enrichir » est un lien vers la page d'enrichissement en 2 temps)
 
-// ── Recherche + filtres combinés (type / état / tag) ─
-const active = {type: '', base: '', etat: '', tag: '', rapide: false};
+// ── Recherche + filtres combinés (nature / type / base / état / tag) ─
+// Par défaut : nature = "Recette" → les briques (Ingrédient) sont masquées.
+const active = {nature: 'Recette', type: '', base: '', etat: '', tag: '', rapide: false};
 function applyFilters() {
     const q = document.getElementById('recipe-search').value.trim().toLowerCase();
     let visible = 0;
@@ -131,13 +140,14 @@ function applyFilters() {
     document.querySelectorAll('.recipe-card').forEach(card => {
         const hay = card.dataset.name + ' ' + (card.dataset.ings || '');
         const okName = !terms.length || terms.every(t => hay.includes(t));
+        const okNature = !active.nature || (card.dataset.nature || 'Recette') === active.nature;
         const okType = !active.type || (card.dataset.type || '').split('|').includes(active.type);
         const okBase = !active.base || (card.dataset.base || '').split('|').includes(active.base);
         const okEtat = !active.etat || card.dataset.etat === active.etat;
         const okTag = !active.tag || (card.dataset.tags || '').split('|').includes(active.tag.toLowerCase());
         const duree = parseInt(card.dataset.duree || '0', 10);
         const okRapide = !active.rapide || (duree > 0 && duree <= 30);
-        const show = okName && okType && okBase && okEtat && okTag && okRapide;
+        const show = okName && okNature && okType && okBase && okEtat && okTag && okRapide;
         card.classList.toggle('hidden', !show);
         if (show) visible++;
     });
@@ -158,6 +168,7 @@ document.querySelectorAll('.stat-chip').forEach(chip => {
         applyFilters();
     });
 });
+applyFilters();  // au chargement : masque les briques (nature=Recette par défaut)
 
 // ── Notation (survol + clic + effacer) ──────────────
 document.querySelectorAll('.recipe-stars').forEach(container => {

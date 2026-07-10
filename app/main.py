@@ -479,9 +479,11 @@ async def liste_recettes(request: Request):
     par_base: dict[str, int] = {}
     par_etat: dict[str, int] = {}
     par_tag: dict[str, int] = {}
+    par_nature: dict[str, int] = {}
     for r in recettes:
         r["ingredients_search"] = ings_by_id.get(r["id"], "")
         r["duree"] = duree_by_id.get(r["id"], 0)
+        par_nature[recipe_nature(r)] = par_nature.get(recipe_nature(r), 0) + 1
         types = recipe_types(r) or ["Non classé"]
         for t in types:
             par_type[t] = par_type.get(t, 0) + 1
@@ -498,6 +500,7 @@ async def liste_recettes(request: Request):
             "request": request,
             "recettes": recettes,
             "total": total,
+            "par_nature": par_nature,
             "par_type": sorted(par_type.items()),
             "par_base": sorted(par_base.items(), key=lambda kv: -kv[1]),
             "par_etat": sorted(par_etat.items()),
