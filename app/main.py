@@ -4,7 +4,6 @@ import base64
 import binascii
 import json
 import logging
-import random
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -36,12 +35,6 @@ from app.nutrition import estimate_nutrition
 from app.text_utils import clean_recipe_title, merge_ingredients, normalize_cached_ingredient, normalize_title_case, parse_ingredient_line, scale_ingredients, split_instructions
 
 VERSION = "1.1.0"
-
-# Nombre max de recettes envoyées au LLM pour la génération du planning.
-# Plus haut = plus de variété ; reste léger en tokens grâce au format compact.
-# Surtout utile en cloud (Gemini/Groq) ; en Ollama local un petit modèle peut
-# ralentir avec une très longue liste.
-MAX_RECIPES_FOR_LLM = 100
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -122,58 +115,22 @@ templates.env.globals["tag_groups"] = TAG_GROUPS
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Page d'accueil : formulaire de génération."""
+    """Page d'accueil : constructeur manuel de planning (grille 7 jours × 2)."""
     today = date.today()
     # Calcul du lundi de la semaine
     lundi = today - timedelta(days=today.weekday())
     week_start = lundi.isoformat()
 
-    # Saison automatique
-    mois = today.month
-    if 3 <= mois <= 5:
-        saison_default = "Printemps"
-    elif 6 <= mois <= 8:
-        saison_default = "Été"
-    elif 9 <= mois <= 11:
-        saison_default = "Automne"
-    else:
-        saison_default = "Hiver"
-
-    # Dernier planning
+    # Dernier planning (lien « Voir »)
     dernier = await db.get_last_planning()
     planning_id = dernier["id"] if dernier else None
-
-    # Préférences mémorisées (pré-remplissage du formulaire)
-    prefs = await db.get_prefs()
-
-    def _to_ints(csv: str, n: int) -> list[int] | None:
-        try:
-            vals = [int(x) for x in csv.split(",")]
-            return vals if len(vals) == n else None
-        except (ValueError, AttributeError):
-            return None
-
-    midi_groups_value = prefs.get("midi_groups") or "1,1,2,2,2,3,4"
-    day_groups = _to_ints(midi_groups_value, 7)
-    day_pers = _to_ints(prefs.get("per_day", ""), 7)
 
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "week_start": week_start,
-            "saison_default": prefs.get("saison") or saison_default,
-            "nb_personnes": 4,
             "planning_id": planning_id,
-            "repas_options": REPAS_OPTIONS,
-            "tag_options": TAG_OPTIONS,
-            # pré-remplissage depuis les préférences mémorisées
-            "day_groups": day_groups,
-            "day_pers": day_pers,
-            "midi_groups_value": midi_groups_value,
-            "ingredients_force": prefs.get("ingredients_force", ""),
-            "custom_prompt": prefs.get("custom_prompt", ""),
-            "off_meals": prefs.get("off_meals", ""),
         },
     )
 
@@ -206,81 +163,6 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["base"] = r.get("base", [])
     plat["nature"] = recipe_nature(r)
     plat["tags"] = r.get("tags", [])
-
-
-# Bases considérées comme « protéine » pour l'assemblage d'un repas simple.
-_PROTEIN_BASES = {"Viande", "Poisson", "Œuf", "Végé"}
-
-
-def _brique_acc(b: dict) -> dict:
-    """Accompagnement (dict standard) construit depuis une brique."""
-    return {
-        "nom_recette": b["nom"],
-        "notion_id": b.get("id", ""),
-        "url": b.get("url", ""),
-        "notion_url": b.get("notion_url", ""),
-    }
-
-
-def _assemble_simple_meals(
-    briques: list[dict], n: int, rng: random.Random | None = None,
-) -> tuple[list[dict], int]:
-    """Assemble jusqu'à `n` repas simples DÉTERMINISTES à partir des briques.
-
-    Un repas simple = 1 brique protéine (le plat) + [1 brique féculent,
-    1 brique légume] en accompagnements. On pioche sans répéter la même brique
-    dans un même pool sur la semaine (variété). Les pools sont mélangés (`rng`,
-    par défaut le module `random` — injectable/seedable pour les tests) pour
-    équilibrer le choix plutôt que toujours prendre la première brique.
-
-    L'exclusion « déjà vu 4 semaines » ne s'applique PAS aux briques (basiques).
-
-    Retourne (repas, nb_complets) où chaque repas est un dict
-    {"prot": brique, "accompagnements": [dict, ...]} et nb_complets = nombre de
-    repas ayant protéine + féculent + légume. Si un pool manque, le repas est
-    produit avec ce qui existe (au minimum la protéine)."""
-    rng = rng or random
-
-    def _pool(pred) -> list[dict]:
-        items = [b for b in briques if pred(b)]
-        rng.shuffle(items)
-        return items
-
-    prots = _pool(lambda b: bool(set(recipe_base(b)) & _PROTEIN_BASES))
-    fecs = _pool(lambda b: "Féculent" in recipe_base(b))
-    legs = _pool(lambda b: "Légume" in recipe_base(b))
-
-    meals: list[dict] = []
-    complete = 0
-    # Un repas simple exige au moins une protéine (le plat) : le nombre de repas
-    # produits est borné par le pool de protéines (jamais de répétition).
-    for i in range(min(n, len(prots))):
-        fec = fecs[i] if i < len(fecs) else None
-        leg = legs[i] if i < len(legs) else None
-        accs: list[dict] = []
-        if fec:
-            accs.append(_brique_acc(fec))
-        if leg:
-            accs.append(_brique_acc(leg))
-        if fec and leg:
-            complete += 1
-        meals.append({"prot": prots[i], "accompagnements": accs})
-    return meals, complete
-
-
-def _pick_replacement(
-    recettes_pool: list[dict], used_names: set[str], exclues: set[str],
-) -> dict | None:
-    """Pioche une recette de remplacement dans le catalogue filtré : une recette
-    réellement présente dans Notion, non déjà utilisée dans la semaine et non
-    exclue (récemment servie). Retourne None si aucune candidate."""
-    candidates = [
-        r for r in recettes_pool
-        if r["nom"].lower().strip() not in used_names and r["nom"] not in exclues
-    ]
-    if not candidates:
-        return None
-    return random.choice(candidates)
 
 
 async def _week_nutrition(plats: list[dict]) -> dict | None:
@@ -396,133 +278,6 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
         "confiance": "Bonne" if cov >= 0.7 else ("Moyenne" if cov >= 0.4 else "Mauvaise"),
         "par_jour": par_jour,
     }
-
-
-def _parse_off_meals(raw: str) -> set[tuple[int, str]]:
-    """Parse « 1:midi,6:soir » en {(1,'midi'),(6,'soir')}. Ignore le reste."""
-    out: set[tuple[int, str]] = set()
-    for tok in (raw or "").split(","):
-        tok = tok.strip()
-        if ":" not in tok:
-            continue
-        d, m = tok.split(":", 1)
-        if d.isdigit() and 1 <= int(d) <= 7 and m in ("midi", "soir"):
-            out.add((int(d), m))
-    return out
-
-
-# Défauts historiques (repli quand la grille `meals` n'est pas soumise) :
-# personnes lun-ven=2, sam-dim=4 ; regroupement des midis 1,1,2,2,2,3,4.
-_DEFAULT_PERS = [2, 2, 2, 2, 2, 4, 4]
-_DEFAULT_GROUPS = [1, 1, 2, 2, 2, 3, 4]
-
-
-def _grid_default(
-    pers: list[int], groups: list[int], off_set: set[tuple[int, str]],
-) -> list[dict]:
-    """Construit la grille 7 jours × 2 moments à partir des anciens paramètres.
-
-    persons = personnes du jour (0 si le créneau est « off »/absent) ; tout en
-    type « recette » ; group des midis repris de `groups`. Reproduit à
-    l'identique le comportement de l'ancien formulaire (nb_* / midi_groups /
-    off_meals)."""
-    grid: list[dict] = []
-    for d in range(1, 8):
-        for m in ("midi", "soir"):
-            persons = 0 if (d, m) in off_set else pers[d - 1]
-            case: dict = {"jour": d, "moment": m, "persons": persons, "type": "recette"}
-            if m == "midi":
-                case["group"] = groups[d - 1]
-            grid.append(case)
-    return grid
-
-
-def _parse_meals(raw: str) -> list[dict] | None:
-    """Parse le champ caché `meals` (JSON) en grille normalisée de cases.
-
-    Chaque case : {jour 1-7, moment midi|soir, persons>=0 (0 = absent),
-    type recette|simple, group (midis uniquement)}. Retourne None si le champ
-    est vide/invalide → l'appelant reconstruit alors une grille par défaut."""
-    if not raw or not raw.strip():
-        return None
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(data, list) or not data:
-        return None
-    grid: list[dict] = []
-    for c in data:
-        if not isinstance(c, dict):
-            continue
-        try:
-            jour = int(c.get("jour"))
-        except (TypeError, ValueError):
-            continue
-        moment = c.get("moment")
-        if not (1 <= jour <= 7) or moment not in ("midi", "soir"):
-            continue
-        try:
-            persons = max(0, int(c.get("persons", 0)))
-        except (TypeError, ValueError):
-            persons = 0
-        typ = c.get("type") if c.get("type") in ("recette", "simple") else "recette"
-        case: dict = {"jour": jour, "moment": moment, "persons": persons, "type": typ}
-        if moment == "midi":
-            try:
-                case["group"] = int(c.get("group", jour))
-            except (TypeError, ValueError):
-                case["group"] = jour
-        grid.append(case)
-    return grid or None
-
-
-def _apply_simple_meal(plat: dict, meal: dict) -> None:
-    """Applique une assiette simple assemblée (protéine + accompagnements) à un plat."""
-    prot = meal["prot"]
-    plat["nom_recette"] = prot["nom"]
-    _apply_recipe_info(plat, prot)  # notion_id + nature=Ingrédient
-    plat["type_repas"] = "Plat"
-    plat["accompagnements"] = meal["accompagnements"]
-
-
-def _convert_to_simple(targets: list[dict], briques: list[dict],
-                       day_groups: list[int] | None = None) -> str:
-    """Transforme des créneaux en repas simples assemblés depuis les briques
-    (protéine + féculent + légume, déterministe). Mute `targets` en place.
-
-    Si `day_groups` est fourni (chemin grille), les midis d'un même groupe
-    partagent la MÊME assiette (une seule unité) ; sinon chaque créneau est sa
-    propre unité (chemin legacy nb_simple aléatoire). Retourne un avertissement
-    si des unités n'ont pu être complétées (briques insuffisantes), sinon ""."""
-    # Unités d'assemblage : midis groupés = 1 unité partagée ; soirs = 1 chacun.
-    units: dict[tuple, list[dict]] = {}
-    order: list[tuple] = []
-    for p in targets:
-        if day_groups and p["moment"] == "midi":
-            g = day_groups[p["jour"] - 1] if 1 <= p["jour"] <= 7 else p["jour"]
-            key = ("midi", g)
-        else:
-            key = (p["moment"], p["jour"])
-        if key not in units:
-            units[key] = []
-            order.append(key)
-        units[key].append(p)
-
-    meals, complets = _assemble_simple_meals(briques, len(order))
-    for i, key in enumerate(order):
-        if i >= len(meals):
-            break  # plus de briques : les créneaux restants gardent leur recette
-        for plat in units[key]:
-            _apply_simple_meal(plat, meals[i])
-
-    demanded = len(order)
-    if complets < demanded:
-        msg = (f"{demanded} repas simples demandés, {complets} produits — "
-               f"crée plus de briques (protéine/féculent/légume).")
-        logger.warning(msg)
-        return msg
-    return ""
 
 
 def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
@@ -1115,269 +870,225 @@ async def historique(request: Request):
 # ── Actions ────────────────────────────────────────────────────────
 
 
-@app.post("/generer")
-async def generer(
-    request: Request,
-    week_start: str = Form(...),
-    saison: str = Form(...),
-    meals: str = Form(""),
-    temperature: str = Form(""),
-    ingredients_force: str = Form(""),
-    tags: list[str] = Form([]),
-    etat: str = Form(""),
-    custom_prompt: str = Form(""),
-    # Rétro-compat : anciens champs éparses, utilisés SEULEMENT si `meals` (la
-    # grille) est absent/invalide (anciens clients, tests historiques).
-    nb_lun: int = Form(2),
-    nb_mar: int = Form(2),
-    nb_mer: int = Form(2),
-    nb_jeu: int = Form(2),
-    nb_ven: int = Form(2),
-    nb_sam: int = Form(4),
-    nb_dim: int = Form(4),
-    midi_groups: str = Form("1,1,2,2,2,3,4"),
-    off_meals: str = Form(""),
-    nb_simple: int = Form(0),
-):
-    """Génère un planning via le LLM et sauvegarde.
+def _parse_builder_meals(raw: str) -> list[dict]:
+    """Parse le champ `meals` du constructeur en cases normalisées.
 
-    Source de vérité : la GRILLE 7 jours × 2 moments soumise dans le champ
-    caché `meals` (JSON, 14 cases). Chaque case porte persons (0 = absent),
-    type (recette|simple) et group (midis uniquement, regroupement = même
-    plat). À défaut (client historique / tests), on reconstruit la grille
-    depuis les anciens champs (nb_* / midi_groups / off_meals / nb_simple) →
-    comportement identique à l'ancien formulaire."""
-    # Anciens paramètres → base du repli grille.
-    pers = [nb_lun, nb_mar, nb_mer, nb_jeu, nb_ven, nb_sam, nb_dim]
-    off_set_legacy = _parse_off_meals(off_meals)
+    Chaque case : {jour 1-7, moment midi|soir, persons >= 0 (0 = absent),
+    group (int, midis uniquement), main {notion_id, nom, nature} | None,
+    accompagnements [{notion_id, nom}, ...]}. Les entrées invalides sont
+    ignorées ; retourne [] si le champ est vide/illisible."""
+    if not raw or not raw.strip():
+        return []
     try:
-        legacy_groups = [int(x) for x in midi_groups.split(",")]
-    except (ValueError, TypeError):
-        legacy_groups = list(_DEFAULT_GROUPS)
-    if len(legacy_groups) != 7:
-        legacy_groups = list(_DEFAULT_GROUPS)
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
 
-    # Grille : soit celle soumise (champ `meals`), soit reconstruite (repli).
-    grid = _parse_meals(meals)
-    fallback = grid is None
-    if fallback:
-        grid = _grid_default(pers, legacy_groups, off_set_legacy)
-
-    grid_by_key = {(c["jour"], c["moment"]): c for c in grid}
-    # Créneaux inactifs (absent) : persons == 0 → non générés / grisés.
-    off_set = {k for k, c in grid_by_key.items() if c["persons"] <= 0}
-    # Groupes de midis (7 valeurs) déduits de la grille (pour generate_planning).
-    day_groups = [
-        grid_by_key.get((d, "midi"), {}).get("group", d) for d in range(1, 8)
-    ]
-    midi_groups = ",".join(str(g) for g in day_groups)
-    # Personnes de référence (quantités LLM) = max des cases actives.
-    actives = [c["persons"] for c in grid if c["persons"] > 0]
-    nb_personnes = max(actives) if actives else 4
-    # per_day (repli d'affichage / anciens plannings) : max(midi, soir) du jour.
-    per_day_list = []
-    for d in range(1, 8):
-        pm = grid_by_key.get((d, "midi"), {}).get("persons", 0)
-        ps = grid_by_key.get((d, "soir"), {}).get("persons", 0)
-        per_day_list.append(max(pm, ps) or nb_personnes)
-    per_day = ",".join(str(x) for x in per_day_list)
-    off_meals_str = ",".join(sorted(f"{d}:{m}" for d, m in off_set))
-
-    def _error_ctx(message: str) -> dict:
-        """Contexte de re-rendu du formulaire en préservant toute la saisie."""
+    def _item(v) -> dict | None:
+        if not isinstance(v, dict):
+            return None
+        nom = str(v.get("nom", "")).strip()
+        if not nom:
+            return None
         return {
-            "request": request,
-            "error": message,
-            "repas_options": REPAS_OPTIONS,
-            "tag_options": TAG_OPTIONS,
-            "week_start": week_start,
-            "saison_default": saison,
-            "temperature_default": temperature,
-            "day_groups": day_groups,
-            "day_pers": pers,
-            "off_meals": off_meals_str,
-            "meals_value": meals,
-            "ingredients_force": ingredients_force,
-            "custom_prompt": custom_prompt,
+            "notion_id": str(v.get("notion_id", "") or ""),
+            "nom": nom,
+            "nature": v.get("nature") or "Recette",
         }
 
-    try:
-        # 1. Récupérer toutes les recettes Notion
-        recettes_all = await notion.get_all_recipes()
-        # Briques (Nature = Ingrédient) : servent à assembler les repas simples
-        # de façon déterministe (sans LLM). Capturées AVANT le filtrage du pool
-        # de recettes complexes.
-        briques = [r for r in recettes_all if recipe_nature(r) == "Ingrédient"]
-        # On garde les recettes utilisables au menu : plats/entrées, ou
-        # accompagnements (Base = Légume). On exclut les briques (Nature =
-        # Ingrédient). Les recettes sans type restent éligibles.
-        recettes = [
-            r for r in recettes_all
-            if recipe_nature(r) == "Recette"
-            and (not recipe_types(r)
-                 or set(recipe_types(r)) & {"Plat", "Entrée"}
-                 or "Légume" in recipe_base(r))
-        ]
+    out: list[dict] = []
+    for c in data:
+        if not isinstance(c, dict):
+            continue
+        try:
+            jour = int(c.get("jour"))
+        except (TypeError, ValueError):
+            continue
+        moment = c.get("moment")
+        if not (1 <= jour <= 7) or moment not in ("midi", "soir"):
+            continue
+        try:
+            persons = max(0, int(c.get("persons", 0)))
+        except (TypeError, ValueError):
+            persons = 0
+        accs: list[dict] = []
+        raw_accs = c.get("accompagnements") or []
+        if isinstance(raw_accs, list):
+            for a in raw_accs:
+                it = _item(a)
+                if it:
+                    accs.append(it)
+        case: dict = {"jour": jour, "moment": moment, "persons": persons,
+                      "main": _item(c.get("main")), "accompagnements": accs}
+        if moment == "midi":
+            try:
+                case["group"] = int(c.get("group", jour))
+            except (TypeError, ValueError):
+                case["group"] = jour
+        else:
+            case["group"] = None
+        out.append(case)
+    return out
 
-        if not recettes:
+
+def _build_plat(item: dict, jour: int, moment: str, persons: int,
+                by_id: dict[str, dict]) -> dict:
+    """Construit un plat du planning à partir d'un item choisi dans le catalogue.
+    Reporte les infos Notion (base, nature, type, url…) si la recette existe."""
+    plat: dict = {
+        "jour": jour,
+        "moment": moment,
+        "persons": persons,
+        "nom_recette": item["nom"],
+        "type_repas": "Plat",
+        "notion_id": "",
+        "url": "",
+        "notion_url": "",
+        "nature": item.get("nature") or "Recette",
+        "base": [],
+        "repas": [],
+        "tags": [],
+        "accompagnements": [],
+    }
+    r = by_id.get(item.get("notion_id", ""))
+    if r:
+        _apply_recipe_info(plat, r)
+    return plat
+
+
+def _build_side(item: dict, by_id: dict[str, dict]) -> dict:
+    """Construit un accompagnement (dict standard) depuis un item du catalogue."""
+    side: dict = {
+        "nom_recette": item["nom"],
+        "notion_id": item.get("notion_id", "") or "",
+        "url": "",
+        "notion_url": "",
+    }
+    r = by_id.get(item.get("notion_id", ""))
+    if r:
+        side.update(
+            notion_id=r["id"],
+            url=r.get("url", ""),
+            notion_url=r.get("notion_url", ""),
+            nature=recipe_nature(r),
+            base=recipe_base(r),
+        )
+    return side
+
+
+@app.get("/api/catalogue")
+async def api_catalogue():
+    """Catalogue complet des recettes Notion pour le picker du constructeur.
+    Renvoie [{id, nom, nature, base:[...], repas:[...]}] pour toutes les recettes."""
+    try:
+        recettes = await notion.get_all_recipes()
+    except Exception as e:
+        logger.error(f"Erreur Notion (catalogue): {e}")
+        return []
+    return [
+        {
+            "id": r["id"],
+            "nom": r["nom"],
+            "nature": recipe_nature(r),
+            "base": recipe_base(r),
+            "repas": recipe_types(r),
+        }
+        for r in recettes
+    ]
+
+
+@app.post("/construire")
+async def construire(
+    request: Request,
+    week_start: str = Form(...),
+    meals: str = Form(""),
+):
+    """Construit un planning À LA MAIN depuis la grille du formulaire.
+
+    Le champ caché `meals` (JSON) porte les cases de la semaine :
+    [{jour 1-7, moment midi|soir, persons (0 = absent), group (midis),
+      main {notion_id, nom, nature} | null,
+      accompagnements [{notion_id, nom}, ...]}].
+    Cases sans `main` ou avec persons <= 0 → ignorées. Les midis d'un même
+    groupe partagent le repas du 1er midi rempli du groupe (même couleur =
+    même plat). On sauvegarde un BROUILLON + sa liste de courses, puis on
+    redirige vers la page planning."""
+
+    def _error_ctx(message: str) -> dict:
+        return {"request": request, "error": message, "week_start": week_start}
+
+    try:
+        cases = _parse_builder_meals(meals)
+        actives = [c for c in cases if c["persons"] > 0]
+
+        # Catalogue Notion indexé par id (report des infos : base, nature, url…).
+        recettes_all = await notion.get_all_recipes()
+        by_id = {r["id"]: r for r in recettes_all}
+
+        # Repas de référence des midis groupés : le 1er midi rempli du groupe.
+        midi_group_meal: dict[int, dict] = {}
+        for c in sorted((c for c in actives if c["moment"] == "midi"),
+                        key=lambda c: c["jour"]):
+            if c["main"] and c["group"] not in midi_group_meal:
+                midi_group_meal[c["group"]] = c
+
+        plats: list[dict] = []
+        for c in actives:
+            if c["moment"] == "midi":
+                src = midi_group_meal.get(c["group"])
+                if not src:
+                    continue  # aucun midi rempli dans ce groupe
+                main_item, accs = src["main"], src["accompagnements"]
+            else:
+                if not c["main"]:
+                    continue
+                main_item, accs = c["main"], c["accompagnements"]
+            plat = _build_plat(main_item, c["jour"], c["moment"], c["persons"], by_id)
+            plat["accompagnements"] = [_build_side(a, by_id) for a in accs]
+            plats.append(plat)
+
+        if not plats:
             return templates.TemplateResponse(
                 "index.html",
-                _error_ctx("Aucune recette trouvée dans Notion. Ajoutez-en d'abord !"),
+                _error_ctx("Aucun repas renseigné. Choisis au moins un plat principal."),
             )
 
-        # 2. Filtrer par tags si sélectionnés
-        if tags and tags[0]:  # tags non vide
-            recettes = [r for r in recettes if any(t in r["tags"] for t in tags)]
-
-        # 3. Filtrer par état si sélectionné
-        if etat:
-            recettes = [r for r in recettes if r["etat"] == etat]
-
-        # 4. Récupérer les recettes récemment utilisées (éviter répétitions)
-        exclues = await db.get_recent_recipe_names(weeks=4)
-        logger.info(f"{len(recettes)} recettes dispo, {len(exclues)} exclues")
-
-        # Filtrer les exclues
-        recettes_filtered = [r for r in recettes if r["nom"] not in exclues]
-        # On envoie le plus de recettes possible pour maximiser la variété du
-        # menu. Grâce au format compact (~15 tokens/recette), MAX_RECIPES_FOR_LLM
-        # tient largement dans le contexte de Gemini/Groq. On n'échantillonne
-        # au hasard que si la base dépasse ce plafond.
-        if len(recettes_filtered) > MAX_RECIPES_FOR_LLM:
-            recettes_sample = random.sample(recettes_filtered, MAX_RECIPES_FOR_LLM)
-        else:
-            recettes_sample = recettes_filtered
-        logger.info(f"Envoi de {len(recettes_sample)} recettes au LLM (sur {len(recettes_filtered)} dispo)")
-
-        # 3. Générer le planning via Ollama
-        plats = await llm.generate_planning(
-            recettes=recettes_sample,
-            saison=saison,
-            temperature=temperature,
-            nb_personnes=nb_personnes,
-            ingredients_force=ingredients_force,
-            recettes_exclues=list(exclues),
-            custom_prompt=custom_prompt,
-            midi_groups=midi_groups,
-            per_day=per_day,
-            off_meals=off_set,
+        # Personnes de référence + per_day (repli d'affichage / anciens plannings).
+        nb_personnes = max((c["persons"] for c in actives), default=4)
+        by_key = {(c["jour"], c["moment"]): c for c in cases}
+        per_day_list = []
+        for d in range(1, 8):
+            pm = by_key.get((d, "midi"), {}).get("persons", 0)
+            ps = by_key.get((d, "soir"), {}).get("persons", 0)
+            per_day_list.append(max(pm, ps) or nb_personnes)
+        per_day = ",".join(str(x) for x in per_day_list)
+        off_meals = sorted(
+            f"{c['jour']}:{c['moment']}" for c in cases if c["persons"] <= 0
         )
 
-        # 4. Associer chaque plat aux infos Notion (lookup O(1))
-        by_name = _index_by_name(recettes)
-        for plat in plats:
-            plat["notion_id"] = ""
-            r = by_name.get(plat["nom_recette"].lower().strip())
-            if r:
-                _apply_recipe_info(plat, r)
+        # Liste de courses ANCRÉE sur le cache DB (mêmes règles que le reste de
+        # l'app : pas d'extraction LLM à l'aveugle, mise à l'échelle PAR REPAS).
+        collected, _ = await _collect_shopping(plats, per_day_list, nb_personnes)
+        liste_courses = merge_ingredients(collected)
+        for it in liste_courses:
+            it["rayon"] = categorize(it.get("nom", ""))
 
-        # 4ter. Repas simples (assemblés DÉTERMINISTES à partir des briques).
-        # On le fait AVANT la validation : les créneaux « brique » portent un
-        # notion_id et sont donc considérés valides (pas de re-tir).
-        briques_manquantes = ""
-        if fallback:
-            # Rétro-compat `nb_simple` : convertir N créneaux ACTIFS (aléatoires)
-            # en repas simples ; les autres restent des recettes complexes.
-            n = max(0, min(nb_simple, len(plats)))
-            if n:
-                slots = list(range(len(plats)))
-                random.shuffle(slots)
-                targets = [plats[i] for i in slots[:n]]
-                briques_manquantes = _convert_to_simple(targets, briques)  # sans groupes
-        else:
-            # Grille : les cases explicitement marquées « simple » (et actives).
-            simple_keys = {
-                (c["jour"], c["moment"]) for c in grid
-                if c["type"] == "simple" and c["persons"] > 0
-            }
-            targets = [p for p in plats if (p["jour"], p["moment"]) in simple_keys]
-            if targets:
-                briques_manquantes = _convert_to_simple(targets, briques, day_groups)
-
-        # 4bis. Valider le planning généré (créneaux ACTIFS uniquement) :
-        #   - une recette réellement dans le catalogue Notion (notion_id non vide,
-        #     sinon le LLM l'a inventée) ;
-        #   - pas de doublon, MAIS les midis d'un même GROUPE partagent
-        #     volontairement la recette (« même plat ») : on les regroupe sous
-        #     une clé commune. Un doublon = même recette sous deux clés
-        #     différentes (2 groupes midi distincts, ou 2 soirs).
-        # Chaque créneau invalide est re-tiré (max 2 tentatives) dans le catalogue
-        # filtré ; s'il reste invalide on le liste en avertissement (sans bloquer).
-        JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        MOMENTS = {"midi": "Midi", "soir": "Soir"}
-
-        def _dup_key(plat: dict) -> tuple:
-            """Clé d'unicité d'un créneau : les midis d'un même groupe partagent
-            la même clé (même plat attendu), les soirs sont uniques par jour."""
-            d = plat["jour"]
-            if plat["moment"] == "midi":
-                g = day_groups[d - 1] if 1 <= d <= 7 else d
-                return ("midi", g)
-            return ("soir", d)
-
-        # Noms déjà placés (normalisés) : évite de re-tirer une recette déjà présente.
-        used_names = {p["nom_recette"].lower().strip() for p in plats if p.get("nom_recette")}
-        # 1re clé où une recette est apparue, pour détecter les doublons.
-        seen_nom_key: dict[str, tuple] = {}
-        creneaux_non_resolus: list[str] = []
-
-        for plat in plats:
-            if (plat["jour"], plat["moment"]) in off_set:
-                continue  # créneau désactivé : non validé
-            nom = plat["nom_recette"].lower().strip()
-            key = _dup_key(plat)
-            doublon = nom in seen_nom_key and seen_nom_key[nom] != key
-            invalide = (not plat.get("notion_id")) or doublon
-            if not invalide:
-                seen_nom_key.setdefault(nom, key)
-                continue
-
-            # Re-tir ciblé dans le catalogue filtré (max 2 tentatives).
-            resolu = False
-            for _ in range(2):
-                remplacement = _pick_replacement(recettes_filtered, used_names, exclues)
-                if not remplacement:
-                    break
-                nouveau = remplacement["nom"].lower().strip()
-                used_names.add(nouveau)
-                plat["nom_recette"] = remplacement["nom"]
-                _apply_recipe_info(plat, remplacement)
-                seen_nom_key[nouveau] = key
-                resolu = True
-                break
-
-            if not resolu:
-                jl = JOURS[plat["jour"] - 1] if 1 <= plat["jour"] <= 7 else f"Jour {plat['jour']}"
-                ml = MOMENTS.get(plat["moment"], plat["moment"])
-                creneaux_non_resolus.append(f"{jl} {ml}")
-
-        if creneaux_non_resolus:
-            logger.warning(f"Créneaux non résolus après re-tir : {creneaux_non_resolus}")
-
-        # 4quater. Personnes PAR REPAS : source de vérité = la case de la grille
-        # (midi et soir peuvent différer). Sert au scaling des courses et à
-        # l'affichage. Repli sur nb_personnes si une case manquait.
-        for plat in plats:
-            case = grid_by_key.get((plat["jour"], plat["moment"]))
-            plat["persons"] = case["persons"] if case else nb_personnes
-
-        # 5. Sauvegarder en BROUILLON (valide=0). Le planning n'apparaît dans
-        #    l'historique qu'après validation explicite par l'utilisateur.
-        #    On purge d'abord l'éventuel brouillon précédent non validé.
+        # Sauvegarde en BROUILLON (valide=0). On purge l'éventuel brouillon
+        # précédent non validé.
         await db.delete_draft_plannings()
         data = {
             "plats": plats,
-            "liste_courses": [],
+            "liste_courses": liste_courses,
             "per_day": per_day,
-            "off_meals": sorted(f"{d}:{m}" for d, m in off_set),
-            "creneaux_non_resolus": creneaux_non_resolus,
-            "briques_manquantes": briques_manquantes,
+            "off_meals": off_meals,
         }
         planning_id = await db.save_planning(
             week_start=week_start,
-            saison=saison,
+            saison="",
             nb_personnes=nb_personnes,
-            ingredients_force=ingredients_force,
+            ingredients_force="",
             data_json=json.dumps(data, ensure_ascii=False),
             recipes=[{
                 "notion_id": p.get("notion_id", ""),
@@ -1387,26 +1098,11 @@ async def generer(
                 "moment": p["moment"],
             } for p in plats],
         )
-
-        # Mémoriser les préférences pour pré-remplir le prochain formulaire
-        try:
-            await db.save_prefs(json.dumps({
-                "saison": saison, "temperature": temperature,
-                "ingredients_force": ingredients_force, "custom_prompt": custom_prompt,
-                "midi_groups": midi_groups, "per_day": per_day,
-                "tags": tags, "etat": etat, "off_meals": off_meals_str,
-            }, ensure_ascii=False))
-        except Exception as e:
-            logger.warning(f"Impossible de mémoriser les préférences: {e}")
-
         return RedirectResponse(url=f"/planning/{planning_id}", status_code=303)
 
     except Exception as e:
-        logger.exception("Erreur lors de la génération")
-        return templates.TemplateResponse(
-            "index.html",
-            _error_ctx(f"Erreur : {str(e)}"),
-        )
+        logger.exception("Erreur lors de la construction du planning")
+        return templates.TemplateResponse("index.html", _error_ctx(f"Erreur : {str(e)}"))
 
 
 @app.post("/generate-shopping/{planning_id}")
