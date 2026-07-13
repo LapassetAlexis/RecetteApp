@@ -41,7 +41,8 @@
 </div>
 
 <!-- Planning 7 jours (cases fusionnées si même repas sur jours consécutifs) -->
-{% set jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
+{# `day_labels` (fourni par le serveur) : libellés jour 1..7 dérivés de la date
+   du jour 1 (week_start). Chaque entrée : {jour, court, long, date}. #}
 {% set labels = {'midi':'☀️ Midi','soir':'🌙 Soir'} %}
 
 {# Contenu d'une case repas, partagé entre la grille (desktop) et la liste (mobile). #}
@@ -89,7 +90,7 @@
         <div class="corner" style="grid-column:1;grid-row:1;"></div>
         {% for jour in range(1, 8) %}
         <div class="day-head" style="grid-column:{{ jour + 1 }};grid-row:1;">
-            <span>{{ jours[jour-1][:3] }}</span>
+            <span>{{ day_labels[jour-1].court }} {{ day_labels[jour-1].date }}</span>
             {% if per_day %}<span class="day-pers" title="Personnes ce jour">👤 {{ per_day[jour-1] }}</span>{% endif %}
         </div>
         {% endfor %}
@@ -101,7 +102,7 @@
         {% set last = run.start + run.span - 1 %}
         <div class="meal {{ moment }}{{ ' merged' if run.span > 1 else '' }}" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}"
              style="grid-column:{{ run.start + 1 }} / span {{ run.span }};grid-row:{{ row }};">
-            {{ meal_inner(run, moment, run.plat, jours[run.start-1][:3] ~ '–' ~ jours[last-1][:3] if run.span > 1 else '') }}
+            {{ meal_inner(run, moment, run.plat, day_labels[run.start-1].court ~ '–' ~ day_labels[last-1].court if run.span > 1 else '') }}
         </div>
         {% endfor %}
         {% endfor %}
@@ -126,14 +127,14 @@
         <h3 class="wl-h">{{ labels[moment] }}</h3>
         {% for run in week_rows[moment] %}
         {% set last = run.start + run.span - 1 %}
-        {% set daylabel = (jours[run.start-1][:3] ~ '–' ~ jours[last-1][:3]) if run.span > 1 else jours[run.start-1] %}
+        {% set daylabel = (day_labels[run.start-1].court ~ '–' ~ day_labels[last-1].court) if run.span > 1 else (day_labels[run.start-1].long ~ ' ' ~ day_labels[run.start-1].date) %}
         <div class="meal {{ moment }}" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}">
             {{ meal_inner(run, moment, run.plat, daylabel) }}
         </div>
         {% endfor %}
         {% for d in range(1, 8) %}
         {% if (d ~ ':' ~ moment) in off_meals %}
-        <div class="meal off {{ moment }}"><span class="off-lbl">🚫 {{ jours[d-1] }} — Absent</span></div>
+        <div class="meal off {{ moment }}"><span class="off-lbl">🚫 {{ day_labels[d-1].long }} {{ day_labels[d-1].date }} — Absent</span></div>
         {% endif %}
         {% endfor %}
     </div>
@@ -315,7 +316,11 @@ async function validerSemaine() {
         else { toast(d.error || 'Erreur', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
     } catch (e) { toast('Erreur réseau', 'error'); if (b) { b.disabled = false; b.textContent = '✅ Valider la semaine'; } }
 }
-const js = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+// Libellés des jours 1..7 dérivés de la date du jour 1 (week_start), fournis
+// par le serveur : [{jour, court, long, date}]. Indexé par (jour-1).
+const DAY_LABELS = {{ day_labels | tojson }};
+const dayShort = i => (DAY_LABELS[i-1] || {}).court || ('J' + i);
+const dayLong = i => (DAY_LABELS[i-1] || {}).long || ('Jour ' + i);
 const RAYON_ORDER = {{ rayon_order | tojson }};
 
 // ── Persistance des cases cochées (côté serveur, cache offline) ────
@@ -394,7 +399,7 @@ async function partagerListe() {
 
 // ── Sélection des repas à changer (une case = 1+ jours fusionnés) ──
 const parseJours = el => (el.dataset.jours||'').split(',').filter(Boolean).map(Number);
-const slotLabel = s => (s.jours.length>1 ? js[s.jours[0]-1]+'–'+js[s.jours[s.jours.length-1]-1] : js[s.jours[0]-1])+' '+s.m;
+const slotLabel = s => (s.jours.length>1 ? dayShort(s.jours[0])+'–'+dayShort(s.jours[s.jours.length-1]) : dayShort(s.jours[0]))+' '+s.m;
 document.querySelectorAll('.ck').forEach(c => c.addEventListener('change', u));
 function u() {
     bul = []; document.querySelectorAll('.ck:checked').forEach(c => bul.push({jours:parseJours(c),m:c.dataset.moment}));
@@ -614,7 +619,7 @@ function copyMenu() {
     const lines = ['🍽️ Menu de la semaine', ''];
     for (let j = 1; j <= 7; j++) {
         if (!days[j]) continue;
-        lines.push(`${js[j-1]} :`);
+        lines.push(`${dayLong(j)} :`);
         if (days[j].midi) lines.push(`  ☀️ ${days[j].midi}`);
         if (days[j].soir) lines.push(`  🌙 ${days[j].soir}`);
     }

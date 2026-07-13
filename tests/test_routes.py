@@ -1276,3 +1276,36 @@ def test_week_label_range():
     assert main._week_label("2026-07-13", [{"jour": 3}]) == "Mercredi 15/07"
     assert main._week_label("2026-07-13", []) == "Semaine du 2026-07-13"
     assert main._week_label("bad", [{"jour": 1}]) == "Semaine du bad"
+
+
+def test_week_label_non_monday():
+    # week_start = date du JOUR 1 (mardi 14/07/2026), pas forcément un lundi.
+    # Le nom du jour vient de la VRAIE date, pas de l'index.
+    assert main._week_label("2026-07-14", [{"jour": 1}]) == "Mardi 14/07"
+    assert main._week_label("2026-07-14", [{"jour": 1}, {"jour": 3}]) == "Mardi 14/07 → jeudi 16/07"
+
+
+def test_day_labels():
+    # jour 1..7 dérivés d'une date de départ arbitraire (mardi 14/07/2026).
+    dl = main._day_labels("2026-07-14")
+    assert len(dl) == 7
+    assert dl[0] == {"jour": 1, "court": "Mar", "long": "Mardi", "date": "14/07"}
+    assert dl[3] == {"jour": 4, "court": "Ven", "long": "Vendredi", "date": "17/07"}
+    # jour 7 = +6j = lundi 20/07.
+    assert dl[6]["long"] == "Lundi" and dl[6]["date"] == "20/07"
+    # Repli neutre si date invalide.
+    bad = main._day_labels("bad")
+    assert bad[0] == {"jour": 1, "court": "J1", "long": "Jour 1", "date": ""}
+
+
+def test_planning_apercu_non_monday(client, monkeypatch):
+    # L'aperçu doit refléter le VRAI jour de semaine du jour 1 (mardi), pas « Lun ».
+    poulet = _recipe("Poulet rôti")
+
+    async def _all():
+        return [poulet]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2)],
+                      week_start="2026-07-14")
+    d = client.get(f"/api/planning/{pid}/apercu").json()
+    assert d["jours"] and d["jours"][0]["jour"] == "Mar"
