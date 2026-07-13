@@ -198,7 +198,7 @@ class Database:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             rows = await db.execute_fetchall(
-                "SELECT id, week_start, created_at, saison, nb_personnes "
+                "SELECT id, week_start, created_at, saison, nb_personnes, data_json "
                 "FROM planning_history WHERE valide = 0 ORDER BY id DESC LIMIT ?",
                 (limit,),
             )
@@ -298,7 +298,7 @@ class Database:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             rows = await db.execute_fetchall(
-                "SELECT id, week_start, created_at, saison, nb_personnes "
+                "SELECT id, week_start, created_at, saison, nb_personnes, data_json "
                 "FROM planning_history WHERE valide = 1 ORDER BY id DESC LIMIT ?",
                 (limit,),
             )
