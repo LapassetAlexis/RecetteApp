@@ -21,6 +21,29 @@ def _recipe(nom, repas="Plat", **kw):
     }
 
 
+def _case(jour, moment, main=None, persons=4, group=None, accs=None):
+    """Construit une case du champ `meals` du constructeur.
+
+    main / accs = recettes (dicts type _recipe) → convertis en items
+    {notion_id, nom, nature}."""
+    c = {"jour": jour, "moment": moment, "persons": persons}
+    if moment == "midi":
+        c["group"] = group if group is not None else jour
+    if main:
+        c["main"] = {"notion_id": main["id"], "nom": main["nom"],
+                     "nature": main.get("nature", "Recette")}
+    c["accompagnements"] = [{"notion_id": a["id"], "nom": a["nom"]} for a in (accs or [])]
+    return c
+
+
+def _construire(client, cases, week_start="2026-01-05"):
+    """POST /construire avec une liste de cases ; renvoie l'id du planning créé."""
+    loc = client.post("/construire", data={
+        "week_start": week_start, "meals": json.dumps(cases),
+    }, follow_redirects=False).headers["location"]
+    return int(loc.rsplit("/", 1)[1])
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     dbpath = str(tmp_path / "t.db")
@@ -95,53 +118,130 @@ def test_analyze_text(client, monkeypatch):
     assert "error" in client.post("/api/analyze-text", json={"text": "  "}).json()
 
 
-def test_generer_success_then_view(client, monkeypatch):
+def test_construire_success_then_view(client, monkeypatch):
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe]
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    r = client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
+    cases = [_case(1, "midi", poulet, persons=2), _case(1, "soir", soupe, persons=2)]
+    r = client.post("/construire", data={"week_start": "2026-01-05",
+                                         "meals": json.dumps(cases)},
                     follow_redirects=False)
     assert r.status_code == 303
-    loc = r.headers["location"]
-    assert client.get(loc).status_code == 200
+    assert client.get(r.headers["location"]).status_code == 200
 
 
-def test_generer_error_preserves_form(client, monkeypatch):
+def test_construire_sans_repas(client, monkeypatch):
+    """Aucun repas choisi → on re-affiche le formulaire avec un message."""
+    async def _all():
+        return [_recipe("Poulet", id="p1")]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    # une case avec convives mais sans plat principal → ignorée → aucun plat
+    cases = [_case(1, "midi", None, persons=2)]
+    r = client.post("/construire", data={"week_start": "2026-01-05",
+                                         "meals": json.dumps(cases)})
+    assert r.status_code == 200
+    assert "Aucun repas" in r.text
+
+
+def test_construire_error_preserves_week(client, monkeypatch):
     async def _boom():
         raise RuntimeError("Notion down")
     monkeypatch.setattr(main.notion, "get_all_recipes", _boom)
-    r = client.post("/generer", data={
-        "week_start": "2026-01-05", "saison": "Été", "ingredients_force": "courgettes",
-        "custom_prompt": "léger le soir",
-    })
+    cases = [_case(1, "midi", _recipe("X", id="x"), persons=2)]
+    r = client.post("/construire", data={"week_start": "2026-02-09",
+                                         "meals": json.dumps(cases)})
     assert r.status_code == 200
-    # la saisie est repassée au formulaire
-    assert "courgettes" in r.text and "léger le soir" in r.text
+    assert "2026-02-09" in r.text        # la semaine saisie est repassée au formulaire
+
+
+def test_api_catalogue(client, monkeypatch):
+    async def _all():
+        return [_recipe("Poulet", id="p1", base=["Viande"]),
+                _recipe("Riz", id="r1", repas="", base=["Féculent"], nature="Ingrédient")]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    data = client.get("/api/catalogue").json()
+    assert isinstance(data, list) and len(data) == 2
+    poulet = next(x for x in data if x["nom"] == "Poulet")
+    assert poulet["id"] == "p1" and poulet["nature"] == "Recette"
+    assert poulet["base"] == ["Viande"]
+    riz = next(x for x in data if x["nom"] == "Riz")
+    assert riz["nature"] == "Ingrédient" and riz["base"] == ["Féculent"]
+
+
+def test_construire_complet(client, monkeypatch):
+    """Constructeur de bout en bout : une recette, une brique + accompagnements,
+    une case absente et deux midis groupés partageant le repas. Vérifie les
+    plats créés, l'application des groupes, les personnes par repas, la liste de
+    courses (ingrédients ancrés au cache) et la redirection /planning."""
+    import asyncio
+
+    poulet = _recipe("Poulet", id="p1", base=["Viande"])
+    steak = _recipe("Steak", id="st", repas="", base=["Viande"], nature="Ingrédient")
+    riz = _recipe("Riz", id="rz", repas="", base=["Féculent"], nature="Ingrédient")
+    brocoli = _recipe("Brocoli", id="br", repas="", base=["Légume"], nature="Ingrédient")
+
+    async def _all():
+        return [poulet, steak, riz, brocoli]
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    cases = [
+        # lun + mar midi : même groupe 1, seul lun porte le repas (Poulet, 2 pers)
+        _case(1, "midi", poulet, persons=2, group=1),
+        _case(2, "midi", None, persons=2, group=1),
+        # lun soir : brique Steak + accompagnements Riz & Brocoli, 4 pers
+        _case(1, "soir", steak, persons=4, accs=[riz, brocoli]),
+        # mar soir : absent (0 convive) → ignoré
+        _case(2, "soir", poulet, persons=0),
+    ]
+    pid = _construire(client, cases)
+
+    plats = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])["plats"]
+    by_key = {(p["jour"], p["moment"]): p for p in plats}
+
+    # Case absente non générée ; 3 repas produits (2 midis groupés + 1 soir).
+    assert (2, "soir") not in by_key
+    assert set(by_key) == {(1, "midi"), (2, "midi"), (1, "soir")}
+
+    # Groupe appliqué : les 2 midis partagent le repas du 1er rempli (Poulet).
+    assert by_key[(1, "midi")]["nom_recette"] == "Poulet"
+    assert by_key[(2, "midi")]["nom_recette"] == "Poulet"
+
+    # Personnes PAR REPAS respectées.
+    assert by_key[(1, "midi")]["persons"] == 2
+    assert by_key[(2, "midi")]["persons"] == 2
+    assert by_key[(1, "soir")]["persons"] == 4
+
+    # La brique + ses accompagnements sont posés au soir.
+    soir = by_key[(1, "soir")]
+    assert soir["nature"] == "Ingrédient" and soir["nom_recette"] == "Steak"
+    assert {a["nom_recette"] for a in soir["accompagnements"]} == {"Riz", "Brocoli"}
+
+    # Liste de courses générée, mise à l'échelle PAR REPAS.
+    shop = {i["nom"]: i for i in json.loads(
+        asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])["liste_courses"]}
+    # p1 : 2 midis (2 pers) × 100 g / 4 = 50 g chacun → fusionnés = 100 g.
+    assert shop["p1"]["quantite"] == "100"
+    # brique + accompagnements soir (4 pers) × 100 g / 4 = 100 g.
+    assert shop["st"]["quantite"] == "100"
+    assert shop["rz"]["quantite"] == "100"
+    assert shop["br"]["quantite"] == "100"
 
 
 def test_update_meal_updates_without_duplicate(client, monkeypatch):
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe"), _recipe("Curry")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe, _recipe("Curry", id="c1")]
     async def _ext(nom, url="", nb=4):
         return {"ingredients": [{"nom": "sel", "quantite": "1", "unite": "pincée"}]}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
 
-    r = client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                    follow_redirects=False)
-    pid = int(r.headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", soupe, persons=2)])
 
     resp = client.post(f"/api/update-meal/{pid}",
                        json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
@@ -156,17 +256,12 @@ def test_update_meal_updates_without_duplicate(client, monkeypatch):
 
 
 def test_planning_draft_then_validate(client, monkeypatch):
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe]
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", soupe, persons=2)])
     # brouillon : pas dans l'historique, bandeau de validation présent
     assert "Semaine du" not in client.get("/historique").text
     assert "Valider la semaine" in client.get(f"/planning/{pid}").text
@@ -292,26 +387,21 @@ def test_enrichir_submit_ecrit_base(client, monkeypatch):
 
 
 def test_alternatives_and_shopping(client, monkeypatch):
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe"), _recipe("Curry")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe, _recipe("Curry", id="c1")]
     # Liste de courses ANCRÉE sur le cache DB (plus de batch LLM à l'aveugle).
     async def _enriched(nid):
         return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
     async def _noop(*a, **k):
         return {}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.db, "get_enriched", _enriched)
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver",
-                                             "nb_lun": "8"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    # 2 repas lundi à 8 personnes chacun.
+    pid = _construire(client, [_case(1, "midi", poulet, persons=8),
+                               _case(1, "soir", soupe, persons=8)])
 
     alts = client.get(f"/api/alternatives/{pid}").json()["alternatives"]
     assert any(a["nom"] == "Curry" for a in alts)
@@ -326,23 +416,18 @@ def test_alternatives_and_shopping(client, monkeypatch):
 
 def _make_shopping_planning(client, monkeypatch):
     """Crée un planning avec une liste de courses (riz) et renvoie son id."""
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe]
     async def _enriched(nid):
         return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
     async def _noop(*a, **k):
         return {}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.db, "get_enriched", _enriched)
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", soupe, persons=2)])
     assert client.post(f"/generate-shopping/{pid}").json().get("success")
     return pid
 
@@ -620,12 +705,11 @@ def test_update_side_invalid_params(client):
 def _side_planning(client, monkeypatch):
     """Planning à un repas (Poulet, midi jour 1) + catalogue de 2 légumes
     (Haricots, Carottes), chacun avec ses ingrédients en cache."""
+    poulet = _recipe("Poulet", id="p1")
     async def _all():
-        return [_recipe("Poulet", id="p1"),
+        return [poulet,
                 _recipe("Haricots", id="h1", base=["Légume"]),
                 _recipe("Carottes", id="c1", base=["Légume"])]
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "notion_id": "p1"}]
     _INGS = {
         "p1": [{"nom": "poulet", "quantite": "200", "unite": "g"}],
         "h1": [{"nom": "haricots", "quantite": "150", "unite": "g"}],
@@ -634,10 +718,8 @@ def _side_planning(client, monkeypatch):
     async def _enriched(nid):
         return {"ingredients": json.dumps(_INGS[nid])} if nid in _INGS else None
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.db, "get_enriched", _enriched)
-    return int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                           follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    return _construire(client, [_case(1, "midi", poulet, persons=4)])
 
 
 def test_add_side_appends_multiple(client, monkeypatch):
@@ -740,15 +822,12 @@ def test_enrich_all_stream(client, monkeypatch):
 
 
 def test_dupliquer_planning(client, monkeypatch):
-    # Crée un planning validé, le duplique -> nouveau brouillon avec plats copiés
+    # Crée un planning, le duplique -> nouveau brouillon avec plats copiés
+    poulet = _recipe("Poulet", id="p1")
     async def _all():
-        return [_recipe("Poulet")]
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"}]
+        return [poulet]
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2)])
     d = client.post(f"/planning/{pid}/dupliquer").json()
     assert d["success"] and d["planning_id"] != pid
     # la copie est un brouillon (bandeau de validation présent)
@@ -757,15 +836,11 @@ def test_dupliquer_planning(client, monkeypatch):
 
 def test_planning_warns_non_enrichi(client, monkeypatch):
     import json
+    poulet = _recipe("Poulet", id="n1")
     async def _all():
-        return [_recipe("Poulet", id="n1")]
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet",
-                 "notion_id": "n1", "accompagnement": None}]
+        return [poulet]
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2)])
     # recette non enrichie -> avertissement présent
     assert "À compléter" in client.get(f"/planning/{pid}").text
     # après enrichissement (ingrédients en cache) -> plus d'avertissement
@@ -793,33 +868,21 @@ def test_planning_repas_string_legacy_rendered_as_one_chip(client, monkeypatch):
     assert '<span class="chip chip-repas">P</span>' not in html
 
 
-def test_parse_off_meals():
-    assert main._parse_off_meals("1:midi,6:soir") == {(1, "midi"), (6, "soir")}
-    assert main._parse_off_meals("") == set()
-    # jetons invalides ignorés
-    assert main._parse_off_meals("9:midi,3:brunch,x:soir,2:soir") == {(2, "soir")}
-
-
-def test_generer_desactive_des_repas(client, monkeypatch):
+def test_construire_case_absente(client, monkeypatch):
+    """Une case à 0 convive (absent) n'est pas générée et le créneau apparaît
+    comme désactivé dans la page planning."""
+    poulet = _recipe("Poulet", id="p1")
     async def _all():
-        return [_recipe("Poulet", id="p1")]
-    captured = {}
-    async def _gen(**kw):
-        captured["off"] = kw.get("off_meals")
-        # respecte les créneaux off comme le vrai code
-        off = kw.get("off_meals") or set()
-        return [{"jour": j, "moment": m, "nom_recette": "Poulet", "notion_id": "p1",
-                 "accompagnement": None}
-                for j in range(1, 8) for m in ("midi", "soir") if (j, m) not in off]
+        return [poulet]
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    loc = client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver",
-                                         "off_meals": "1:midi,7:soir"},
-                      follow_redirects=False).headers["location"]
-    pid = int(loc.rsplit("/", 1)[1])
-    assert captured["off"] == {(1, "midi"), (7, "soir")}
+    # midi 1 présent, midi 1 soir absent
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", poulet, persons=0)])
+    import asyncio
+    plats = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])["plats"]
+    assert {(p["jour"], p["moment"]) for p in plats} == {(1, "midi")}
     page = client.get(f"/planning/{pid}").text
-    assert "Absent" in page  # placeholder rendu
+    assert "Absent" in page  # placeholder rendu pour le créneau off
 
 
 def test_week_nutrition(client):
@@ -899,39 +962,14 @@ def test_ajouter_recette_echec_ingredients(client, monkeypatch):
     assert "ajoutée avec succès" not in r.text
 
 
-def test_generer_valide_recette_inventee(client, monkeypatch):
-    """Le LLM invente une recette absente du catalogue → le créneau est re-tiré
-    avec une recette réelle du catalogue (ou listé en non-résolu)."""
-    async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Inventée", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Poulet", "type_repas": "Plat"},
-        ]
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    r = client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                    follow_redirects=False)
-    assert r.status_code == 303
-    page = client.get(r.headers["location"]).text
-    # la recette inventée a été remplacée par une recette réelle du catalogue
-    assert "Inventée" not in page
-    assert "Soupe" in page
-
-
 def test_free_meal_creates_and_places(client, monkeypatch):
     """Un « repas libre » crée une recette minimale, la place dans le bon créneau
     et régénère une liste de courses incluant les ingrédients saisis."""
     import asyncio
 
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe]
 
     created = {}
     async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="Recette", base=None):
@@ -945,13 +983,12 @@ def test_free_meal_creates_and_places(client, monkeypatch):
         return {}
 
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.notion, "create_recipe", _create)
     monkeypatch.setattr(main.notion, "update_ingredients", _upd_ings)
     # db.save_enriched / get_enriched : vrai cache (round-trip sur la db temporaire)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", soupe, persons=2)])
 
     resp = client.post(f"/api/free-meal/{pid}", json={
         "jour": 1, "moment": "soir",
@@ -984,20 +1021,17 @@ def test_free_meal_creates_and_places(client, monkeypatch):
 
 def test_free_meal_creneau_introuvable(client, monkeypatch):
     """Créneau inexistant → erreur, pas de recette créée."""
+    poulet = _recipe("Poulet", id="p1")
     async def _all():
-        return [_recipe("Poulet")]
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"}]
+        return [poulet]
     appels = {"create": 0}
     async def _create(**kw):
         appels["create"] += 1
         return {"id": "x"}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.notion, "create_recipe", _create)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2)])
     # jour 1 soir n'existe pas dans ce planning
     resp = client.post(f"/api/free-meal/{pid}", json={
         "jour": 1, "moment": "soir", "nom": "Test", "ingredients": ""})
@@ -1007,15 +1041,11 @@ def test_free_meal_creneau_introuvable(client, monkeypatch):
 
 def _brique_mocks(monkeypatch):
     """Prépare les mocks partagés des tests brique : catalogue Notion minimal,
-    génération d'un planning 1 jour, capture de create_recipe/update_ingredients.
-    Renvoie (created, ings_ecrits) pour inspection. Le cache DB reste RÉEL."""
+    capture de create_recipe/update_ingredients. Renvoie
+    (created, ings_ecrits, poulet, soupe) pour inspection. Le cache DB reste RÉEL."""
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
-        return [_recipe("Poulet"), _recipe("Soupe")]
-    async def _gen(**kw):
-        return [
-            {"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"},
-            {"jour": 1, "moment": "soir", "nom_recette": "Soupe", "type_repas": "Plat"},
-        ]
+        return [poulet, soupe]
     created = {}
     async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="", base=None):
         created["nom"] = nom
@@ -1029,20 +1059,19 @@ def _brique_mocks(monkeypatch):
         ings_ecrits["text"] = text
         return {}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.notion, "create_recipe", _create)
     monkeypatch.setattr(main.notion, "update_ingredients", _upd_ings)
-    return created, ings_ecrits
+    return created, ings_ecrits, poulet, soupe
 
 
 def test_brique_plat_creates_and_places(client, monkeypatch):
     """Quick-create brique en slot plat : crée une recette Nature=Ingrédient +
     Base, avec pour ingrédient elle-même, la place et l'inclut dans les courses."""
     import asyncio
-    created, ings_ecrits = _brique_mocks(monkeypatch)
+    created, ings_ecrits, poulet, soupe = _brique_mocks(monkeypatch)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", soupe, persons=2)])
 
     resp = client.post(f"/api/brique/{pid}", json={
         "jour": 1, "moment": "soir", "slot": "plat",
@@ -1078,10 +1107,10 @@ def test_brique_plat_creates_and_places(client, monkeypatch):
 
 def test_brique_accompagnement_creates_and_places(client, monkeypatch):
     """Quick-create brique en slot accompagnement : placée comme side du repas."""
-    created, ings_ecrits = _brique_mocks(monkeypatch)
+    created, ings_ecrits, poulet, soupe = _brique_mocks(monkeypatch)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
+                               _case(1, "soir", soupe, persons=2)])
 
     resp = client.post(f"/api/brique/{pid}", json={
         "jour": 1, "moment": "midi", "slot": "accompagnement",
@@ -1110,265 +1139,19 @@ def test_brique_accompagnement_creates_and_places(client, monkeypatch):
 
 def test_brique_creneau_introuvable(client, monkeypatch):
     """Créneau inexistant → erreur, aucune recette brique créée."""
+    poulet = _recipe("Poulet", id="p1")
     async def _all():
-        return [_recipe("Poulet")]
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Poulet", "type_repas": "Plat"}]
+        return [poulet]
     appels = {"create": 0}
     async def _create(**kw):
         appels["create"] += 1
         return {"id": "x"}
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
     monkeypatch.setattr(main.notion, "create_recipe", _create)
 
-    pid = int(client.post("/generer", data={"week_start": "2026-01-05", "saison": "Hiver"},
-                          follow_redirects=False).headers["location"].rsplit("/", 1)[1])
+    pid = _construire(client, [_case(1, "midi", poulet, persons=2)])
     # jour 1 soir n'existe pas dans ce planning
     resp = client.post(f"/api/brique/{pid}", json={
         "jour": 1, "moment": "soir", "slot": "plat", "nom": "Riz", "base": ["Féculent"]})
     assert resp.json().get("error")
     assert appels["create"] == 0  # pas de page Notion orpheline
-
-
-def _brique(nom, base, **kw):
-    """Brique = recette Nature=Ingrédient portant une Base."""
-    return _recipe(nom, repas="", base=[base], nature="Ingrédient",
-                   id=kw.get("id", nom.lower()))
-
-
-def test_generer_repas_simples(client, monkeypatch):
-    """nb_simple=2 → 2 créneaux deviennent des repas simples (brique protéine +
-    accompagnements féculent + légume), le reste reste des recettes, et la liste
-    de courses inclut les ingrédients des briques."""
-    import asyncio
-
-    async def _all():
-        return [
-            _recipe("Plat A", id="a"), _recipe("Plat B", id="b"),
-            _recipe("Plat C", id="c"), _recipe("Plat D", id="d"),
-            _brique("Steak", "Viande"), _brique("Saumon", "Poisson"),
-            _brique("Riz", "Féculent"), _brique("Pâtes", "Féculent"),
-            _brique("Brocoli", "Légume"), _brique("Carottes", "Légume"),
-        ]
-
-    async def _gen(**kw):
-        noms = ["Plat A", "Plat B", "Plat C", "Plat D"]
-        return [{"jour": i + 1, "moment": "midi", "nom_recette": n, "type_repas": "Plat"}
-                for i, n in enumerate(noms)]
-
-    # Ingrédient de courses d'une brique = son nom (ici l'id, = nom en minuscule).
-    async def _enriched(nid):
-        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
-
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    monkeypatch.setattr(main.db, "get_enriched", _enriched)
-
-    pid = int(client.post("/generer", data={
-        "week_start": "2026-01-05", "saison": "Hiver", "nb_simple": "2",
-    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
-
-    planning = asyncio.run(main.db.get_planning_with_recipes(pid))
-    data = json.loads(planning["data_json"])
-    plats = data["plats"]
-
-    briques = [p for p in plats if p.get("nature") == "Ingrédient"]
-    assert len(briques) == 2
-    for b in briques:
-        accs = b["accompagnements"]
-        assert len(accs) == 2
-        noms = {a["nom_recette"] for a in accs}
-        assert noms & {"Riz", "Pâtes"}      # un féculent
-        assert noms & {"Brocoli", "Carottes"}  # un légume
-        assert b["nom_recette"] in {"Steak", "Saumon"}
-
-    recettes_plats = [p for p in plats if p.get("nature") != "Ingrédient"]
-    assert len(recettes_plats) == 2                 # le reste = recettes
-    assert not data.get("briques_manquantes")       # 2 repas complets produits
-
-    shop = client.post(f"/generate-shopping/{pid}").json()
-    noms_courses = {i["nom"] for i in shop["liste_courses"]}
-    assert {"steak", "saumon"} <= noms_courses       # protéines des 2 repas simples
-
-
-def test_generer_repas_simples_groupes_meme_assiette(client, monkeypatch):
-    """Deux midis SIMPLES du même groupe partagent la MÊME assiette."""
-    import asyncio
-
-    async def _all():
-        return [
-            _recipe("Plat A", id="a"), _recipe("Plat B", id="b"),
-            _brique("Steak", "Viande"), _brique("Saumon", "Poisson"),
-            _brique("Riz", "Féculent"), _brique("Pâtes", "Féculent"),
-            _brique("Brocoli", "Légume"), _brique("Carottes", "Légume"),
-        ]
-
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Plat A", "type_repas": "Plat"},
-                {"jour": 2, "moment": "midi", "nom_recette": "Plat B", "type_repas": "Plat"}]
-
-    async def _enriched(nid):
-        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
-
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    monkeypatch.setattr(main.db, "get_enriched", _enriched)
-
-    # Grille : lun + mar midi, même groupe (1), type simple ; tout le reste absent.
-    meals = []
-    for d in range(1, 8):
-        for m in ("midi", "soir"):
-            simple = d in (1, 2) and m == "midi"
-            case = {"jour": d, "moment": m, "persons": 2 if simple else 0,
-                    "type": "simple" if simple else "recette"}
-            if m == "midi":
-                case["group"] = 1  # même groupe pour tous les midis
-            meals.append(case)
-
-    pid = int(client.post("/generer", data={
-        "week_start": "2026-01-05", "saison": "Hiver", "meals": json.dumps(meals),
-    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
-
-    data = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])
-    midis = {p["jour"]: p for p in data["plats"] if p["moment"] == "midi"}
-    assert 1 in midis and 2 in midis
-    # même protéine ET mêmes accompagnements (même assiette, groupe partagé)
-    assert midis[1]["nom_recette"] == midis[2]["nom_recette"]
-    accs1 = [a["nom_recette"] for a in midis[1]["accompagnements"]]
-    accs2 = [a["nom_recette"] for a in midis[2]["accompagnements"]]
-    assert accs1 == accs2 and len(accs1) == 2
-
-
-def test_generer_repas_simples_briques_insuffisantes(client, monkeypatch):
-    """Pas assez de briques → bannière briques_manquantes présente."""
-    import asyncio
-
-    async def _all():
-        return [_recipe("Plat A", id="a"), _recipe("Plat B", id="b"),
-                _brique("Steak", "Viande")]  # 1 protéine, 0 féculent, 0 légume
-
-    async def _gen(**kw):
-        return [{"jour": 1, "moment": "midi", "nom_recette": "Plat A", "type_repas": "Plat"},
-                {"jour": 1, "moment": "soir", "nom_recette": "Plat B", "type_repas": "Plat"}]
-
-    async def _enriched(nid):
-        return None
-
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    monkeypatch.setattr(main.db, "get_enriched", _enriched)
-
-    pid = int(client.post("/generer", data={
-        "week_start": "2026-01-05", "saison": "Hiver", "nb_simple": "2",
-    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
-
-    planning = asyncio.run(main.db.get_planning_with_recipes(pid))
-    data = json.loads(planning["data_json"])
-    assert data.get("briques_manquantes")            # bannière présente
-    page = client.get(f"/planning/{pid}").text
-    assert "repas simples demandés" in page
-
-
-def test_generer_grille_meals(client, monkeypatch):
-    """Contrat de la GRILLE (champ `meals`) : une case simple, une case absente
-    (persons=0), deux midis dans le même groupe. Vérifie que la case absente
-    n'est pas générée, que les midis groupés partagent la recette, que la case
-    simple devient une brique + accompagnements, que les personnes par repas
-    sont respectées et que les courses sont mises à l'échelle PAR REPAS."""
-    import asyncio
-
-    async def _all():
-        return [
-            _recipe("R1", id="r1"), _recipe("R2", id="r2"),
-            _brique("Steak", "Viande"), _brique("Riz", "Féculent"),
-            _brique("Brocoli", "Légume"),
-        ]
-
-    async def _gen(**kw):
-        # Émule generate_planning : 1 recette par groupe midi ACTIF + soirs
-        # actifs, en respectant les créneaux « off » (absent).
-        off = kw.get("off_meals") or set()
-        groups = [int(x) for x in kw["midi_groups"].split(",")]
-        names = iter(["R1", "R2", "R3", "R4", "R5", "R6", "R7"])
-        by_group = {}
-        for g in dict.fromkeys(groups):
-            days = [d for d, gg in enumerate(groups, 1)
-                    if gg == g and (d, "midi") not in off]
-            if days:
-                by_group[g] = next(names)
-        plats = []
-        for d in range(1, 8):
-            if (d, "midi") in off:
-                continue
-            g = groups[d - 1]
-            if g in by_group:
-                plats.append({"jour": d, "moment": "midi",
-                              "nom_recette": by_group[g], "type_repas": "Plat"})
-        for d in range(1, 8):
-            if (d, "soir") in off:
-                continue
-            plats.append({"jour": d, "moment": "soir",
-                          "nom_recette": next(names), "type_repas": "Plat"})
-        return plats
-
-    # Ingrédient de courses d'une recette/brique = son id, 100 g (base 4 pers).
-    async def _enriched(nid):
-        return {"ingredients": json.dumps([{"nom": nid, "quantite": "100", "unite": "g"}])}
-
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "generate_planning", _gen)
-    monkeypatch.setattr(main.db, "get_enriched", _enriched)
-
-    # Grille : (1,midi) & (2,midi) même groupe 1 (2 pers) ; (1,soir) simple
-    # (4 pers) ; tout le reste absent (persons=0).
-    active = {(1, "midi"), (2, "midi"), (1, "soir")}
-    grid = []
-    for d in range(1, 8):
-        for m in ("midi", "soir"):
-            case = {"jour": d, "moment": m}
-            if (d, m) in active:
-                case["persons"] = 2 if m == "midi" else 4
-                case["type"] = "simple" if (d, m) == (1, "soir") else "recette"
-            else:
-                case["persons"] = 0
-                case["type"] = "recette"
-            if m == "midi":
-                case["group"] = 1 if d in (1, 2) else d
-            grid.append(case)
-
-    pid = int(client.post("/generer", data={
-        "week_start": "2026-01-05", "saison": "Hiver", "meals": json.dumps(grid),
-    }, follow_redirects=False).headers["location"].rsplit("/", 1)[1])
-
-    planning = asyncio.run(main.db.get_planning_with_recipes(pid))
-    plats = json.loads(planning["data_json"])["plats"]
-    by_key = {(p["jour"], p["moment"]): p for p in plats}
-
-    # Seules les 3 cases actives sont générées (l'absente ne l'est pas).
-    assert set(by_key) == active
-    assert (3, "midi") not in by_key
-
-    # Les deux midis groupés partagent la même recette.
-    assert by_key[(1, "midi")]["nom_recette"] == by_key[(2, "midi")]["nom_recette"]
-
-    # La case simple est devenue une brique (Nature=Ingrédient) + 2 accompagnements.
-    soir = by_key[(1, "soir")]
-    assert soir.get("nature") == "Ingrédient"
-    assert soir["nom_recette"] == "Steak"
-    noms_acc = {a["nom_recette"] for a in soir["accompagnements"]}
-    assert noms_acc == {"Riz", "Brocoli"}
-
-    # Personnes PAR REPAS respectées (midi=2, soir=4).
-    assert by_key[(1, "midi")]["persons"] == 2
-    assert by_key[(2, "midi")]["persons"] == 2
-    assert soir["persons"] == 4
-
-    # Courses mises à l'échelle PAR REPAS.
-    shop = {i["nom"]: i for i in client.post(f"/generate-shopping/{pid}").json()["liste_courses"]}
-    # r1 : 2 midis (2 pers) × 100 g / 4 = 50 g chacun → fusionnés = 100 g.
-    assert shop["r1"]["quantite"] == "100"
-    # brique protéine + accompagnements du soir (4 pers) × 100 g / 4 = 100 g.
-    assert shop["steak"]["quantite"] == "100"
-    assert shop["riz"]["quantite"] == "100"
-    assert shop["brocoli"]["quantite"] == "100"

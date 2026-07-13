@@ -1,144 +1,105 @@
 {% extends "base.html" %}
-{% block title %}Générer un planning{% endblock %}
+{% block title %}Construire un planning{% endblock %}
 {% block content %}
 <style>
-.grille-wrap { overflow-x: auto; }
-.grille {
+.build-wrap { overflow-x: auto; }
+.build-grid {
     display: grid;
-    grid-template-columns: auto repeat(7, minmax(84px, 1fr));
-    gap: 6px;
-    min-width: 640px;
+    grid-template-columns: auto 1fr 1fr;
+    gap: 8px;
+    min-width: 560px;
     align-items: stretch;
 }
-.g-dayhead { text-align: center; font-weight: 700; padding: 4px 0; }
-.g-rowlabel { display: flex; align-items: center; font-weight: 600; padding-right: 6px; white-space: nowrap; }
-.g-cell {
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    padding: 8px 6px; border-radius: 10px;
+.b-colhead { text-align: center; font-weight: 700; padding: 4px 0; }
+.b-rowlabel { display: flex; align-items: center; font-weight: 700; padding-right: 6px; white-space: nowrap; }
+.b-cell {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 10px; border-radius: 12px;
     border: 2px solid var(--bd, #ddd); background: var(--bg2, #fafafa);
 }
-.g-cell.off { opacity: .45; filter: grayscale(1); }
-.g-pers { width: 56px; text-align: center; }
-.g-pers-lbl { font-size: .8rem; color: var(--t2, #777); }
-.g-type, .g-group {
-    cursor: pointer; border: none; border-radius: 8px; padding: 4px 8px;
-    font-size: .95rem; font-weight: 700;
+.b-cell.off { opacity: .5; filter: grayscale(1); }
+.b-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.b-pers { width: 62px; text-align: center; }
+.b-pers-lbl { font-size: .8rem; color: var(--t2, #777); }
+.b-main, .b-side {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 6px 8px; border-radius: 8px; background: var(--bg3, #eee);
+    font-size: .92rem;
 }
-.g-type { background: var(--bg3, #eee); }
-.g-group { color: #fff; }
+.b-side { background: transparent; border: 1px dashed var(--bd, #ccc); }
+.b-x { cursor: pointer; border: none; background: transparent; color: var(--t2, #999); font-size: 1rem; padding: 0 2px; }
+.b-x:hover { color: #c0392b; }
+.b-add { cursor: pointer; border: 1px dashed var(--bd, #bbb); border-radius: 8px;
+    padding: 6px 8px; font-size: .9rem; background: transparent; color: var(--t1, #333); }
+.b-add:hover { border-color: var(--t1, #333); }
+.b-group { cursor: pointer; border: none; border-radius: 8px; padding: 4px 8px;
+    font-size: .9rem; font-weight: 700; color: #fff; }
 .group-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: .82rem; }
-.group-picker { position: absolute; z-index: 50; display: flex; gap: 6px; padding: 6px;
+.group-picker { position: absolute; z-index: 60; display: flex; gap: 6px; padding: 6px;
     background: var(--card, #fff); border: 1px solid var(--bo, #ddd); border-radius: 10px;
     box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 .group-sw { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent;
     cursor: pointer; padding: 0; }
 .group-sw.sel { border-color: var(--t1, #333); box-shadow: 0 0 0 2px #fff inset; }
+
+/* Picker modale */
+.pk-overlay { position: fixed; inset: 0; z-index: 100; display: none;
+    background: rgba(0,0,0,.45); align-items: flex-start; justify-content: center; padding: 24px 12px; }
+.pk-overlay.open { display: flex; }
+.pk-modal { background: var(--card, #fff); border-radius: 14px; width: 100%; max-width: 560px;
+    max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+.pk-head { padding: 14px 16px; border-bottom: 1px solid var(--bo, #eee); }
+.pk-head .row-between { display: flex; align-items: center; justify-content: space-between; }
+.pk-search { width: 100%; margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--bo, #ccc); font-size: 1rem; }
+.pk-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pk-f { cursor: pointer; border: 1px solid var(--bo, #ccc); border-radius: 999px;
+    padding: 3px 10px; font-size: .82rem; background: transparent; }
+.pk-f.sel { background: var(--pri, #2980b9); color: #fff; border-color: var(--pri, #2980b9); }
+.pk-list { overflow-y: auto; padding: 8px; }
+.pk-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+.pk-item:hover { background: var(--bg2, #f2f2f2); }
+.pk-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.pk-chip { font-size: .72rem; padding: 1px 7px; border-radius: 999px; background: var(--bg3, #eee); color: var(--t2, #666); }
+.pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
 </style>
 
 <div class="hero">
-    <h1>📅 Planning de la semaine</h1>
-    <p>Configure chaque repas (midi / soir) de la semaine, puis génère.</p>
+    <h1>📅 Construire la semaine</h1>
+    <p>Choisis à la main chaque repas (midi / soir), ses accompagnements, et le nombre de convives.</p>
 </div>
 
 {% if error %}
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<form method="POST" action="/generer" class="card" id="pf">
+<form method="POST" action="/construire" class="card" id="bf">
     <div class="form-r">
         <div class="form-g">
             <label for="week_start">Semaine du</label>
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
         </div>
     </div>
-    <div class="form-r">
-        <div class="form-g">
-            <label for="saison">🌤️ Saison</label>
-            <select id="saison" name="saison">
-                <option value="Printemps" {% if saison_default == "Printemps" %}selected{% endif %}>Printemps</option>
-                <option value="Été" {% if saison_default == "Été" %}selected{% endif %}>Été</option>
-                <option value="Automne" {% if saison_default == "Automne" %}selected{% endif %}>Automne</option>
-                <option value="Hiver" {% if saison_default == "Hiver" %}selected{% endif %}>Hiver</option>
-            </select>
-        </div>
-        <div class="form-g">
-            <label for="temperature">🌡️ Température</label>
-            {% set temp_val = temperature_default or "Frais (10-18°C)" %}
-            <select id="temperature" name="temperature">
-                <option value="Froid (< 10°C)" {% if temp_val == "Froid (< 10°C)" %}selected{% endif %}>Froid (&lt; 10°C)</option>
-                <option value="Frais (10-18°C)" {% if temp_val == "Frais (10-18°C)" %}selected{% endif %}>Frais (10-18°C)</option>
-                <option value="Doux (18-25°C)" {% if temp_val == "Doux (18-25°C)" %}selected{% endif %}>Doux (18-25°C)</option>
-                <option value="Chaud (> 25°C)" {% if temp_val == "Chaud (> 25°C)" %}selected{% endif %}>Chaud (&gt; 25°C)</option>
-                <option value="Canicule (> 35°C)" {% if temp_val == "Canicule (> 35°C)" %}selected{% endif %}>Canicule (&gt; 35°C)</option>
-            </select>
+
+    <div class="build-wrap">
+        <div class="build-grid" id="grid">
+            <div></div>
+            <div class="b-colhead">☀️ Midi</div>
+            <div class="b-colhead">🌙 Soir</div>
+            <!-- lignes injectées en JS -->
         </div>
     </div>
+    <div id="group-legend" class="group-legend"></div>
 
-    <!-- Grille des repas : 7 jours × 2 moments (midi / soir) -->
-    <div class="card">
-        <div class="row-between">
-            <strong>🍽️ Grille des repas</strong>
-            <button type="button" id="reset-grille" class="btn btn-ghost btn-sm btn-tiny">↺ Défaut</button>
-        </div>
-        {% set jours = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'] %}
-        {% set pers = day_pers or [2,2,2,2,2,4,4] %}
-        {% set groups = day_groups or [1,1,2,2,2,3,4] %}
-        <div class="grille-wrap">
-            <div class="grille" id="grille">
-                <div class="g-corner"></div>
-                {% for i in range(7) %}<div class="g-dayhead">{{ jours[i] }}</div>{% endfor %}
+    <input type="hidden" name="meals" id="meals-input">
+    <small class="hint">
+        👥 convives par repas (<strong>0 = absent</strong>, case grisée).
+        🎨 sur les midis, le badge <strong>G</strong> regroupe (même couleur = même repas).
+    </small>
 
-                <div class="g-rowlabel">☀️ Midi</div>
-                {% for i in range(7) %}
-                <div class="g-cell" data-jour="{{ i + 1 }}" data-moment="midi">
-                    <div><span class="g-pers-lbl">👤</span> <input type="number" class="g-pers" min="0" max="20" value="{{ pers[i] }}" title="Personnes (0 = absent)"></div>
-                    <button type="button" class="g-type" data-type="simple" title="Type : Recette (IA) / Simple (briques)">🧱 Simple</button>
-                    <button type="button" class="g-group" data-group="{{ groups[i] }}" title="Groupe : même couleur = même plat">G{{ groups[i] }}</button>
-                </div>
-                {% endfor %}
-
-                <div class="g-rowlabel">🌙 Soir</div>
-                {% for i in range(7) %}
-                <div class="g-cell" data-jour="{{ i + 1 }}" data-moment="soir">
-                    <div><span class="g-pers-lbl">👤</span> <input type="number" class="g-pers" min="0" max="20" value="{{ pers[i] }}" title="Personnes (0 = absent)"></div>
-                    <button type="button" class="g-type" data-type="simple" title="Type : Recette (IA) / Simple (briques)">🧱 Simple</button>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        <div id="group-legend" class="group-legend"></div>
-        <input type="hidden" name="meals" id="meals-input" value="{{ meals_value or '' }}">
-        <small class="hint">
-            👤 personnes par repas (<strong>0 = absent</strong>, case grisée).
-            🍲/🧱 bascule <strong>Recette</strong> (IA) ↔ <strong>Simple</strong> (briques : protéine + féculent + légume).
-            🎨 sur les midis, clique le badge <strong>G</strong> pour regrouper (même couleur = même plat).
-        </small>
-    </div>
-
-    <hr class="sep">
-
-    <div class="form-g">
-        <label for="ingredients_force">🥫 Restes à écouler</label>
-        <input type="text" id="ingredients_force" name="ingredients_force" value="{{ ingredients_force or '' }}" placeholder="courgettes, œufs, poulet" class="inp">
-    </div>
-
-    <div class="form-g">
-        <label for="custom_prompt">✏️ Mes consignes pour l'IA</label>
-        <textarea id="custom_prompt" name="custom_prompt" rows="4" class="inp" placeholder="Ex: le soir on mange léger, un soir par semaine restes du midi...">{{ custom_prompt or "" }}</textarea>
-    </div>
-
-    <button type="submit" class="btn btn-primary btn-lg" id="btn-g">🔄 Générer les repas de la semaine</button>
+    <button type="submit" class="btn btn-primary btn-lg" id="btn-b">✅ Créer le planning</button>
 </form>
-
-<!-- Loading -->
-<div id="load" class="loading-overlay">
-    <div class="loading-box">
-        <div class="spinner-big"></div>
-        <h2>🍳 Génération en cours...</h2>
-        <p>Le chef élabore votre menu.</p>
-        <p class="loading-tip">Groq ⚡ 10-30s · Ollama 🐢 2-3min</p>
-    </div>
-</div>
 
 {% if planning_id %}
 <div class="card text-center">
@@ -147,38 +108,102 @@
 </div>
 {% endif %}
 
+<!-- Picker modale -->
+<div class="pk-overlay" id="pk">
+    <div class="pk-modal">
+        <div class="pk-head">
+            <div class="row-between">
+                <strong id="pk-title">Choisir un repas</strong>
+                <button type="button" class="b-x" id="pk-close" title="Fermer">✕</button>
+            </div>
+            <input type="text" class="pk-search" id="pk-search" placeholder="🔍 Rechercher par nom…" autocomplete="off">
+            <div class="pk-filters" id="pk-nature"></div>
+            <div class="pk-filters" id="pk-base"></div>
+        </div>
+        <div class="pk-list" id="pk-list"></div>
+    </div>
+</div>
+
 <script>
+const JOURS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const JOURS_COURT = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const GROUP_COLORS = ['#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b'];  // 5 couleurs max
 const DEFAULT_PERS = [2,2,2,2,2,4,4];
 const DEFAULT_GROUPS = [1,1,2,2,2,3,4];
+const BASES = ['Viande','Poisson','Œuf','Légume','Féculent','Végé'];
 
-const cells = () => [...document.querySelectorAll('.g-cell')];
-const midiCells = () => cells().filter(c => c.dataset.moment === 'midi');
-const cellKey = c => c.dataset.jour + ':' + c.dataset.moment;
+// Bases acceptées comme accompagnement : légume/féculent (briques) + recettes légume.
+function isSideItem(it) {
+    const base = it.base || [];
+    if (it.nature === 'Ingrédient') return base.includes('Légume') || base.includes('Féculent');
+    return base.includes('Légume');  // recette : accompagnement = garniture de légume
+}
 
-function persInput(c) { return c.querySelector('.g-pers'); }
-function typeBtn(c) { return c.querySelector('.g-type'); }
-function groupBtn(c) { return c.querySelector('.g-group'); }
-
-// ── Rendu d'une case (couleurs, grisé, libellés) ────────────────────
-function paintCell(c) {
-    const persons = Math.max(0, parseInt(persInput(c).value) || 0);
-    c.classList.toggle('off', persons === 0);
-    const tb = typeBtn(c);
-    tb.textContent = tb.dataset.type === 'simple' ? '🧱 Simple' : '🍲 Recette';
-    const gb = groupBtn(c);
-    if (gb) {
-        const g = parseInt(gb.dataset.group) || 1;
-        const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
-        gb.style.background = col;
-        gb.textContent = 'G' + g;
-        c.style.borderColor = persons === 0 ? '' : col;
+// État : 14 cases indexées "jour:moment".
+const state = {};
+for (let d = 1; d <= 7; d++) {
+    for (const m of ['midi','soir']) {
+        state[d + ':' + m] = {
+            jour: d, moment: m,
+            persons: DEFAULT_PERS[d - 1],
+            group: m === 'midi' ? DEFAULT_GROUPS[d - 1] : null,
+            main: null, accompagnements: [],
+        };
     }
 }
 
+let CATALOGUE = [];
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ── Rendu de la grille ─────────────────────────────────────────────
+function cellHtml(c) {
+    const col = c.moment === 'midi' ? GROUP_COLORS[(c.group - 1) % GROUP_COLORS.length] : '';
+    const off = c.persons === 0;
+    let h = `<div class="b-cell${off ? ' off' : ''}" data-key="${c.jour}:${c.moment}"`
+          + (c.moment === 'midi' && !off ? ` style="border-color:${col}"` : '') + '>';
+    h += '<div class="b-top">';
+    h += `<div><span class="b-pers-lbl">👥</span> <input type="number" class="b-pers" min="0" max="20" value="${c.persons}" title="Convives (0 = absent)"></div>`;
+    if (c.moment === 'midi') {
+        h += `<button type="button" class="b-group" style="background:${col}" title="Groupe : même couleur = même repas">G${c.group}</button>`;
+    }
+    h += '</div>';
+    if (c.main) {
+        h += `<div class="b-main"><span>🍽️ ${esc(c.main.nom)}</span><button type="button" class="b-x" data-act="clear-main" title="Retirer">✕</button></div>`;
+        for (let i = 0; i < c.accompagnements.length; i++) {
+            const a = c.accompagnements[i];
+            h += `<div class="b-side"><span>🥗 ${esc(a.nom)}</span><button type="button" class="b-x" data-act="rm-side" data-i="${i}" title="Retirer">✕</button></div>`;
+        }
+        h += `<button type="button" class="b-add" data-act="add-side">+ accompagnement</button>`;
+    } else {
+        h += `<button type="button" class="b-add" data-act="pick-main">+ choisir un repas</button>`;
+    }
+    h += '</div>';
+    return h;
+}
+
+function renderGrid() {
+    const grid = document.getElementById('grid');
+    grid.querySelectorAll('.b-row-el').forEach(e => e.remove());
+    for (let d = 1; d <= 7; d++) {
+        const label = document.createElement('div');
+        label.className = 'b-rowlabel b-row-el';
+        label.textContent = JOURS[d - 1];
+        grid.appendChild(label);
+        for (const m of ['midi','soir']) {
+            const wrap = document.createElement('div');
+            wrap.className = 'b-row-el';
+            wrap.innerHTML = cellHtml(state[d + ':' + m]);
+            grid.appendChild(wrap.firstChild);
+        }
+    }
+    renderLegend();
+    bindCells();
+}
+
 function renderLegend() {
-    const groups = midiCells().map(c => parseInt(groupBtn(c).dataset.group) || 1);
+    const groups = [];
+    for (let d = 1; d <= 7; d++) groups.push(state[d + ':midi'].group);
     const uniq = [...new Set(groups)];
     const legend = document.getElementById('group-legend');
     legend.innerHTML = uniq.map(g => {
@@ -186,30 +211,33 @@ function renderLegend() {
         const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
         return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${col}22;border:1px solid ${col};">
             <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;"></span>
-            ${days.join(' + ')} ${days.length > 1 ? '= même plat midi' : ''}</span>`;
+            ${days.join(' + ')} ${days.length > 1 ? '= même repas' : ''}</span>`;
     }).join('');
-    legend.innerHTML += '<span style="color:var(--t2)">· Soirs : tous différents</span>';
 }
 
-function renderAll() { cells().forEach(paintCell); renderLegend(); }
-
-// ── Interactions ────────────────────────────────────────────────────
-function bindCell(c) {
-    persInput(c).addEventListener('input', () => paintCell(c));
-    typeBtn(c).addEventListener('click', () => {
-        const tb = typeBtn(c);
-        tb.dataset.type = tb.dataset.type === 'simple' ? 'recette' : 'simple';
-        paintCell(c);
-    });
-    const gb = groupBtn(c);
-    if (gb) gb.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openGroupPicker(gb, c);
+// ── Interactions des cases ─────────────────────────────────────────
+function bindCells() {
+    document.querySelectorAll('.b-cell').forEach(cell => {
+        const c = state[cell.dataset.key];
+        cell.querySelector('.b-pers').addEventListener('input', e => {
+            c.persons = Math.max(0, parseInt(e.target.value) || 0);
+            renderGrid();
+        });
+        const gb = cell.querySelector('.b-group');
+        if (gb) gb.addEventListener('click', e => { e.stopPropagation(); openGroupPicker(gb, c); });
+        cell.querySelectorAll('[data-act]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const act = btn.dataset.act;
+                if (act === 'pick-main') openPicker('main', c);
+                else if (act === 'clear-main') { c.main = null; c.accompagnements = []; renderGrid(); }
+                else if (act === 'add-side') openPicker('side', c);
+                else if (act === 'rm-side') { c.accompagnements.splice(parseInt(btn.dataset.i), 1); renderGrid(); }
+            });
+        });
     });
 }
 
-// Sélecteur de couleur : clic sur le badge G → choix parmi les 5 couleurs.
-// Même couleur (= même groupe) sur plusieurs midis => même plat.
+// ── Sélecteur de groupe (couleur) ──────────────────────────────────
 let _picker = null;
 function closeGroupPicker() { if (_picker) { _picker.remove(); _picker = null; } }
 document.addEventListener('click', closeGroupPicker);
@@ -223,13 +251,12 @@ function openGroupPicker(gb, c) {
         sw.className = 'group-sw';
         sw.style.background = col;
         sw.title = 'Groupe ' + (idx + 1);
-        if ((parseInt(gb.dataset.group) || 1) === idx + 1) sw.classList.add('sel');
-        sw.addEventListener('click', (ev) => {
+        if (c.group === idx + 1) sw.classList.add('sel');
+        sw.addEventListener('click', ev => {
             ev.stopPropagation();
-            gb.dataset.group = idx + 1;
-            paintCell(c);
-            renderLegend();
+            c.group = idx + 1;
             closeGroupPicker();
+            renderGrid();
         });
         pop.appendChild(sw);
     });
@@ -237,65 +264,116 @@ function openGroupPicker(gb, c) {
     const r = gb.getBoundingClientRect();
     pop.style.left = (window.scrollX + r.left) + 'px';
     pop.style.top = (window.scrollY + r.bottom + 4) + 'px';
+    _picker = pop;
 }
 
-// ── Hydratation depuis le champ `meals` (re-rendu après erreur) ──────
-function hydrateFromMeals() {
-    const raw = document.getElementById('meals-input').value;
-    if (!raw) return false;
-    let arr;
-    try { arr = JSON.parse(raw); } catch (e) { return false; }
-    if (!Array.isArray(arr) || !arr.length) return false;
-    const byKey = {};
-    arr.forEach(o => { byKey[o.jour + ':' + o.moment] = o; });
-    cells().forEach(c => {
-        const o = byKey[cellKey(c)];
-        if (!o) return;
-        persInput(c).value = Math.max(0, parseInt(o.persons) || 0);
-        typeBtn(c).dataset.type = o.type === 'simple' ? 'simple' : 'recette';
-        const gb = groupBtn(c);
-        if (gb && o.group != null) gb.dataset.group = parseInt(o.group) || 1;
+// ── Picker modale (recettes / briques) ─────────────────────────────
+let pkMode = 'main';   // 'main' ou 'side'
+let pkCell = null;
+let pkNature = '';     // '', 'Recette', 'Ingrédient'
+let pkBase = '';       // '' ou une base
+
+function buildFilters() {
+    const nat = document.getElementById('pk-nature');
+    nat.innerHTML = '';
+    [['', 'Tout'], ['Recette', 'Recette'], ['Ingrédient', 'Ingrédient']].forEach(([v, lbl]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'pk-f' + (pkNature === v ? ' sel' : '');
+        b.textContent = lbl;
+        b.addEventListener('click', () => { pkNature = v; buildFilters(); renderPkList(); });
+        nat.appendChild(b);
     });
-    return true;
+    const bs = document.getElementById('pk-base');
+    bs.innerHTML = '';
+    [['', 'Toutes bases'], ...BASES.map(b => [b, b])].forEach(([v, lbl]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'pk-f' + (pkBase === v ? ' sel' : '');
+        b.textContent = lbl;
+        b.addEventListener('click', () => { pkBase = v; buildFilters(); renderPkList(); });
+        bs.appendChild(b);
+    });
 }
 
-// ── Sérialisation dans le champ caché `meals` avant submit ──────────
+function renderPkList() {
+    const q = document.getElementById('pk-search').value.trim().toLowerCase();
+    const list = document.getElementById('pk-list');
+    let items = CATALOGUE.slice();
+    if (pkMode === 'side') items = items.filter(isSideItem);
+    if (pkNature) items = items.filter(it => it.nature === pkNature);
+    if (pkBase) items = items.filter(it => (it.base || []).includes(pkBase));
+    if (q) items = items.filter(it => it.nom.toLowerCase().includes(q));
+    items.sort((a, b) => a.nom.localeCompare(b.nom));
+    if (!items.length) { list.innerHTML = '<div class="pk-empty">Aucun résultat.</div>'; return; }
+    list.innerHTML = '';
+    items.slice(0, 200).forEach(it => {
+        const row = document.createElement('div');
+        row.className = 'pk-item';
+        const chips = [it.nature, ...(it.base || [])].map(c => `<span class="pk-chip">${esc(c)}</span>`).join('');
+        row.innerHTML = `<span>${esc(it.nom)}</span><span class="pk-chips">${chips}</span>`;
+        row.addEventListener('click', () => choose(it));
+        list.appendChild(row);
+    });
+}
+
+function openPicker(mode, cell) {
+    pkMode = mode; pkCell = cell; pkNature = ''; pkBase = '';
+    document.getElementById('pk-title').textContent =
+        mode === 'main' ? 'Choisir le repas principal' : 'Choisir un accompagnement';
+    document.getElementById('pk-search').value = '';
+    buildFilters();
+    renderPkList();
+    document.getElementById('pk').classList.add('open');
+    document.getElementById('pk-search').focus();
+}
+
+function closePicker() { document.getElementById('pk').classList.remove('open'); pkCell = null; }
+
+function choose(it) {
+    if (!pkCell) return;
+    const item = { notion_id: it.id, nom: it.nom, nature: it.nature };
+    if (pkMode === 'main') {
+        pkCell.main = item;
+    } else if (!pkCell.accompagnements.some(a => a.notion_id === it.id && a.nom === it.nom)) {
+        pkCell.accompagnements.push(item);
+    }
+    closePicker();
+    renderGrid();
+}
+
+document.getElementById('pk-close').addEventListener('click', closePicker);
+document.getElementById('pk').addEventListener('click', e => { if (e.target.id === 'pk') closePicker(); });
+document.getElementById('pk-search').addEventListener('input', renderPkList);
+
+// ── Sérialisation + submit ─────────────────────────────────────────
 function serialize() {
-    const arr = cells().map(c => {
-        const o = {
-            jour: parseInt(c.dataset.jour),
-            moment: c.dataset.moment,
-            persons: Math.max(0, parseInt(persInput(c).value) || 0),
-            type: typeBtn(c).dataset.type === 'simple' ? 'simple' : 'recette',
-        };
-        if (c.dataset.moment === 'midi') o.group = parseInt(groupBtn(c).dataset.group) || 1;
+    const arr = Object.values(state).map(c => {
+        const o = { jour: c.jour, moment: c.moment, persons: c.persons };
+        if (c.moment === 'midi') o.group = c.group;
+        if (c.main) o.main = { notion_id: c.main.notion_id, nom: c.main.nom, nature: c.main.nature };
+        o.accompagnements = c.accompagnements.map(a => ({ notion_id: a.notion_id, nom: a.nom }));
         return o;
     });
     document.getElementById('meals-input').value = JSON.stringify(arr);
 }
 
-function resetGrille() {
-    cells().forEach(c => {
-        const i = parseInt(c.dataset.jour) - 1;
-        persInput(c).value = DEFAULT_PERS[i];
-        typeBtn(c).dataset.type = 'simple';
-        const gb = groupBtn(c);
-        if (gb) gb.dataset.group = DEFAULT_GROUPS[i];
-    });
-    renderAll();
-}
-
-document.getElementById('reset-grille').addEventListener('click', resetGrille);
-cells().forEach(bindCell);
-hydrateFromMeals();
-renderAll();
-
-// Loading + sérialisation au submit
-document.getElementById('pf').addEventListener('submit', function () {
+document.getElementById('bf').addEventListener('submit', function (e) {
     serialize();
-    document.getElementById('load').style.display = 'flex';
-    document.getElementById('btn-g').disabled = true;
-    document.getElementById('btn-g').textContent = '⏳ Génération...';
+    const any = Object.values(state).some(c => c.persons > 0 && c.main);
+    if (!any) {
+        e.preventDefault();
+        alert('Choisis au moins un repas principal (case avec des convives).');
+        return;
+    }
+    document.getElementById('btn-b').disabled = true;
+    document.getElementById('btn-b').textContent = '⏳ Création…';
 });
+
+// ── Chargement du catalogue ────────────────────────────────────────
+fetch('/api/catalogue')
+    .then(r => r.json())
+    .then(data => { CATALOGUE = Array.isArray(data) ? data : []; })
+    .catch(() => { CATALOGUE = []; });
+
+renderGrid();
 </script>
 {% endblock %}
