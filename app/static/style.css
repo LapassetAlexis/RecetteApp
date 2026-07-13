@@ -222,8 +222,8 @@ a.meal-warn:hover { background:#f9e0c4; }
 .hist-item .meta { font-size:0.8rem; color:var(--t2); margin:4px 0; }
 .hist-dup { margin-top:8px; width:100%; }
 .section-title { margin:22px 0 10px; font-size:1.1rem; }
-.hist-actions { display:flex; gap:6px; margin-top:8px; }
-.hist-actions .btn { flex:1; }
+.hist-actions { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.hist-actions .btn { width:100%; min-width:0; }
 
 /* ── Vue liste planning (mobile) ─────────────── */
 .week-list { display:none; }
