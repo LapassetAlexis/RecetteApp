@@ -379,6 +379,7 @@ async def voir_planning(request: Request, planning_id: int):
         {
             "request": request,
             "planning": planning,
+            "titre": _week_label(planning.get("week_start", ""), plats),
             "plats": plats,
             "week_rows": _group_week(plats),
             "week_nutrition": await _week_nutrition(plats),
@@ -896,11 +897,46 @@ async def ajouter_page(request: Request):
     )
 
 
+_JOURS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+
+
+def _week_label(week_start: str, plats: list) -> str:
+    """Titre reflétant la PLAGE de jours réellement remplis (ex. « Mardi 14/07 →
+    vendredi 17/07 »). Repli sur « Semaine du <date> » si rien d'exploitable."""
+    jours = sorted({p.get("jour") for p in plats
+                    if isinstance(p.get("jour"), int) and 1 <= p["jour"] <= 7})
+    if not jours:
+        return f"Semaine du {week_start}"
+    try:
+        y, m, d = (int(x) for x in week_start.split("-"))
+        start = date(y, m, d)
+    except (ValueError, AttributeError):
+        return f"Semaine du {week_start}"
+
+    def _fmt(j: int) -> str:
+        dt = start + timedelta(days=j - 1)
+        return f"{_JOURS_FR[j - 1]} {dt.day:02d}/{dt.month:02d}"
+
+    if jours[0] == jours[-1]:
+        return _fmt(jours[0]).capitalize()
+    return f"{_fmt(jours[0]).capitalize()} → {_fmt(jours[-1])}"
+
+
+def _attach_label(p: dict) -> dict:
+    """Ajoute `label` (plage de jours) à une ligne de planning listée."""
+    try:
+        plats = json.loads(p.get("data_json") or "{}").get("plats", [])
+    except (json.JSONDecodeError, TypeError):
+        plats = []
+    p["label"] = _week_label(p.get("week_start", ""), plats)
+    return p
+
+
 @app.get("/historique", response_class=HTMLResponse)
 async def historique(request: Request):
     """Liste les plannings précédents (validés) et les brouillons en cours."""
-    plannings = await db.list_plannings(limit=20)
-    drafts = await db.list_drafts(limit=20)
+    plannings = [_attach_label(p) for p in await db.list_plannings(limit=20)]
+    drafts = [_attach_label(p) for p in await db.list_drafts(limit=20)]
     return templates.TemplateResponse(
         "historique.html",
         {"request": request, "plannings": plannings, "drafts": drafts},

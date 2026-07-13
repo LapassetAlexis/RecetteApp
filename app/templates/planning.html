@@ -4,7 +4,7 @@
 <div class="hero">
     <h1>📅 Planning semaine</h1>
     <p class="hero-sub">
-        Semaine du <strong>{{ planning.week_start }}</strong>
+        <strong>{{ titre or ("Semaine du " ~ planning.week_start) }}</strong>
         — {{ planning.saison }} — {{ planning.nb_personnes }} pers.
         {% if planning.ingredients_force and planning.ingredients_force != "" %}
         <br><small class="hero-force">🥫 Restes : {{ planning.ingredients_force }}</small>

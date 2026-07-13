@@ -1268,3 +1268,11 @@ def test_brique_creneau_introuvable(client, monkeypatch):
         "jour": 1, "moment": "soir", "slot": "plat", "nom": "Riz", "base": ["Féculent"]})
     assert resp.json().get("error")
     assert appels["create"] == 0  # pas de page Notion orpheline
+
+
+def test_week_label_range():
+    # Plage de jours réellement remplis (2026-07-13 = lundi).
+    assert main._week_label("2026-07-13", [{"jour": 2}, {"jour": 5}]) == "Mardi 14/07 → vendredi 17/07"
+    assert main._week_label("2026-07-13", [{"jour": 3}]) == "Mercredi 15/07"
+    assert main._week_label("2026-07-13", []) == "Semaine du 2026-07-13"
+    assert main._week_label("bad", [{"jour": 1}]) == "Semaine du bad"
