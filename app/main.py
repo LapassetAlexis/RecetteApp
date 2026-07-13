@@ -907,6 +907,39 @@ async def historique(request: Request):
     )
 
 
+@app.get("/api/planning/{planning_id}/apercu")
+async def api_planning_apercu(planning_id: int):
+    """Aperçu compact d'une semaine (pour le survol dans l'historique) :
+    par jour, le nom du repas midi/soir (plat + accompagnements résumés)."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return {"error": "Introuvable"}
+    try:
+        plats = json.loads(planning["data_json"]).get("plats", [])
+    except (json.JSONDecodeError, TypeError):
+        plats = []
+    jours_lbl = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+
+    def _label(plat: dict) -> str:
+        nom = clean_recipe_title(plat.get("nom_recette", ""))
+        accs = plat_accompagnements(plat)
+        if accs:
+            nom += " + " + " + ".join(clean_recipe_title(a.get("nom_recette", "")) for a in accs)
+        return nom
+
+    by = {(p.get("jour"), p.get("moment")): p for p in plats}
+    jours = []
+    for d in range(1, 8):
+        midi, soir = by.get((d, "midi")), by.get((d, "soir"))
+        if midi or soir:
+            jours.append({
+                "jour": jours_lbl[d - 1],
+                "midi": _label(midi) if midi else "",
+                "soir": _label(soir) if soir else "",
+            })
+    return {"jours": jours}
+
+
 # ── Actions ────────────────────────────────────────────────────────
 
 
