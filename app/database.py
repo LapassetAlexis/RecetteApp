@@ -193,6 +193,28 @@ class Database:
             await db.execute("DELETE FROM planning_history WHERE valide = 0")
             await db.commit()
 
+    async def list_drafts(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Liste les brouillons (plannings non validés), du plus récent au plus ancien."""
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await db.execute_fetchall(
+                "SELECT id, week_start, created_at, saison, nb_personnes "
+                "FROM planning_history WHERE valide = 0 ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            return [_row_to_dict(r) for r in rows]
+
+    async def delete_planning(self, planning_id: int) -> None:
+        """Supprime un planning (validé ou brouillon) et ses recettes liées."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "DELETE FROM planning_recipes WHERE planning_id = ?", (planning_id,)
+            )
+            await db.execute(
+                "DELETE FROM planning_history WHERE id = ?", (planning_id,)
+            )
+            await db.commit()
+
     async def get_last_planning(self) -> dict[str, Any] | None:
         """Retourne le dernier planning VALIDÉ."""
         async with aiosqlite.connect(self.path) as db:

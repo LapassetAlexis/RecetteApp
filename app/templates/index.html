@@ -62,6 +62,8 @@
 .pk-f.sel { background: var(--pri, #2980b9); color: #fff; border-color: var(--pri, #2980b9); }
 .pk-list { overflow-y: auto; padding: 12px; }
 .pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
+.build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.build-actions .btn { flex: 1 1 220px; }
 </style>
 
 <div class="hero">
@@ -92,12 +94,17 @@
     <div id="group-legend" class="group-legend"></div>
 
     <input type="hidden" name="meals" id="meals-input">
+    <input type="hidden" name="action" id="action-input" value="valider">
+    <input type="hidden" name="draft_id" id="draft-id-input" value="{{ draft_id }}">
     <small class="hint">
         👥 convives par repas (<strong>0 = absent</strong>, case grisée).
         🎨 sur les midis, le badge <strong>G</strong> regroupe (même couleur = même repas).
     </small>
 
-    <button type="submit" class="btn btn-primary btn-lg" id="btn-b">✅ Créer le planning</button>
+    <div class="build-actions">
+        <button type="submit" class="btn btn-secondary btn-lg" id="btn-draft" data-action="brouillon">💾 Enregistrer le brouillon</button>
+        <button type="submit" class="btn btn-primary btn-lg" id="btn-b" data-action="valider">✅ Valider ma semaine</button>
+    </div>
 </form>
 
 {% if planning_id %}
@@ -147,6 +154,10 @@ function isMainItem(it) {
     return repas.some(r => !NON_REPAS.includes(r));        // au moins un type « repas »
 }
 
+// Grille d'un brouillon rouvert (?draft=<id>) : liste de cases sérialisées.
+// Vide pour un nouveau planning.
+const INITIAL_BUILDER = {{ builder|tojson }};
+
 // État : 14 cases indexées "jour:moment".
 const state = {};
 for (let d = 1; d <= 7; d++) {
@@ -159,6 +170,33 @@ for (let d = 1; d <= 7; d++) {
         };
     }
 }
+
+// Hydratation depuis un brouillon : on écrase les cases avec les données
+// sauvegardées (persons/group/main/accompagnements). Les noms sont dans le
+// JSON, pas besoin du catalogue.
+function hydrateBuilder(cases) {
+    if (!Array.isArray(cases)) return;
+    for (const c of cases) {
+        if (!c || typeof c !== 'object') continue;
+        const key = c.jour + ':' + c.moment;
+        const cell = state[key];
+        if (!cell) continue;
+        const p = parseInt(c.persons);
+        cell.persons = Number.isFinite(p) && p >= 0 ? p : cell.persons;
+        if (c.moment === 'midi') {
+            const g = parseInt(c.group);
+            if (Number.isFinite(g)) cell.group = g;
+        }
+        cell.main = (c.main && c.main.nom)
+            ? { notion_id: c.main.notion_id || '', nom: c.main.nom, nature: c.main.nature || 'Recette' }
+            : null;
+        cell.accompagnements = Array.isArray(c.accompagnements)
+            ? c.accompagnements.filter(a => a && a.nom)
+                .map(a => ({ notion_id: a.notion_id || '', nom: a.nom, nature: a.nature || 'Recette' }))
+            : [];
+    }
+}
+hydrateBuilder(INITIAL_BUILDER);
 
 let CATALOGUE = [];
 
@@ -441,17 +479,30 @@ function serialize() {
     document.getElementById('meals-input').value = JSON.stringify(arr);
 }
 
+// Le bouton cliqué détermine l'action (brouillon vs valider).
+let _submitAction = 'valider';
+document.querySelectorAll('#bf button[type="submit"]').forEach(btn => {
+    btn.addEventListener('click', () => { _submitAction = btn.dataset.action || 'valider'; });
+});
+
 document.getElementById('bf').addEventListener('submit', function (e) {
     serialize();
+    document.getElementById('action-input').value = _submitAction;
     const any = Object.values(state).some(c => c.persons > 0 && c.main);
     if (!any) {
         e.preventDefault();
         alert('Choisis au moins un repas principal (case avec des convives).');
         return;
     }
-    document.getElementById('btn-b').disabled = true;
-    document.getElementById('btn-b').textContent = '⏳ Création…';
+    const btn = document.getElementById(_submitAction === 'brouillon' ? 'btn-draft' : 'btn-b');
+    btn.disabled = true;
+    btn.textContent = _submitAction === 'brouillon' ? '⏳ Enregistrement…' : '⏳ Création…';
 });
+
+// Message « brouillon enregistré » après un retour /?draft=<id>&saved=1.
+{% if saved %}
+if (window.toast) toast('Brouillon enregistré ✓', 'success');
+{% endif %}
 
 // ── Chargement du catalogue ────────────────────────────────────────
 fetch('/api/catalogue')

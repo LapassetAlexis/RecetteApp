@@ -114,8 +114,12 @@ templates.env.globals["tag_groups"] = TAG_GROUPS
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    """Page d'accueil : constructeur manuel de planning (grille 7 jours × 2)."""
+async def index(request: Request, draft: str = "", saved: str = ""):
+    """Page d'accueil : constructeur manuel de planning (grille 7 jours × 2).
+
+    `?draft=<id>` rouvre un brouillon existant : on ré-injecte la grille du
+    formulaire (stockée dans `data["builder"]`) pour l'éditer puis la mettre à
+    jour. `?saved=1` affiche un message « brouillon enregistré »."""
     today = date.today()
     # Calcul du lundi de la semaine
     lundi = today - timedelta(days=today.weekday())
@@ -125,12 +129,37 @@ async def index(request: Request):
     dernier = await db.get_last_planning()
     planning_id = dernier["id"] if dernier else None
 
+    # Réouverture d'un brouillon : on hydrate la grille depuis data["builder"].
+    builder: list = []
+    draft_id = ""
+    if draft:
+        try:
+            did = int(draft)
+        except (TypeError, ValueError):
+            did = 0
+        if did:
+            planning = await db.get_planning_with_recipes(did)
+            # Uniquement les brouillons (valide=0) sont ré-éditables.
+            if planning and not planning.get("valide", 0):
+                try:
+                    data = json.loads(planning["data_json"])
+                    b = data.get("builder")
+                    if isinstance(b, list):
+                        builder = b
+                        draft_id = str(did)
+                        week_start = planning.get("week_start") or week_start
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "week_start": week_start,
             "planning_id": planning_id,
+            "builder": builder,
+            "draft_id": draft_id,
+            "saved": bool(saved),
         },
     )
 
@@ -380,7 +409,7 @@ async def dupliquer_planning(planning_id: int):
     today = date.today()
     week_start = (today - timedelta(days=today.weekday())).isoformat()
 
-    await db.delete_draft_plannings()
+    # Les brouillons multiples coexistent : on ne purge PAS les autres brouillons.
     new_data = {"plats": plats, "liste_courses": [], "per_day": data.get("per_day", "")}
     new_id = await db.save_planning(
         week_start=week_start,
@@ -403,6 +432,16 @@ async def valider_planning(planning_id: int):
     if not planning:
         return {"error": "Planning introuvable"}
     await db.mark_planning_valid(planning_id)
+    return {"success": True}
+
+
+@app.post("/planning/{planning_id}/supprimer")
+async def supprimer_planning(planning_id: int):
+    """Supprime un planning (brouillon ou validé) et ses recettes liées."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return {"error": "Planning introuvable"}
+    await db.delete_planning(planning_id)
     return {"success": True}
 
 
@@ -859,15 +898,27 @@ async def ajouter_page(request: Request):
 
 @app.get("/historique", response_class=HTMLResponse)
 async def historique(request: Request):
-    """Liste les plannings précédents."""
+    """Liste les plannings précédents (validés) et les brouillons en cours."""
     plannings = await db.list_plannings(limit=20)
+    drafts = await db.list_drafts(limit=20)
     return templates.TemplateResponse(
         "historique.html",
-        {"request": request, "plannings": plannings},
+        {"request": request, "plannings": plannings, "drafts": drafts},
     )
 
 
 # ── Actions ────────────────────────────────────────────────────────
+
+
+def _json_or_none(raw: str):
+    """Parse une chaîne JSON en objet Python, ou None si vide/illisible.
+    Sert à re-stocker la grille brute du constructeur (`builder`)."""
+    if not raw or not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def _parse_builder_meals(raw: str) -> list[dict]:
@@ -1006,6 +1057,8 @@ async def construire(
     request: Request,
     week_start: str = Form(...),
     meals: str = Form(""),
+    action: str = Form("valider"),
+    draft_id: str = Form(""),
 ):
     """Construit un planning À LA MAIN depuis la grille du formulaire.
 
@@ -1015,11 +1068,25 @@ async def construire(
       accompagnements [{notion_id, nom}, ...]}].
     Cases sans `main` ou avec persons <= 0 → ignorées. Les midis d'un même
     groupe partagent le repas du 1er midi rempli du groupe (même couleur =
-    même plat). On sauvegarde un BROUILLON + sa liste de courses, puis on
-    redirige vers la page planning."""
+    même plat). On sauvegarde un BROUILLON + sa liste de courses.
+
+    `action` :
+      - « valider » (défaut) → redirige vers la page planning (flux existant) ;
+      - « brouillon » → reste en mode brouillon, redirige vers `/?draft=<id>`.
+    `draft_id` (optionnel) : si fourni, on MET À JOUR ce brouillon au lieu d'en
+    créer un nouveau. Les brouillons multiples coexistent (aucune purge)."""
 
     def _error_ctx(message: str) -> dict:
-        return {"request": request, "error": message, "week_start": week_start}
+        # On repasse la grille saisie (builder) + le draft_id pour ne pas perdre
+        # la saisie de l'utilisateur en cas d'erreur.
+        return {
+            "request": request,
+            "error": message,
+            "week_start": week_start,
+            "builder": _json_or_none(meals) or [],
+            "draft_id": draft_id,
+            "saved": False,
+        }
 
     try:
         cases = _parse_builder_meals(meals)
@@ -1077,29 +1144,57 @@ async def construire(
         for it in liste_courses:
             it["rayon"] = categorize(it.get("nom", ""))
 
-        # Sauvegarde en BROUILLON (valide=0). On purge l'éventuel brouillon
-        # précédent non validé.
-        await db.delete_draft_plannings()
+        # Sauvegarde en BROUILLON (valide=0). Les brouillons multiples
+        # coexistent : on ne purge PLUS les autres. On stocke aussi la grille
+        # brute du formulaire (`builder`) pour pouvoir ré-éditer ce brouillon.
         data = {
             "plats": plats,
             "liste_courses": liste_courses,
             "per_day": per_day,
             "off_meals": off_meals,
+            "builder": _json_or_none(meals) or [],
         }
-        planning_id = await db.save_planning(
-            week_start=week_start,
-            saison="",
-            nb_personnes=nb_personnes,
-            ingredients_force="",
-            data_json=json.dumps(data, ensure_ascii=False),
-            recipes=[{
-                "notion_id": p.get("notion_id", ""),
-                "recipe_name": p["nom_recette"],
-                "repas_type": p.get("type_repas", ""),
-                "jour": p["jour"],
-                "moment": p["moment"],
-            } for p in plats],
-        )
+        recipes = [{
+            "notion_id": p.get("notion_id", ""),
+            "recipe_name": p["nom_recette"],
+            "repas_type": p.get("type_repas", ""),
+            "jour": p["jour"],
+            "moment": p["moment"],
+        } for p in plats]
+
+        # Mise à jour d'un brouillon existant (draft_id valide) plutôt que
+        # création d'un nouveau planning.
+        target_id = 0
+        if draft_id:
+            try:
+                did = int(draft_id)
+            except (TypeError, ValueError):
+                did = 0
+            if did:
+                existing = await db.get_planning_with_recipes(did)
+                if existing and not existing.get("valide", 0):
+                    target_id = did
+
+        if target_id:
+            await db.update_planning(
+                planning_id=target_id,
+                data_json=json.dumps(data, ensure_ascii=False),
+                recipes=recipes,
+            )
+            planning_id = target_id
+        else:
+            planning_id = await db.save_planning(
+                week_start=week_start,
+                saison="",
+                nb_personnes=nb_personnes,
+                ingredients_force="",
+                data_json=json.dumps(data, ensure_ascii=False),
+                recipes=recipes,
+            )
+
+        if action == "brouillon":
+            # On RESTE en mode brouillon : retour au constructeur pré-rempli.
+            return RedirectResponse(url=f"/?draft={planning_id}&saved=1", status_code=303)
         return RedirectResponse(url=f"/planning/{planning_id}", status_code=303)
 
     except Exception as e:
