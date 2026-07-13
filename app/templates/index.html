@@ -33,6 +33,8 @@
     padding: 6px 8px; font-size: .9rem; background: transparent; color: var(--t1, #333); }
 .b-add:hover { border-color: var(--t1, #333); }
 .b-main.ro, .b-side.ro { opacity: .7; }
+.b-main-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.b-main-link:hover { color: var(--pri, #2980b9); }
 .b-follow-note { display: block; font-size: .78rem; color: var(--t2, #888); font-style: italic; margin-top: 2px; }
 .b-group { cursor: pointer; border: none; border-radius: 8px; padding: 4px 8px;
     font-size: .9rem; font-weight: 700; color: #fff; }
@@ -162,6 +164,16 @@ let CATALOGUE = [];
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+// Libellé du repas principal : lien (nouvel onglet) vers la recette, ou simple
+// texte pour une brique (Nature=Ingrédient, pas de fiche recette dédiée).
+function mainLabel(m) {
+    const inner = '🍽️ ' + esc(m.nom);
+    if (m.nature === 'Recette' && m.notion_id) {
+        return `<a href="/recette/${encodeURIComponent(m.notion_id)}" target="_blank" rel="noopener" class="b-main-link" title="Ouvrir la recette">${inner}</a>`;
+    }
+    return `<span>${inner}</span>`;
+}
+
 // ── Groupes de midis : 1 seul repas par groupe ─────────────────────
 // Le repas d'un groupe est édité sur le PREMIER jour ACTIF du groupe ; les
 // autres midis du groupe le suivent en lecture seule.
@@ -212,7 +224,7 @@ function cellHtml(c) {
         if (ed && ed !== c.jour) {
             const src = state[ed + ':midi'];
             if (src.main) {
-                h += `<div class="b-main ro"><span>🍽️ ${esc(src.main.nom)}</span></div>`;
+                h += `<div class="b-main ro">${mainLabel(src.main)}</div>`;
                 src.accompagnements.forEach(a => { h += `<div class="b-side ro"><span>🥗 ${esc(a.nom)}</span></div>`; });
             } else {
                 h += `<span class="b-follow-note">à définir sur ${JOURS_COURT[ed - 1]}</span>`;
@@ -223,7 +235,7 @@ function cellHtml(c) {
         }
     }
     if (c.main) {
-        h += `<div class="b-main"><span>🍽️ ${esc(c.main.nom)}</span><button type="button" class="b-x" data-act="clear-main" title="Retirer">✕</button></div>`;
+        h += `<div class="b-main">${mainLabel(c.main)}<button type="button" class="b-x" data-act="clear-main" title="Retirer">✕</button></div>`;
         for (let i = 0; i < c.accompagnements.length; i++) {
             const a = c.accompagnements[i];
             h += `<div class="b-side"><span>🥗 ${esc(a.nom)}</span><button type="button" class="b-x" data-act="rm-side" data-i="${i}" title="Retirer">✕</button></div>`;
