@@ -5,7 +5,26 @@
     <h1>📚 Historique des plannings</h1>
 </div>
 
+{% if drafts %}
+<h2 class="section-title">📝 Brouillons</h2>
+<div class="hist-grid" id="drafts-grid">
+    {% for p in drafts %}
+    <div class="hist-item" data-draft="{{ p.id }}">
+        <a href="/?draft={{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
+            <div class="date">📅 Semaine du {{ p.week_start }}</div>
+            <div class="meta">Créé le {{ p.created_at[:10] }}</div>
+        </a>
+        <div class="hist-actions">
+            <a href="/?draft={{ p.id }}" class="btn btn-primary btn-sm">✏️ Reprendre</a>
+            <button class="btn btn-ghost btn-sm hist-del" data-id="{{ p.id }}" title="Supprimer ce brouillon">🗑️ Supprimer</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if plannings %}
+<h2 class="section-title">✅ Semaines validées</h2>
 <div class="hist-grid">
     {% for p in plannings %}
     <div class="hist-item">
@@ -18,6 +37,15 @@
     </div>
     {% endfor %}
 </div>
+{% endif %}
+
+{% if not plannings and not drafts %}
+<div class="card text-center">
+    <p>Aucun planning généré pour le moment.</p>
+    <a href="/" class="btn btn-primary">Générer un planning →</a>
+</div>
+{% endif %}
+
 <script>
 document.querySelectorAll('.hist-dup').forEach(b => b.onclick = async function() {
     this.disabled = true; this.textContent = '⏳';
@@ -28,11 +56,27 @@ document.querySelectorAll('.hist-dup').forEach(b => b.onclick = async function()
         else { this.disabled = false; this.textContent = '🔁 Refaire'; }
     } catch(e) { this.disabled = false; this.textContent = '🔁 Refaire'; }
 });
+
+document.querySelectorAll('.hist-del').forEach(b => b.onclick = async function() {
+    if (!confirm('Supprimer ce brouillon ?')) return;
+    this.disabled = true; this.textContent = '⏳';
+    try {
+        const r = await fetch(`/planning/${this.dataset.id}/supprimer`, {method:'POST'});
+        const d = await r.json();
+        if (d.success) {
+            const card = document.querySelector(`.hist-item[data-draft="${this.dataset.id}"]`);
+            if (card) card.remove();
+            if (window.toast) toast('Brouillon supprimé ✓', 'success');
+            const grid = document.getElementById('drafts-grid');
+            if (grid && !grid.querySelector('.hist-item')) location.reload();
+        } else {
+            this.disabled = false; this.textContent = '🗑️ Supprimer';
+            if (window.toast) toast(d.error || 'Erreur', 'error');
+        }
+    } catch(e) {
+        this.disabled = false; this.textContent = '🗑️ Supprimer';
+        if (window.toast) toast('Erreur réseau', 'error');
+    }
+});
 </script>
-{% else %}
-<div class="card text-center">
-    <p>Aucun planning généré pour le moment.</p>
-    <a href="/" class="btn btn-primary">Générer un planning →</a>
-</div>
-{% endif %}
 {% endblock %}

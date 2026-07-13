@@ -262,13 +262,117 @@ def test_planning_draft_then_validate(client, monkeypatch):
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
     pid = _construire(client, [_case(1, "midi", poulet, persons=2),
                                _case(1, "soir", soupe, persons=2)])
-    # brouillon : pas dans l'historique, bandeau de validation présent
-    assert "Semaine du" not in client.get("/historique").text
+    # brouillon : listé dans la section Brouillons, PAS dans les validées ;
+    # bandeau de validation présent sur la page planning.
+    hist = client.get("/historique").text
+    assert "📝 Brouillons" in hist
+    assert "Semaines validées" not in hist
     assert "Valider la semaine" in client.get(f"/planning/{pid}").text
-    # validation
+    # validation → rejoint les semaines validées
     assert client.post(f"/planning/{pid}/valider").json().get("success")
-    assert "Semaine du" in client.get("/historique").text
+    assert "Semaines validées" in client.get("/historique").text
     assert "Semaine validée" in client.get(f"/planning/{pid}").text
+
+
+def _enregistrer_brouillon(client, cases, week_start="2026-01-05", draft_id=""):
+    """POST /construire avec action=brouillon ; renvoie la réponse (sans suivre
+    la redirection) pour inspecter le Location."""
+    return client.post("/construire", data={
+        "week_start": week_start, "meals": json.dumps(cases),
+        "action": "brouillon", "draft_id": draft_id,
+    }, follow_redirects=False)
+
+
+def test_enregistrer_brouillon_reste_en_brouillon(client, monkeypatch):
+    """action=brouillon → planning valide=0 avec data["builder"], redirection
+    vers /?draft=<id>&saved=1, et PAS de validation."""
+    import asyncio
+    poulet = _recipe("Poulet", id="p1")
+    async def _all():
+        return [poulet]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    cases = [_case(1, "midi", poulet, persons=2)]
+    r = _enregistrer_brouillon(client, cases)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/?draft=") and "saved=1" in loc
+    pid = int(loc.split("draft=")[1].split("&")[0])
+    # brouillon (valide=0) : pas dans les validées, présent dans list_drafts
+    assert asyncio.run(main.db.list_plannings()) == []
+    drafts = asyncio.run(main.db.list_drafts())
+    assert [d["id"] for d in drafts] == [pid]
+    # data["builder"] contient la grille brute soumise
+    data = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])
+    assert data["builder"] == cases
+
+
+def test_reouvrir_brouillon_injecte_builder(client, monkeypatch):
+    """GET /?draft=<id> hydrate la page : INITIAL_BUILDER non vide + draft_id."""
+    poulet = _recipe("Poulet", id="p1")
+    async def _all():
+        return [poulet]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    cases = [_case(1, "midi", poulet, persons=2)]
+    r = _enregistrer_brouillon(client, cases)
+    pid = int(r.headers["location"].split("draft=")[1].split("&")[0])
+    html = client.get(f"/?draft={pid}").text
+    assert "Poulet" in html                       # le nom du plat est dans le builder
+    assert f'value="{pid}"' in html               # draft_id pré-rempli
+    assert "INITIAL_BUILDER = []" not in html      # builder hydraté (non vide)
+    # brouillon inconnu / validé : grille vierge
+    html2 = client.get("/?draft=99999").text
+    assert "INITIAL_BUILDER = []" in html2
+
+
+def test_maj_brouillon_ne_cree_pas_de_planning(client, monkeypatch):
+    """draft_id fourni → met à jour le brouillon existant, aucun nouveau créé."""
+    import asyncio
+    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
+    async def _all():
+        return [poulet, soupe]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    r = _enregistrer_brouillon(client, [_case(1, "midi", poulet, persons=2)])
+    pid = int(r.headers["location"].split("draft=")[1].split("&")[0])
+    # ré-enregistrement avec draft_id : même planning mis à jour
+    cases2 = [_case(1, "midi", soupe, persons=3)]
+    r2 = _enregistrer_brouillon(client, cases2, draft_id=str(pid))
+    pid2 = int(r2.headers["location"].split("draft=")[1].split("&")[0])
+    assert pid2 == pid
+    drafts = asyncio.run(main.db.list_drafts())
+    assert len(drafts) == 1                        # pas de nouveau planning
+    p = asyncio.run(main.db.get_planning_with_recipes(pid))
+    assert {rec["recipe_name"] for rec in p["recipes"]} == {"Soupe"}
+
+
+def test_brouillons_multiples_coexistent(client, monkeypatch):
+    """Deux brouillons enregistrés coexistent (pas de purge en construire)."""
+    import asyncio
+    poulet = _recipe("Poulet", id="p1")
+    async def _all():
+        return [poulet]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    _enregistrer_brouillon(client, [_case(1, "midi", poulet, persons=2)])
+    _enregistrer_brouillon(client, [_case(2, "midi", poulet, persons=2)])
+    assert len(asyncio.run(main.db.list_drafts())) == 2
+
+
+def test_historique_affiche_brouillons_et_suppression(client, monkeypatch):
+    """L'historique liste la section Brouillons ; la suppression retire le
+    brouillon via /planning/{id}/supprimer."""
+    import asyncio
+    poulet = _recipe("Poulet", id="p1")
+    async def _all():
+        return [poulet]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    r = _enregistrer_brouillon(client, [_case(1, "midi", poulet, persons=2)])
+    pid = int(r.headers["location"].split("draft=")[1].split("&")[0])
+    hist = client.get("/historique").text
+    assert "📝 Brouillons" in hist
+    assert f"/?draft={pid}" in hist                # lien Reprendre
+    # suppression
+    assert client.post(f"/planning/{pid}/supprimer").json().get("success")
+    assert asyncio.run(main.db.list_drafts()) == []
+    assert client.post(f"/planning/{pid}/supprimer").json().get("error")
 
 
 def test_detail_recette(client, monkeypatch):

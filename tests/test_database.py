@@ -76,6 +76,25 @@ def test_delete_draft_plannings(tmp_path):
     assert len(asyncio.run(db.list_plannings())) == 1  # seul le validé reste
 
 
+def test_list_drafts(tmp_path):
+    db = _db(tmp_path)
+    v = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    asyncio.run(db.mark_planning_valid(v))
+    d1 = asyncio.run(db.save_planning("2026-01-12", "Hiver", 4, "", "{}", _plats()))
+    d2 = asyncio.run(db.save_planning("2026-01-19", "Hiver", 4, "", "{}", _plats()))
+    drafts = asyncio.run(db.list_drafts())
+    # seulement les brouillons (valide=0), du plus récent au plus ancien
+    assert [x["id"] for x in drafts] == [d2, d1]
+
+
+def test_delete_planning(tmp_path):
+    db = _db(tmp_path)
+    pid = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
+    asyncio.run(db.delete_planning(pid))
+    assert asyncio.run(db.get_planning_with_recipes(pid)) is None
+    assert asyncio.run(db.list_drafts()) == []
+
+
 def test_enriched_cache_roundtrip(tmp_path):
     db = _db(tmp_path)
     ings = json.dumps([{"nom": "farine", "quantite": "200", "unite": "g"}])
