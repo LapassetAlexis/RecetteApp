@@ -536,6 +536,15 @@ def _make_shopping_planning(client, monkeypatch):
     return pid
 
 
+def test_planning_apercu(client, monkeypatch):
+    pid = _make_shopping_planning(client, monkeypatch)
+    d = client.get(f"/api/planning/{pid}/apercu").json()
+    jours = d["jours"]
+    assert jours and jours[0]["jour"] == "Lun"
+    assert "Poulet" in jours[0]["midi"] and "Soupe" in jours[0]["soir"]
+    assert "error" in client.get("/api/planning/999999/apercu").json()
+
+
 def test_shopping_check_persists_state(client, monkeypatch):
     import asyncio
     pid = _make_shopping_planning(client, monkeypatch)

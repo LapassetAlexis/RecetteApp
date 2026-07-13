@@ -9,13 +9,13 @@
 <h2 class="section-title">📝 Brouillons</h2>
 <div class="hist-grid" id="drafts-grid">
     {% for p in drafts %}
-    <div class="hist-item" data-draft="{{ p.id }}">
+    <div class="hist-item" data-draft="{{ p.id }}" data-preview="{{ p.id }}">
         <a href="/?draft={{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
             <div class="date">📅 Semaine du {{ p.week_start }}</div>
             <div class="meta">Créé le {{ p.created_at[:10] }}</div>
         </a>
         <div class="hist-actions">
-            <a href="/?draft={{ p.id }}" class="btn btn-primary btn-sm">✏️ Reprendre</a>
+            <a href="/?draft={{ p.id }}" class="btn btn-ghost btn-sm">✏️ Reprendre</a>
             <button class="btn btn-ghost btn-sm hist-del" data-id="{{ p.id }}" title="Supprimer ce brouillon">🗑️ Supprimer</button>
         </div>
     </div>
@@ -27,7 +27,7 @@
 <h2 class="section-title">✅ Semaines validées</h2>
 <div class="hist-grid">
     {% for p in plannings %}
-    <div class="hist-item">
+    <div class="hist-item" data-preview="{{ p.id }}">
         <a href="/planning/{{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
             <div class="date">📅 Semaine du {{ p.week_start }}</div>
             <div class="meta">{{ p.saison }} · {{ p.nb_personnes }} pers.</div>
@@ -46,7 +46,62 @@
 </div>
 {% endif %}
 
+<style>
+.hist-preview { position: fixed; z-index: 80; max-width: 320px; background: var(--card, #fff);
+    border: 1px solid var(--bo, #ddd); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+    padding: 10px 12px; font-size: .82rem; pointer-events: none; }
+.hist-preview h4 { margin: 0 0 6px; font-size: .85rem; }
+.hist-preview .pv-day { display: grid; grid-template-columns: 34px 1fr; gap: 6px; padding: 2px 0; }
+.hist-preview .pv-j { font-weight: 700; color: var(--t2, #777); }
+.hist-preview .pv-m { line-height: 1.25; }
+.hist-preview .pv-empty { color: var(--t2, #999); }
+</style>
 <script>
+// ── Aperçu de la semaine au survol ─────────────────────────────────
+const _pvCache = {};
+let _pvEl = null;
+function pvHide() { if (_pvEl) { _pvEl.remove(); _pvEl = null; } }
+function pvShow(html, rect) {
+    pvHide();
+    const el = document.createElement('div');
+    el.className = 'hist-preview';
+    el.innerHTML = html;
+    document.body.appendChild(el);
+    // Positionne à droite de la carte, repli à gauche si déborde.
+    let left = rect.right + 10, top = rect.top;
+    const w = el.offsetWidth;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, rect.left - w - 10);
+    el.style.left = left + 'px';
+    el.style.top = Math.max(8, Math.min(top, window.innerHeight - el.offsetHeight - 8)) + 'px';
+    _pvEl = el;
+}
+function pvRender(data) {
+    if (!data || !data.jours || !data.jours.length) return '<div class="pv-empty">Semaine vide.</div>';
+    let h = '<h4>🍽️ Aperçu</h4>';
+    data.jours.forEach(j => {
+        const lines = [];
+        if (j.midi) lines.push('☀️ ' + j.midi);
+        if (j.soir) lines.push('🌙 ' + j.soir);
+        h += `<div class="pv-day"><span class="pv-j">${j.jour}</span><span class="pv-m">${lines.map(esc).join('<br>')}</span></div>`;
+    });
+    return h;
+}
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+document.querySelectorAll('.hist-item[data-preview]').forEach(card => {
+    const id = card.dataset.preview;
+    card.addEventListener('mouseenter', async () => {
+        const rect = card.getBoundingClientRect();
+        if (_pvCache[id]) { pvShow(pvRender(_pvCache[id]), rect); return; }
+        try {
+            const r = await fetch(`/api/planning/${id}/apercu`);
+            const d = await r.json();
+            _pvCache[id] = d;
+            if (card.matches(':hover')) pvShow(pvRender(d), card.getBoundingClientRect());
+        } catch (e) { /* silencieux */ }
+    });
+    card.addEventListener('mouseleave', pvHide);
+});
+
 document.querySelectorAll('.hist-dup').forEach(b => b.onclick = async function() {
     this.disabled = true; this.textContent = '⏳';
     try {
