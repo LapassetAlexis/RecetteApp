@@ -243,9 +243,10 @@ function renderGrid() {
         grid.appendChild(label);
         for (const m of ['midi','soir']) {
             const wrap = document.createElement('div');
-            wrap.className = 'b-row-el';
             wrap.innerHTML = cellHtml(state[d + ':' + m]);
-            grid.appendChild(wrap.firstChild);
+            const cellEl = wrap.firstChild;
+            cellEl.classList.add('b-row-el');  // pour être retiré au prochain rendu
+            grid.appendChild(cellEl);
         }
     }
     renderLegend();
@@ -270,10 +271,14 @@ function renderLegend() {
 function bindCells() {
     document.querySelectorAll('.b-cell').forEach(cell => {
         const c = state[cell.dataset.key];
-        cell.querySelector('.b-pers').addEventListener('input', e => {
+        const pers = cell.querySelector('.b-pers');
+        // Saisie : maj légère (pas de re-render → on garde le focus).
+        pers.addEventListener('input', e => {
             c.persons = Math.max(0, parseInt(e.target.value) || 0);
-            renderGrid();
+            cell.classList.toggle('off', c.persons === 0);
         });
+        // Blur : re-render complet (recalcule éditeur/suiveurs des groupes).
+        pers.addEventListener('change', () => renderGrid());
         const gb = cell.querySelector('.b-group');
         if (gb) gb.addEventListener('click', e => { e.stopPropagation(); openGroupPicker(gb, c); });
         cell.querySelectorAll('[data-act]').forEach(btn => {
