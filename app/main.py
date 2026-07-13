@@ -194,7 +194,7 @@ def _apply_recipe_info(plat: dict, r: dict) -> None:
     plat["tags"] = r.get("tags", [])
 
 
-async def _week_nutrition(plats: list[dict]) -> dict | None:
+async def _week_nutrition(plats: list[dict], day_labels: list[dict] | None = None) -> dict | None:
     """Estime la nutrition moyenne par jour/personne sur le planning, à partir
     des ingrédients en cache. Retourne None si rien d'estimable."""
     ids: set[str] = set()
@@ -279,6 +279,13 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
 
     JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 
+    def _jour_nom(jour: int) -> str:
+        # Nom du jour dérivé de la DATE (day_labels) si dispo, sinon repli sur
+        # l'index (compat : anciens appels sans week_start / plannings « lundi »).
+        if day_labels and 1 <= jour <= len(day_labels):
+            return day_labels[jour - 1]["long"]
+        return JOURS[jour - 1] if 1 <= jour <= 7 else f"Jour {jour}"
+
     def _round(n: dict | None) -> dict | None:
         return {k: round(n[k]) for k in _KEYS} if n else None
 
@@ -292,7 +299,7 @@ async def _week_nutrition(plats: list[dict]) -> dict | None:
             day_total = {k: sum(m[k] for m in present) for k in _KEYS}
         par_jour.append({
             "jour": jour,
-            "nom": JOURS[jour - 1] if 1 <= jour <= 7 else f"Jour {jour}",
+            "nom": _jour_nom(jour),
             "midi": _round(midi),
             "soir": _round(soir),
             "total": _round(day_total),
@@ -374,6 +381,9 @@ async def voir_planning(request: Request, planning_id: int):
             acc["non_enrichi"] = not (aid and aid in enriched_ids)
         p["accompagnements"] = accs
 
+    # Libellés des 7 jours dérivés de la date du jour 1 (week_start).
+    day_labels = _day_labels(planning.get("week_start", ""))
+
     return templates.TemplateResponse(
         "planning.html",
         {
@@ -381,8 +391,9 @@ async def voir_planning(request: Request, planning_id: int):
             "planning": planning,
             "titre": _week_label(planning.get("week_start", ""), plats),
             "plats": plats,
+            "day_labels": day_labels,
             "week_rows": _group_week(plats),
-            "week_nutrition": await _week_nutrition(plats),
+            "week_nutrition": await _week_nutrition(plats, day_labels),
             "liste_courses": liste_courses,
             "courses_par_rayon": group_by_rayon(liste_courses),
             "courses_checked": data.get("courses_checked", []),
@@ -900,6 +911,35 @@ async def ajouter_page(request: Request):
 _JOURS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 
 
+def _day_labels(week_start: str) -> list[dict]:
+    """Libellés des jours 1..7 du planning, DÉRIVÉS de la date du jour 1
+    (`week_start`). Le jour 1 = `week_start`, le jour 2 = +1j, … le jour 7 = +6j.
+
+    Chaque entrée : {jour (1..7), court (3 lettres capitalisées, ex. « Lun »),
+    long (nom complet capitalisé, ex. « Lundi »), date « JJ/MM »}. Le nom du jour
+    vient du VRAI jour de semaine (`date.weekday()`), pas de l'index. Repli neutre
+    (« J1 » / « Jour 1 » / date vide) si `week_start` est invalide."""
+    try:
+        y, m, d = (int(x) for x in week_start.split("-"))
+        start = date(y, m, d)
+    except (ValueError, AttributeError):
+        start = None
+    out: list[dict] = []
+    for j in range(1, 8):
+        if start:
+            dt = start + timedelta(days=j - 1)
+            nom = _JOURS_FR[dt.weekday()]
+            out.append({
+                "jour": j,
+                "court": nom[:3].capitalize(),
+                "long": nom.capitalize(),
+                "date": f"{dt.day:02d}/{dt.month:02d}",
+            })
+        else:
+            out.append({"jour": j, "court": f"J{j}", "long": f"Jour {j}", "date": ""})
+    return out
+
+
 def _week_label(week_start: str, plats: list) -> str:
     """Titre reflétant la PLAGE de jours réellement remplis (ex. « Mardi 14/07 →
     vendredi 17/07 »). Repli sur « Semaine du <date> » si rien d'exploitable."""
@@ -914,8 +954,10 @@ def _week_label(week_start: str, plats: list) -> str:
         return f"Semaine du {week_start}"
 
     def _fmt(j: int) -> str:
+        # Le nom du jour vient du VRAI jour de semaine (week_start + j-1),
+        # pas de l'index j (week_start = date du jour 1, un jour quelconque).
         dt = start + timedelta(days=j - 1)
-        return f"{_JOURS_FR[j - 1]} {dt.day:02d}/{dt.month:02d}"
+        return f"{_JOURS_FR[dt.weekday()]} {dt.day:02d}/{dt.month:02d}"
 
     if jours[0] == jours[-1]:
         return _fmt(jours[0]).capitalize()
@@ -954,7 +996,8 @@ async def api_planning_apercu(planning_id: int):
         plats = json.loads(planning["data_json"]).get("plats", [])
     except (json.JSONDecodeError, TypeError):
         plats = []
-    jours_lbl = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+    # Libellés courts dérivés de la date du jour 1 (week_start), pas de l'index.
+    day_labels = _day_labels(planning.get("week_start", ""))
 
     def _label(plat: dict) -> str:
         nom = clean_recipe_title(plat.get("nom_recette", ""))
@@ -969,7 +1012,7 @@ async def api_planning_apercu(planning_id: int):
         midi, soir = by.get((d, "midi")), by.get((d, "soir"))
         if midi or soir:
             jours.append({
-                "jour": jours_lbl[d - 1],
+                "jour": day_labels[d - 1]["court"],
                 "midi": _label(midi) if midi else "",
                 "soir": _label(soir) if soir else "",
             })

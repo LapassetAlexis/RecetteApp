@@ -78,8 +78,9 @@
 <form method="POST" action="/construire" class="card" id="bf">
     <div class="form-r">
         <div class="form-g">
-            <label for="week_start">Semaine du</label>
+            <label for="week_start">📅 Date de début</label>
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
+            <small class="hint">1<sup>er</sup> jour du planning (jour 1) ; les jours suivent.</small>
         </div>
     </div>
 
@@ -131,8 +132,30 @@
 </div>
 
 <script>
-const JOURS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
-const JOURS_COURT = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const JOURS_FR = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+// Date de début (jour 1) saisie dans le champ, ou null si vide/invalide.
+function startDate() {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(document.getElementById('week_start').value || '');
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
+}
+// Libellé du jour `idx` (1..7) du planning, DÉRIVÉ de la date de début :
+// vrai jour de semaine + date. {court:'Lun', long:'Lundi', date:'13/07'}.
+function dayInfo(idx) {
+    const start = startDate();
+    if (!start) return { court: 'J' + idx, long: 'Jour ' + idx, date: '' };
+    const dt = new Date(start);
+    dt.setDate(dt.getDate() + (idx - 1));
+    const nom = JOURS_FR[(dt.getDay() + 6) % 7];   // JS: 0=dimanche → 0=lundi
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    return { court: cap1(nom.slice(0, 3)), long: cap1(nom), date: `${dd}/${mm}` };
+}
+// Libellé court « Lun 13/07 » pour les lignes de la grille.
+function dayLabel(idx) { const i = dayInfo(idx); return i.date ? `${i.court} ${i.date}` : i.court; }
 const GROUP_COLORS = ['#e67e22','#27ae60','#8e44ad','#2980b9','#c0392b'];  // 5 couleurs max
 const DEFAULT_PERS = [2,2,2,2,2,4,4];
 const DEFAULT_GROUPS = [1,1,2,2,2,3,4];
@@ -265,9 +288,9 @@ function cellHtml(c) {
                 h += `<div class="b-main ro">${mainLabel(src.main)}</div>`;
                 src.accompagnements.forEach(a => { h += `<div class="b-side ro"><span>🥗 ${esc(a.nom)}</span></div>`; });
             } else {
-                h += `<span class="b-follow-note">à définir sur ${JOURS_COURT[ed - 1]}</span>`;
+                h += `<span class="b-follow-note">à définir sur ${dayInfo(ed).court}</span>`;
             }
-            h += `<small class="b-follow-note">↳ même repas que ${JOURS_COURT[ed - 1]}</small>`;
+            h += `<small class="b-follow-note">↳ même repas que ${dayInfo(ed).court}</small>`;
             h += '</div>';
             return h;
         }
@@ -293,7 +316,7 @@ function renderGrid() {
     for (let d = 1; d <= 7; d++) {
         const label = document.createElement('div');
         label.className = 'b-rowlabel b-row-el';
-        label.textContent = JOURS[d - 1];
+        label.textContent = dayLabel(d);
         grid.appendChild(label);
         for (const m of ['midi','soir']) {
             const wrap = document.createElement('div');
@@ -313,7 +336,7 @@ function renderLegend() {
     const uniq = [...new Set(groups)];
     const legend = document.getElementById('group-legend');
     legend.innerHTML = uniq.map(g => {
-        const days = groups.map((v, i) => v === g ? JOURS_COURT[i] : null).filter(Boolean);
+        const days = groups.map((v, i) => v === g ? dayInfo(i + 1).court : null).filter(Boolean);
         const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
         return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${col}22;border:1px solid ${col};">
             <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;"></span>
@@ -509,6 +532,9 @@ fetch('/api/catalogue')
     .then(r => r.json())
     .then(data => { CATALOGUE = Array.isArray(data) ? data : []; })
     .catch(() => { CATALOGUE = []; });
+
+// Changer la date de début → recalcule les libellés de jours (grille + légende).
+document.getElementById('week_start').addEventListener('change', renderGrid);
 
 renderGrid();
 </script>
