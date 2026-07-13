@@ -11,7 +11,7 @@
     {% for p in drafts %}
     <div class="hist-item" data-draft="{{ p.id }}" data-preview="{{ p.id }}">
         <a href="/?draft={{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
-            <div class="date">📅 Semaine du {{ p.week_start }}</div>
+            <div class="date">📅 Semaine du <span class="nowrap">{{ p.week_start }}</span></div>
             <div class="meta">Créé le {{ p.created_at[:10] }}</div>
         </a>
         <div class="hist-actions">
@@ -29,7 +29,7 @@
     {% for p in plannings %}
     <div class="hist-item" data-preview="{{ p.id }}">
         <a href="/planning/{{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
-            <div class="date">📅 Semaine du {{ p.week_start }}</div>
+            <div class="date">📅 Semaine du <span class="nowrap">{{ p.week_start }}</span></div>
             <div class="meta">{{ p.saison }} · {{ p.nb_personnes }} pers.</div>
             <div class="meta">Créé le {{ p.created_at[:10] }}</div>
         </a>

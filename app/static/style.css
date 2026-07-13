@@ -224,6 +224,7 @@ a.meal-warn:hover { background:#f9e0c4; }
 .section-title { margin:22px 0 10px; font-size:1.1rem; }
 .hist-actions { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
 .hist-actions .btn { width:100%; min-width:0; }
+.nowrap { white-space:nowrap; }
 
 /* ── Vue liste planning (mobile) ─────────────── */
 .week-list { display:none; }
