@@ -32,6 +32,8 @@
 .b-add { cursor: pointer; border: 1px dashed var(--bd, #bbb); border-radius: 8px;
     padding: 6px 8px; font-size: .9rem; background: transparent; color: var(--t1, #333); }
 .b-add:hover { border-color: var(--t1, #333); }
+.b-main.ro, .b-side.ro { opacity: .7; }
+.b-follow-note { display: block; font-size: .78rem; color: var(--t2, #888); font-style: italic; margin-top: 2px; }
 .b-group { cursor: pointer; border: none; border-radius: 8px; padding: 4px 8px;
     font-size: .9rem; font-weight: 700; color: #fff; }
 .group-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: .82rem; }
@@ -156,6 +158,38 @@ let CATALOGUE = [];
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+// ── Groupes de midis : 1 seul repas par groupe ─────────────────────
+// Le repas d'un groupe est édité sur le PREMIER jour ACTIF du groupe ; les
+// autres midis du groupe le suivent en lecture seule.
+function midiEditorDay(group) {
+    for (let d = 1; d <= 7; d++) {
+        const c = state[d + ':midi'];
+        if (c.group === group && c.persons > 0) return d;
+    }
+    return null;
+}
+// Rassemble le repas de chaque groupe sur son jour éditeur (migre depuis un
+// suiveur si besoin) et vide les suiveurs → un seul choix par groupe.
+function consolidateGroups() {
+    const byGroup = {};
+    for (let d = 1; d <= 7; d++) {
+        const c = state[d + ':midi'];
+        (byGroup[c.group] = byGroup[c.group] || []).push(c);
+    }
+    for (const g in byGroup) {
+        const all = byGroup[g];                      // triés par jour croissant
+        const active = all.filter(c => c.persons > 0);
+        if (!active.length) continue;
+        const editor = active[0];
+        const src = all.find(c => c.main);           // repas existant (actif ou non)
+        if (src && src !== editor) {
+            editor.main = src.main;
+            editor.accompagnements = src.accompagnements;
+        }
+        all.forEach(c => { if (c !== editor) { c.main = null; c.accompagnements = []; } });
+    }
+}
+
 // ── Rendu de la grille ─────────────────────────────────────────────
 function cellHtml(c) {
     const col = c.moment === 'midi' ? GROUP_COLORS[(c.group - 1) % GROUP_COLORS.length] : '';
@@ -168,6 +202,22 @@ function cellHtml(c) {
         h += `<button type="button" class="b-group" style="background:${col}" title="Groupe : même couleur = même repas">G${c.group}</button>`;
     }
     h += '</div>';
+    // Midi suiveur (pas le jour éditeur du groupe) : repas en lecture seule.
+    if (c.moment === 'midi' && !off) {
+        const ed = midiEditorDay(c.group);
+        if (ed && ed !== c.jour) {
+            const src = state[ed + ':midi'];
+            if (src.main) {
+                h += `<div class="b-main ro"><span>🍽️ ${esc(src.main.nom)}</span></div>`;
+                src.accompagnements.forEach(a => { h += `<div class="b-side ro"><span>🥗 ${esc(a.nom)}</span></div>`; });
+            } else {
+                h += `<span class="b-follow-note">à définir sur ${JOURS_COURT[ed - 1]}</span>`;
+            }
+            h += `<small class="b-follow-note">↳ même repas que ${JOURS_COURT[ed - 1]}</small>`;
+            h += '</div>';
+            return h;
+        }
+    }
     if (c.main) {
         h += `<div class="b-main"><span>🍽️ ${esc(c.main.nom)}</span><button type="button" class="b-x" data-act="clear-main" title="Retirer">✕</button></div>`;
         for (let i = 0; i < c.accompagnements.length; i++) {
@@ -183,6 +233,7 @@ function cellHtml(c) {
 }
 
 function renderGrid() {
+    consolidateGroups();  // un seul repas par groupe (sur le 1er jour actif)
     const grid = document.getElementById('grid');
     grid.querySelectorAll('.b-row-el').forEach(e => e.remove());
     for (let d = 1; d <= 7; d++) {
@@ -346,6 +397,7 @@ document.getElementById('pk-search').addEventListener('input', renderPkList);
 
 // ── Sérialisation + submit ─────────────────────────────────────────
 function serialize() {
+    consolidateGroups();  // 1 repas par groupe (sur le jour éditeur) avant envoi
     const arr = Object.values(state).map(c => {
         const o = { jour: c.jour, moment: c.moment, persons: c.persons };
         if (c.moment === 'midi') o.group = c.group;
