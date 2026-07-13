@@ -136,6 +136,15 @@ function isSideItem(it) {
     return base.includes('Légume');  // recette : accompagnement = garniture de légume
 }
 
+// Repas qui NE sont PAS un plat principal midi/soir (exclus du picker « principal »).
+const NON_REPAS = ['Dessert', 'Boisson', 'Apéro', 'Goûter', 'Petit dej'];
+function isMainItem(it) {
+    if (it.nature === 'Ingrédient') return true;          // brique = composant de repas
+    const repas = it.repas || [];
+    if (!repas.length) return true;                        // non classé : on garde
+    return repas.some(r => !NON_REPAS.includes(r));        // au moins un type « repas »
+}
+
 // État : 14 cases indexées "jour:moment".
 const state = {};
 for (let d = 1; d <= 7; d++) {
@@ -350,6 +359,7 @@ function renderPkList() {
     const list = document.getElementById('pk-list');
     let items = CATALOGUE.slice();
     if (pkMode === 'side') items = items.filter(isSideItem);
+    else items = items.filter(isMainItem);   // principal : pas de dessert/boisson/…
     if (pkNature) items = items.filter(it => it.nature === pkNature);
     if (pkBase) items = items.filter(it => (it.base || []).includes(pkBase));
     if (q) items = items.filter(it => it.nom.toLowerCase().includes(q));
