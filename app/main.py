@@ -987,13 +987,15 @@ async def api_catalogue():
     except Exception as e:
         logger.error(f"Erreur Notion (catalogue): {e}")
         return []
+    from app.text_utils import clean_recipe_title
     return [
         {
             "id": r["id"],
-            "nom": r["nom"],
+            "nom": clean_recipe_title(r["nom"]),
             "nature": recipe_nature(r),
             "base": recipe_base(r),
             "repas": recipe_types(r),
+            "image": r.get("image", ""),
         }
         for r in recettes
     ]
