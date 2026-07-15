@@ -39,6 +39,40 @@ VERSION = "1.1.0"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+app = FastAPI(title=settings.app_title, version="1.0.0")
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+
+# ── HTTP Basic Auth (optionnel) ────────────────────────────────
+import base64
+import secrets
+
+if settings.auth_user and settings.auth_password:
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth[6:]).decode("utf-8")
+                user, pwd = decoded.split(":", 1)
+                if secrets.compare_digest(user, settings.auth_user) and secrets.compare_digest(pwd, settings.auth_password):
+                    return await call_next(request)
+            except: pass
+
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Menu Planner"'},
+            content="Authentification requise"
+        )
+    logger.info("🔒 Authentification HTTP Basic activée")
+else:
+    logger.info("🔓 Authentification désactivée (accès libre)")
+
+# Static files & templates
+BASE_DIR = Path(__file__).parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Instances
 db = Database()
 notion = NotionClient()
