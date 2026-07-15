@@ -111,6 +111,24 @@ def test_parse_nature_defaults_recette():
     assert r["base"] == []
 
 
+def test_parse_portions_to_base_servings():
+    # Propriété « Portions » (number) → base_servings.
+    page = _page({
+        "Nom": {"type": "title", "title": [{"plain_text": "Pâtes"}]},
+        "Portions": {"number": 1},
+    })
+    assert notion._parse_page(page)["base_servings"] == 1
+
+
+def test_parse_portions_defaults_to_4():
+    # Portions absente ou <= 0 → défaut 4.
+    r = notion._parse_page(_page({"Nom": {"type": "title", "title": [{"plain_text": "X"}]}}))
+    assert r["base_servings"] == 4
+    page = _page({"Nom": {"type": "title", "title": [{"plain_text": "Y"}]},
+                  "Portions": {"number": 0}})
+    assert notion._parse_page(page)["base_servings"] == 4
+
+
 def test_parse_base_read_directly():
     # Base lue telle quelle depuis Notion (plus de dérivation legacy).
     page = _page({

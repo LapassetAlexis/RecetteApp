@@ -398,7 +398,7 @@ def test_detail_recette(client, monkeypatch):
 
 def test_ajouter_recette_manuel(client, monkeypatch):
     created = {}
-    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None, base_servings=None):
         created["nom"] = nom
         return {"id": "newid", "url": "https://notion/newid"}
     async def _noop(*a, **k):
@@ -407,6 +407,7 @@ def test_ajouter_recette_manuel(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "append_instructions", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     r = client.post("/ajouter-recette", data={
         "nom": "Gratin", "repas": "Plat", "ingredients_manual": "200 g pommes de terre\ncrème",
         "steps": ["Éplucher.", "Cuire au four."], "image_url": "http://img",
@@ -418,7 +419,7 @@ def test_ajouter_recette_manuel(client, monkeypatch):
 def test_ajouter_recette_types_multiples(client, monkeypatch):
     # Deux types cochés -> create_recipe reçoit la liste des deux.
     created = {}
-    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None, base_servings=None):
         created["repas"] = repas
         return {"id": "newid", "url": "https://notion/newid"}
     async def _noop(*a, **k):
@@ -427,6 +428,7 @@ def test_ajouter_recette_types_multiples(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "append_instructions", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     r = client.post("/ajouter-recette", data={
         "nom": "Cookie", "repas": ["Goûter", "Dessert"],
         "ingredients_manual": "200 g farine",
@@ -438,7 +440,7 @@ def test_ajouter_recette_types_multiples(client, monkeypatch):
 def test_ajouter_recette_ecrit_base(client, monkeypatch):
     # Les cases Base cochées -> create_recipe reçoit la liste des bases.
     created = {}
-    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None, base_servings=None):
         created["base"] = base
         created["nature"] = nature
         return {"id": "newid", "url": "https://notion/newid"}
@@ -448,6 +450,7 @@ def test_ajouter_recette_ecrit_base(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "append_instructions", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     r = client.post("/ajouter-recette", data={
         "nom": "Saumon grillé", "repas": "Plat", "base": ["Poisson", "Légume"],
         "ingredients_manual": "1 pavé de saumon",
@@ -482,6 +485,7 @@ def test_enrichir_submit_ecrit_base(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     r = client.post("/recette/abc/enrichir", data={
         "repas": "Plat", "base": ["Poisson"], "ingredients_text": "1 pavé de saumon",
     }, follow_redirects=False)
@@ -640,6 +644,7 @@ def test_enrichir_page_and_submit(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
     r = client.post("/recette/abc/enrichir", data={
         "repas": "Plat", "ingredients_text": "200 g riz\n1 oignon",
@@ -673,6 +678,7 @@ def test_enrichir_submit_types_multiples(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     r = client.post("/recette/abc/enrichir", data={
         "repas": ["Goûter", "Dessert"], "ingredients_text": "200 g farine",
     }, follow_redirects=False)
@@ -709,6 +715,7 @@ def test_enrichir_renomme_librement(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
     r = client.post("/recette/abc/enrichir", data={
         "nom": "Curry de légumes", "repas": "Plat",
@@ -768,6 +775,7 @@ def test_enrichir_demande_url_si_absente(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
     monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_url", _url)
     r = client.post("/recette/abc/enrichir", data={
@@ -1034,6 +1042,7 @@ def test_enrichir_submit_notion_echec(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _boom)  # Notion KO
     monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
     monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
 
     r = client.post("/recette/abc/enrichir", data={
@@ -1053,7 +1062,7 @@ def test_enrichir_submit_notion_echec(client, monkeypatch):
 def test_ajouter_recette_echec_ingredients(client, monkeypatch):
     """Échec de save ingrédients → error listant l'étape ; page créée signalée,
     pas de « succès » nu."""
-    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None):
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None, base_servings=None):
         return {"id": "newid", "url": "https://notion/newid"}
     async def _noop(*a, **k):
         return {}
@@ -1063,6 +1072,7 @@ def test_ajouter_recette_echec_ingredients(client, monkeypatch):
     monkeypatch.setattr(main.notion, "update_ingredients", _boom)
     monkeypatch.setattr(main.notion, "append_instructions", _noop)
     monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_portions", _noop)
 
     r = client.post("/ajouter-recette", data={
         "nom": "Gratin", "repas": "Plat",
@@ -1085,7 +1095,7 @@ def test_free_meal_creates_and_places(client, monkeypatch):
         return [poulet, soupe]
 
     created = {}
-    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="Recette", base=None):
+    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="Recette", base=None, base_servings=None):
         created["nom"] = nom
         created["repas"] = repas
         return {"id": "free1", "url": "https://notion.so/free1"}
@@ -1309,3 +1319,120 @@ def test_planning_apercu_non_monday(client, monkeypatch):
                       week_start="2026-07-14")
     d = client.get(f"/api/planning/{pid}/apercu").json()
     assert d["jours"] and d["jours"][0]["jour"] == "Mar"
+
+
+def test_scaling_par_base_servings_de_la_recette(client, monkeypatch):
+    """Le diviseur de mise à l'échelle est la base de portions PROPRE à chaque
+    recette (colonne cache), pas la constante globale.
+
+    - « Solo » : base 1, cache 100 g. Repas 2 pers → 2/1 = ×2 → 200 g.
+    - « Famille » : base 4, cache 100 g. Repas 2 pers → 2/4 = ×0.5 → 50 g."""
+    import asyncio
+
+    solo = _recipe("Solo", id="solo", base=["Féculent"])
+    famille = _recipe("Famille", id="fam", base=["Féculent"])
+
+    async def _all():
+        return [solo, famille]
+
+    caches = {
+        "solo": {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}]),
+                 "base_servings": 1},
+        "fam": {"ingredients": json.dumps([{"nom": "pates", "quantite": "100", "unite": "g"}]),
+                "base_servings": 4},
+    }
+
+    async def _enriched(nid):
+        return caches.get(nid)
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    pid = _construire(client, [_case(1, "midi", solo, persons=2),
+                               _case(1, "soir", famille, persons=2)])
+    shop = {i["nom"]: i for i in json.loads(
+        asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])["liste_courses"]}
+    assert shop["riz"]["quantite"] == "200"   # base 1 → ×2
+    assert shop["pates"]["quantite"] == "50"  # base 4 → ×0.5
+
+
+def test_scaling_defaut_4_si_base_absente(client, monkeypatch):
+    """Recette dont le cache n'a pas de base_servings → défaut 4 (comportement
+    identique à l'ancien BASE_SERVINGS global)."""
+    import asyncio
+
+    plat = _recipe("Plat", id="pl", base=["Féculent"])
+
+    async def _all():
+        return [plat]
+
+    async def _enriched(nid):
+        # Cache SANS base_servings (ligne « ancienne »).
+        return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    pid = _construire(client, [_case(1, "midi", plat, persons=4)])
+    shop = {i["nom"]: i for i in json.loads(
+        asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])["liste_courses"]}
+    assert shop["riz"]["quantite"] == "100"  # 4/4 = ×1
+
+
+def test_ajouter_recette_ecrit_base_servings(client, monkeypatch):
+    # Le champ Portions du formulaire → create_recipe + cache local.
+    created = {}
+    saved = {}
+    async def _create(nom, url="", repas="", tags=None, moment="", nature="Recette", base=None, base_servings=None):
+        created["base_servings"] = base_servings
+        return {"id": "newid", "url": "https://notion/newid"}
+    async def _save(*a, **k):
+        saved["base_servings"] = k.get("base_servings")
+        return None
+    async def _noop(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "create_recipe", _create)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "append_instructions", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    r = client.post("/ajouter-recette", data={
+        "nom": "Pâtes solo", "repas": "Plat", "base_servings": "1",
+        "ingredients_manual": "70 g pâtes",
+    })
+    assert r.status_code == 200 and "succès" in r.text
+    assert created["base_servings"] == 1
+    assert saved["base_servings"] == 1
+
+
+def test_enrichir_submit_ecrit_base_servings(client, monkeypatch):
+    # Le champ Portions → update_portions Notion + cache local base_servings.
+    async def _get(pid):
+        return _recipe("Pâtes", id="abc", url="http://r")
+    async def _enriched(nid):
+        return None
+    async def _instr(pid):
+        return []
+    portions = {}
+    saved = {}
+    async def _portions(page_id, n):
+        portions["n"] = n
+        return {}
+    async def _save(*a, **k):
+        saved["base_servings"] = k.get("base_servings")
+        return None
+    async def _noop(*a, **k):
+        return {}
+    monkeypatch.setattr(main.notion, "get_recipe", _get)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+    monkeypatch.setattr(main.notion, "get_recipe_instructions", _instr)
+    monkeypatch.setattr(main.notion, "update_portions", _portions)
+    monkeypatch.setattr(main.db, "save_enriched", _save)
+    monkeypatch.setattr(main.notion, "update_ingredients", _noop)
+    monkeypatch.setattr(main.notion, "rewrite_recipe_body", _noop)
+    monkeypatch.setattr(main.notion, "update_image", _noop)
+    monkeypatch.setattr(main.notion, "update_recipe_meta", _noop)
+    r = client.post("/recette/abc/enrichir", data={
+        "repas": "Plat", "base_servings": "1", "ingredients_text": "70 g pâtes",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert portions["n"] == 1
+    assert saved["base_servings"] == 1

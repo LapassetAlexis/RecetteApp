@@ -1,0 +1,112 @@
+[
+  {
+    "nom": "Pâtes crémeuses poulet et épinards",
+    "repas": ["Plat"],
+    "base": ["Viande", "Féculent"],
+    "tags": ["Pâtes", "Rapide"],
+    "moment": "Les deux",
+    "base_servings": 1,
+    "url": "",
+    "image": "",
+    "ingredients": [
+      "70 g pâtes sèches",
+      "120 g émincés de poulet cuit",
+      "150 g épinards frais",
+      "50 g fromage frais",
+      "1 cuillère à café huile d'olive",
+      "sel",
+      "poivre"
+    ],
+    "instructions": "Cuire les pâtes al dente, réserver un peu d'eau de cuisson.\nFaire tomber les épinards 3-4 min à l'huile d'olive.\nAjouter le poulet émincé, réchauffer 2 min.\nHors du feu vif, incorporer le fromage frais ; détendre avec un peu d'eau de cuisson.\nAjouter les pâtes, mélanger 1 min, saler/poivrer, servir."
+  },
+  {
+    "nom": "Pâtes aux crevettes, courgettes et citron",
+    "repas": ["Plat"],
+    "base": ["Poisson", "Féculent"],
+    "tags": ["Pâtes"],
+    "moment": "Les deux",
+    "base_servings": 1,
+    "url": "",
+    "image": "",
+    "ingredients": [
+      "70 g pâtes complètes",
+      "120 g crevettes décortiquées",
+      "1 courgette moyenne",
+      "1 gousse d'ail",
+      "1 filet de jus de citron",
+      "10 g huile d'olive",
+      "persil frais",
+      "sel",
+      "poivre"
+    ],
+    "instructions": "Cuire les pâtes al dente, égoutter.\nPoêler la courgette en dés dans la moitié de l'huile, saler/poivrer.\nDans une autre poêle, cuire l'ail et les crevettes (jus de citron, sel, poivre) 2-3 min par face.\nMélanger pâtes, courgettes, crevettes ; parsemer de persil."
+  },
+  {
+    "nom": "Salade de riz aux crevettes, concombre et mangue",
+    "repas": ["Plat"],
+    "base": ["Poisson", "Féculent"],
+    "tags": ["Salade", "Plat froid", "Été"],
+    "moment": "Les deux",
+    "base_servings": 1,
+    "url": "",
+    "image": "",
+    "ingredients": [
+      "74 g riz thaï ou basmati",
+      "110 g crevettes cuites décortiquées",
+      "100 g concombre",
+      "100 g mangue",
+      "1 filet de jus de citron vert",
+      "12 g huile d'olive",
+      "coriandre ou menthe fraîche",
+      "sel",
+      "poivre"
+    ],
+    "instructions": "Cuire le riz, égoutter et laisser refroidir.\nAjouter les crevettes.\nCouper concombre et mangue en dés, ajouter.\nVerser le jus de citron vert.\nMélanger, ajouter herbes ciselées et huile d'olive, saler/poivrer, réserver au frais."
+  },
+  {
+    "nom": "Pita façon kebab froid",
+    "repas": ["Plat"],
+    "base": ["Viande"],
+    "tags": ["Sandwich", "Sur le pouce", "Plat froid"],
+    "moment": "Les deux",
+    "base_servings": 1,
+    "url": "",
+    "image": "",
+    "ingredients": [
+      "1 pain pita",
+      "66 g poulet rôti émincé",
+      "66 g concombre",
+      "53 g tomates cerises",
+      "20 g oignon rouge",
+      "33 g fromage à tartiner",
+      "13 g salade verte",
+      "menthe fraîche",
+      "sel",
+      "poivre"
+    ],
+    "instructions": "Ouvrir le pita en poche (option : tiédir au grille-pain).\nÉmincer le poulet froid.\nCouper concombre, tomates cerises (en deux), oignon rouge émincé.\nMélanger le fromage à tartiner avec la menthe ciselée, sel, poivre.\nTartiner le pita, garnir de salade, poulet, légumes ; déguster frais."
+  },
+  {
+    "nom": "Salade tiède de pommes de terre, haricots verts et jambon",
+    "repas": ["Plat"],
+    "base": ["Viande", "Féculent", "Légume"],
+    "tags": ["Salade"],
+    "moment": "Les deux",
+    "base_servings": 1,
+    "url": "",
+    "image": "",
+    "ingredients": [
+      "240 g pommes de terre nouvelles",
+      "180 g haricots verts",
+      "48 g jambon cuit",
+      "75 g fromage blanc 0%",
+      "6 g moutarde",
+      "5 g jus de citron",
+      "6 g huile d'olive",
+      "persil frais",
+      "sel",
+      "poivre"
+    ],
+    "instructions": "Cuire les pommes de terre en morceaux 20-25 min, égoutter.\nÉgoutter les haricots verts, couper le jambon en lanières.\nFaire dorer le jambon 2-3 min à l'huile, ajouter les haricots 1-2 min.\nSauce : fromage blanc + moutarde + jus de citron + persil, sel, poivre.\nDresser pommes de terre tièdes + haricots/jambon, napper de sauce."
+  }
+]
