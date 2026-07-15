@@ -51,7 +51,8 @@ class Database:
                     cuisson_minutes INTEGER,
                     saison TEXT,
                     dernier_usage TEXT,
-                    nutrition TEXT
+                    nutrition TEXT,
+                    base_servings INTEGER DEFAULT 4
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_planning_recipes_recipe
@@ -80,6 +81,12 @@ class Database:
                 await db.execute("UPDATE planning_history SET valide = 1")
             if not await _has_column("enriched_recipes", "nutrition"):
                 await db.execute("ALTER TABLE enriched_recipes ADD COLUMN nutrition TEXT")
+            if not await _has_column("enriched_recipes", "base_servings"):
+                # Base de portions par recette (défaut 4 pour les lignes existantes,
+                # ce qui reproduit l'ancien comportement global BASE_SERVINGS=4).
+                await db.execute(
+                    "ALTER TABLE enriched_recipes ADD COLUMN base_servings INTEGER DEFAULT 4"
+                )
             await db.commit()
 
     # ── Historique des plannings ──────────────────────────────────
@@ -314,13 +321,14 @@ class Database:
         cuisson_minutes: int = 0,
         saison: str = "",
         nutrition: str = "",
+        base_servings: int = 4,
     ) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 """INSERT OR REPLACE INTO enriched_recipes
-                   (notion_id, recipe_name, ingredients, cuisson_minutes, saison, dernier_usage, nutrition)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
-                (notion_id, recipe_name, ingredients, cuisson_minutes, saison, nutrition),
+                   (notion_id, recipe_name, ingredients, cuisson_minutes, saison, dernier_usage, nutrition, base_servings)
+                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)""",
+                (notion_id, recipe_name, ingredients, cuisson_minutes, saison, nutrition, base_servings),
             )
             await db.commit()
 

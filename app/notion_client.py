@@ -154,6 +154,16 @@ class NotionClient:
         if sel:
             moment = sel.get("name", "")
 
+        # Portions (number) : base de portions de la recette. Absente ou <= 0 →
+        # défaut 4 (reproduit l'ancien comportement global BASE_SERVINGS).
+        base_servings = 4
+        portions = p.get("Portions", {}).get("number")
+        try:
+            if portions is not None and int(portions) > 0:
+                base_servings = int(portions)
+        except (TypeError, ValueError):
+            base_servings = 4
+
         # Image = couverture de la page (external ou fichier uploadé)
         image = ""
         cover = page.get("cover")
@@ -172,6 +182,7 @@ class NotionClient:
             "note": note,
             "etat": etat,
             "moment": moment,
+            "base_servings": base_servings,
             "image": image,
         }
 
@@ -187,6 +198,7 @@ class NotionClient:
         moment: str = "",
         nature: str = "",
         base: list[str] | str = "",
+        base_servings: int | None = None,
     ) -> dict[str, Any]:
         """Crée une nouvelle page dans la base de recettes."""
         properties: dict[str, Any] = {
@@ -195,6 +207,8 @@ class NotionClient:
             "URL": {"url": url or None},
             "État": {"status": {"name": etat}},
         }
+        if base_servings is not None:
+            properties["Portions"] = {"number": base_servings}
 
         repas_names = [repas] if isinstance(repas, str) else list(repas)
         repas_names = [n for n in repas_names if n]
@@ -428,6 +442,21 @@ class NotionClient:
                 f"{BASE_URL}/pages/{page_id}",
                 headers=self._headers,
                 json={"properties": {"URL": {"url": url}}},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            self.invalidate_cache()
+            return resp.json()
+
+    async def update_portions(self, page_id: str, n: int) -> dict[str, Any]:
+        """Met à jour la base de portions (propriété number « Portions »)."""
+        if not n or n <= 0:
+            return {}
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{BASE_URL}/pages/{page_id}",
+                headers=self._headers,
+                json={"properties": {"Portions": {"number": n}}},
                 timeout=30,
             )
             resp.raise_for_status()

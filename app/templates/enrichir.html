@@ -78,6 +78,11 @@
         </div>
 
         <div class="form-g">
+            <label for="base_servings">👤 Portions <small class="muted-sm">(nombre de personnes pour ces quantités)</small></label>
+            <input type="number" id="base_servings" name="base_servings" class="inp" min="1" step="1" value="{{ base_servings or 4 }}">
+        </div>
+
+        <div class="form-g">
             <label for="ingredients_text">🥦 Ingrédients <small class="muted-sm">(une ligne par ingrédient : « 200 g farine »)</small></label>
             <textarea id="ingredients_text" name="ingredients_text" rows="9" class="inp">{% for i in ingredients %}{{ [i.quantite, i.unite, i.nom]|select|join(' ') }}
 {% endfor %}</textarea>

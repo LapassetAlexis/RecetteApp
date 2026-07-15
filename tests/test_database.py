@@ -105,6 +105,20 @@ def test_enriched_cache_roundtrip(tmp_path):
     assert asyncio.run(db.get_enriched("inconnu")) is None
 
 
+def test_enriched_base_servings_default(tmp_path):
+    # Sans base_servings fourni : défaut 4 (reproduit l'ancien BASE_SERVINGS).
+    db = _db(tmp_path)
+    asyncio.run(db.save_enriched("n1", "Crepes", ingredients="[]"))
+    assert asyncio.run(db.get_enriched("n1"))["base_servings"] == 4
+
+
+def test_enriched_base_servings_roundtrip(tmp_path):
+    # base_servings explicite est persisté et relu tel quel.
+    db = _db(tmp_path)
+    asyncio.run(db.save_enriched("n1", "Pâtes", ingredients="[]", base_servings=1))
+    assert asyncio.run(db.get_enriched("n1"))["base_servings"] == 1
+
+
 def test_get_last_planning_empty(tmp_path):
     db = _db(tmp_path)
     assert asyncio.run(db.get_last_planning()) is None

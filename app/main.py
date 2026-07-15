@@ -229,7 +229,11 @@ async def _week_nutrition(plats: list[dict], day_labels: list[dict] | None = Non
             except (json.JSONDecodeError, TypeError):
                 nut = None
         if not nut:
-            nut = estimate_nutrition(ings, BASE_SERVINGS)
+            try:
+                base = int(cached.get("base_servings") or BASE_SERVINGS)
+            except (TypeError, ValueError):
+                base = BASE_SERVINGS
+            nut = estimate_nutrition(ings, base or BASE_SERVINGS)
         if nut:
             per_recipe[nid] = nut
 
@@ -593,7 +597,13 @@ async def _collect_shopping(
         clean: list[dict] = []
         for ing in ings:
             clean.extend(normalize_cached_ingredient(ing))
-        factor = _persons_for(src) / BASE_SERVINGS
+        # Diviseur = base de portions PROPRE à la recette (colonne cache), pas la
+        # constante globale : une recette « pour 1 » mise pour 2 pers → ×2.
+        try:
+            base = int(cached.get("base_servings") or BASE_SERVINGS)
+        except (TypeError, ValueError):
+            base = BASE_SERVINGS
+        factor = _persons_for(src) / (base or BASE_SERVINGS)
         for ing in scale_ingredients(clean, factor):
             ing["recette"] = title
             collected.append(ing)
@@ -656,6 +666,19 @@ async def detail_recette(request: Request, page_id: str):
             except (json.JSONDecodeError, TypeError):
                 ingredients = []
 
+        # Base de portions de CETTE recette : priorité au cache, repli sur la
+        # valeur Notion (Portions) lue par _parse_page, défaut 4.
+        base_servings = BASE_SERVINGS
+        try:
+            if cached and cached.get("base_servings"):
+                base_servings = int(cached["base_servings"])
+            elif recette.get("base_servings"):
+                base_servings = int(recette["base_servings"])
+        except (TypeError, ValueError):
+            base_servings = BASE_SERVINGS
+        if base_servings <= 0:
+            base_servings = BASE_SERVINGS
+
         # Instructions depuis les blocks Notion (best-effort)
         try:
             instructions = await notion.get_recipe_instructions(page_id)
@@ -678,7 +701,7 @@ async def detail_recette(request: Request, page_id: str):
                 src.setdefault("confiance", "Excellente")  # valeurs officielles du site
                 nutrition = src
         if not nutrition and ingredients:
-            nutrition = estimate_nutrition(ingredients, BASE_SERVINGS)
+            nutrition = estimate_nutrition(ingredients, base_servings)
 
         duree = cached.get("cuisson_minutes") if cached else 0
         return templates.TemplateResponse(
@@ -687,7 +710,7 @@ async def detail_recette(request: Request, page_id: str):
                 "request": request,
                 "recette": recette,
                 "ingredients": ingredients,
-                "base_servings": BASE_SERVINGS,
+                "base_servings": base_servings,
                 "instructions": instructions,
                 "nutrition": nutrition,
                 "duree": duree or 0,
@@ -744,6 +767,12 @@ async def enrichir_page(request: Request, page_id: str, url: str = ""):
         except Exception:
             instructions_text = ""
 
+    # Base de portions à pré-remplir : cache en priorité, sinon Notion, défaut 4.
+    base_servings = recette.get("base_servings") or BASE_SERVINGS
+    cached_bs = await db.get_enriched(page_id)
+    if cached_bs and cached_bs.get("base_servings"):
+        base_servings = cached_bs["base_servings"]
+
     return templates.TemplateResponse(
         "enrichir.html",
         {
@@ -754,6 +783,7 @@ async def enrichir_page(request: Request, page_id: str, url: str = ""):
             "image_url": image_url,
             "nutrition_json": json.dumps(nutrition_src),
             "duree_minutes": duree_minutes,
+            "base_servings": base_servings,
             "repas_options": REPAS_OPTIONS,
             "tag_options": TAG_OPTIONS,
             "base_options": BASE_OPTIONS,
@@ -778,6 +808,7 @@ async def enrichir_submit(
     image_url: str = Form(""),
     nutrition_json: str = Form(""),
     duree_minutes: int = Form(0),
+    base_servings: int = Form(4),
     source_url: str = Form(""),
 ):
     """Étape 2 : applique les changements validés à la recette Notion + cache."""
@@ -823,15 +854,19 @@ async def enrichir_submit(
         await _etape("titre", notion.update_recipe_title(page_id, nom_norm))
     if source_url and source_url != (recette.get("url") or ""):
         await _etape("URL source", notion.update_recipe_url(page_id, source_url))
+    # Base de portions : bornée à >= 1 (une valeur <= 0 retomberait sur le défaut).
+    bs = base_servings if base_servings and base_servings > 0 else 4
     if structured:
         # Cache local d'abord (distinct de Notion) : on note s'il a réussi.
         try:
             await db.save_enriched(page_id, nom_norm, ingredients=json.dumps(structured),
-                                   cuisson_minutes=duree_minutes or 0, nutrition=nutrition)
+                                   cuisson_minutes=duree_minutes or 0, nutrition=nutrition,
+                                   base_servings=bs)
             cache_local_ok = True
         except Exception:
             logger.exception("Erreur validation enrichissement : cache local")
         await _etape("ingrédients", notion.update_ingredients(page_id, _ingredients_to_text(structured)))
+    await _etape("portions", notion.update_portions(page_id, bs))
     if instructions_text:
         await _etape("instructions", notion.rewrite_recipe_body(page_id, instructions_text))
     if image_url:
@@ -865,6 +900,7 @@ async def enrichir_submit(
                 "image_url": image_url,
                 "nutrition_json": nutrition_json,
                 "duree_minutes": duree_minutes,
+                "base_servings": bs,
                 "repas_options": REPAS_OPTIONS,
                 "tag_options": TAG_OPTIONS,
                 "base_options": BASE_OPTIONS,
@@ -1700,6 +1736,7 @@ async def ajouter_recette(
     base: list[str] = Form([]),
     nature: str = Form("Recette"),
     moment: str = Form(""),
+    base_servings: int = Form(4),
     ingredients_manual: str = Form(""),
     steps: list[str] = Form([]),
     image_url: str = Form(""),
@@ -1726,6 +1763,7 @@ async def ajouter_recette(
             # Si que URL sans extraction
             pass
 
+        bs = base_servings if base_servings and base_servings > 0 else 4
         if not error:
             result = await notion.create_recipe(
                 nom=nom,
@@ -1735,6 +1773,7 @@ async def ajouter_recette(
                 moment=moment,
                 nature=nature,
                 base=base,
+                base_servings=bs,
             )
             page_id = result.get("id", "")
             recette_url = result.get("url", "")
@@ -1766,6 +1805,7 @@ async def ajouter_recette(
                 ]
                 await _etape("le cache local des ingrédients", db.save_enriched(
                     notion_id=page_id, recipe_name=nom, ingredients=json.dumps(ings_list),
+                    base_servings=bs,
                 ))
 
             if echecs:
