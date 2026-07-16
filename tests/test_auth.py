@@ -1,6 +1,5 @@
-"""Tests de l'auth HTTP Basic optionnelle."""
+"""Tests de l'auth par session (formulaire de login) optionnelle."""
 
-import base64
 import importlib
 import os
 
@@ -26,39 +25,43 @@ def _client(tmp_path, auth_user="", auth_password=""):
     return TestClient(main.app)
 
 
-def _basic(user, pwd):
-    token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
-
-
 def test_auth_desactivee_par_defaut(tmp_path):
     with _client(tmp_path) as c:
         assert c.get("/health").status_code == 200
-        # route protégée accessible sans identifiants quand l'auth est off
+        # route protégée accessible sans login quand l'auth est off
         assert c.get("/historique").status_code == 200
 
 
-def test_auth_active_refuse_sans_identifiants(tmp_path):
+def test_auth_active_redirige_vers_login(tmp_path):
     with _client(tmp_path, "chef", "secret") as c:
-        assert c.get("/historique").status_code == 401
-        assert "WWW-Authenticate" in c.get("/historique").headers
+        r = c.get("/historique", follow_redirects=False)
+        assert r.status_code == 303 and "/login" in r.headers["location"]
+        # API → 401 (pas de redirection)
+        assert c.get("/api/catalogue", follow_redirects=False).status_code == 401
 
 
-def test_auth_active_accepte_bons_identifiants(tmp_path):
+def test_auth_login_ouvre_session_persistante(tmp_path):
     with _client(tmp_path, "chef", "secret") as c:
-        r = c.get("/historique", headers=_basic("chef", "secret"))
-        assert r.status_code == 200
+        c.post("/login", data={"username": "chef", "password": "secret", "next": "/historique"})
+        # session ouverte → route protégée accessible, sans re-login
+        assert c.get("/historique").status_code == 200
+        # déconnexion → de nouveau protégé
+        c.get("/logout")
+        assert c.get("/historique", follow_redirects=False).status_code == 303
 
 
-def test_auth_active_refuse_mauvais_mot_de_passe(tmp_path):
+def test_auth_refuse_mauvais_mot_de_passe(tmp_path):
     with _client(tmp_path, "chef", "secret") as c:
-        r = c.get("/historique", headers=_basic("chef", "mauvais"))
+        r = c.post("/login", data={"username": "chef", "password": "mauvais"},
+                   follow_redirects=False)
         assert r.status_code == 401
+        assert c.get("/historique", follow_redirects=False).status_code == 303  # toujours protégé
 
 
-def test_health_public_meme_avec_auth(tmp_path):
+def test_health_et_login_publics_meme_avec_auth(tmp_path):
     with _client(tmp_path, "chef", "secret") as c:
         assert c.get("/health").status_code == 200
+        assert c.get("/login").status_code == 200
 
 
 @pytest.fixture(autouse=True)

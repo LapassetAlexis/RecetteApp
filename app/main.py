@@ -1,7 +1,5 @@
 """App FastAPI — Menu Planner avec génération IA."""
 
-import base64
-import binascii
 import json
 import logging
 import secrets
@@ -9,6 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
@@ -39,40 +38,6 @@ VERSION = "1.1.0"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=settings.app_title, version="1.0.0")
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
-
-# ── HTTP Basic Auth (optionnel) ────────────────────────────────
-import base64
-import secrets
-
-if settings.auth_user and settings.auth_password:
-    @app.middleware("http")
-    async def auth_middleware(request: Request, call_next):
-        if request.url.path == "/health":
-            return await call_next(request)
-
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Basic "):
-            try:
-                decoded = base64.b64decode(auth[6:]).decode("utf-8")
-                user, pwd = decoded.split(":", 1)
-                if secrets.compare_digest(user, settings.auth_user) and secrets.compare_digest(pwd, settings.auth_password):
-                    return await call_next(request)
-            except: pass
-
-        return Response(
-            status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="Menu Planner"'},
-            content="Authentification requise"
-        )
-    logger.info("🔒 Authentification HTTP Basic activée")
-else:
-    logger.info("🔓 Authentification désactivée (accès libre)")
-
-# Static files & templates
-BASE_DIR = Path(__file__).parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Instances
 db = Database()
 notion = NotionClient()
@@ -91,44 +56,37 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_title, version=VERSION, lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
-
-# Auth HTTP Basic optionnelle, activée seulement si AUTH_USER + AUTH_PASSWORD
-# sont définis. /health et /static restent publics (sondes, assets).
+# Auth par SESSION (formulaire de login), activée seulement si AUTH_USER +
+# AUTH_PASSWORD sont définis. Publics : sondes/assets, page de login, et
+# /courses/<token> (partage lecture seule, le token fait office d'accès).
 if settings.auth_enabled:
-    # /courses/<token> : partage public en lecture seule, le token fait office
-    # d'accès (pas d'auth Basic exigée sur ce préfixe).
-    _PUBLIC_PREFIXES = ("/health", "/static", "/courses/")
+    _PUBLIC_PREFIXES = ("/health", "/static", "/courses/", "/login", "/logout")
 
     @app.middleware("http")
-    async def basic_auth(request: Request, call_next):
-        if request.url.path.startswith(_PUBLIC_PREFIXES):
+    async def session_auth(request: Request, call_next):
+        if request.url.path.startswith(_PUBLIC_PREFIXES) or request.session.get("authed"):
             return await call_next(request)
+        # API → 401 JSON ; pages → redirection vers le formulaire de login.
+        if request.url.path.startswith("/api/"):
+            return Response("Authentification requise", status_code=401)
+        nxt = request.url.path
+        if request.url.query:
+            nxt += "?" + request.url.query
+        return RedirectResponse(url=f"/login?next={quote(nxt, safe='')}", status_code=303)
 
-        unauthorized = Response(
-            "Authentification requise",
-            status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="Menu Planner"'},
-        )
+    logger.info("🔒 Auth par session activée")
 
-        header = request.headers.get("Authorization", "")
-        if not header.startswith("Basic "):
-            return unauthorized
-        try:
-            decoded = base64.b64decode(header[6:]).decode("utf-8")
-            user, _, password = decoded.partition(":")
-        except (binascii.Error, UnicodeDecodeError):
-            return unauthorized
-
-        # compare_digest : comparaison à temps constant (anti timing attack)
-        ok_user = secrets.compare_digest(user, settings.auth_user)
-        ok_pass = secrets.compare_digest(password, settings.auth_password)
-        if not (ok_user and ok_pass):
-            return unauthorized
-
-        return await call_next(request)
-
-    logger.info("🔒 Auth HTTP Basic activée")
+# SessionMiddleware ajouté EN DERNIER → couche la plus EXTERNE → `request.session`
+# est disponible dans le middleware d'auth ci-dessus. Session persistante (cookie
+# signé, 30 j) : plus de re-login à chaque visite, le navigateur peut enregistrer
+# le mot de passe.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.secret_key,
+    max_age=60 * 60 * 24 * 30,          # 30 jours
+    same_site="lax",
+    https_only=False,                    # derrière un proxy éventuellement en HTTP
+)
 
 # Static files & templates
 BASE_DIR = Path(__file__).parent
@@ -2218,6 +2176,42 @@ async def service_worker():
         media_type="application/javascript",
         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
     )
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str = "/", error: str = ""):
+    """Formulaire de connexion (session). Publique."""
+    if not settings.auth_enabled or request.session.get("authed"):
+        return RedirectResponse(url=next or "/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "next": next, "error": error},
+    )
+
+
+@app.post("/login")
+async def login_submit(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    next: str = Form("/"),
+):
+    """Vérifie les identifiants → ouvre une session persistante (30 j)."""
+    ok = (secrets.compare_digest(username, settings.auth_user)
+          and secrets.compare_digest(password, settings.auth_password))
+    if not ok:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "next": next, "error": "Identifiants incorrects."},
+            status_code=401,
+        )
+    request.session["authed"] = True
+    return RedirectResponse(url=next or "/", status_code=303)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
 
 
 @app.get("/health")
