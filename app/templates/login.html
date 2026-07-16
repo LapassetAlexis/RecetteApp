@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Connexion{% endblock %}
+{% block content %}
+<div class="hero"><h1>🔒 Connexion</h1></div>
+
+<form method="POST" action="/login" class="card" style="max-width:380px;margin:0 auto;" autocomplete="on">
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+    <div class="form-g">
+        <label for="username">Identifiant</label>
+        <input type="text" id="username" name="username" class="inp" autocomplete="username"
+               autofocus required>
+    </div>
+    <div class="form-g">
+        <label for="password">Mot de passe</label>
+        <input type="password" id="password" name="password" class="inp"
+               autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="btn btn-primary btn-lg" style="margin-top:6px;">Se connecter</button>
+</form>
+{% endblock %}

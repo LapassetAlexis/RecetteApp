@@ -23,6 +23,7 @@
                 <a href="/recettes" class="{{ 'active' if path.startswith('/recette') else '' }}">Recettes</a>
                 <a href="/ajouter" class="{{ 'active' if path == '/ajouter' else '' }}">Ajouter</a>
                 <a href="/historique" class="{{ 'active' if path.startswith('/historique') or path.startswith('/planning') else '' }}">Historique</a>
+                {% if request.session.get('authed') %}<a href="/logout" title="Se déconnecter">Déconnexion</a>{% endif %}
             </div>
         </div>
     </nav>
