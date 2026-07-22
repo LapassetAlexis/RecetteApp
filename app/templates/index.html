@@ -65,17 +65,6 @@
 .pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
 .build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .build-actions .btn { flex: 1 1 220px; }
-.day-chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
-.day-chip { display: inline-flex; align-items: baseline; gap: 7px;
-    padding: 10px 16px; border: 1.5px solid var(--bo); border-radius: 999px; cursor: pointer;
-    background: var(--card, #fff); font-size: .95rem; font-weight: 600; user-select: none; transition: all .12s; }
-.day-chip:hover { border-color: var(--pr, #e67e22); }
-.day-chip small { font-size: .8rem; font-weight: 400; color: var(--t2); }
-.day-chip.sel { background: var(--pr, #e67e22); border-color: var(--pr, #e67e22); color: #fff; }
-.day-chip.sel small { color: rgba(255,255,255,.85); }
-.day-chips-tools { display: inline-flex; gap: 6px; align-items: center; margin-left: 4px; }
-.day-chips-tools button { border: none; background: transparent; color: var(--pr, #e67e22);
-    cursor: pointer; font-size: .82rem; text-decoration: underline; padding: 4px; }
 </style>
 
 <div class="hero">
@@ -90,19 +79,15 @@
 <form method="POST" action="/construire" class="card" id="bf">
     <div class="form-r">
         <div class="form-g">
-            <label for="week_start">📅 Date de début</label>
+            <label for="week_start">📅 Du</label>
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
-            <small class="hint">1<sup>er</sup> jour du planning (jour 1) ; les jours suivent.</small>
         </div>
-    </div>
-
-    <div class="form-r">
         <div class="form-g">
-            <label>🗓️ Jours à planifier</label>
-            <div class="day-chips" id="day-chips"><!-- chips injectés en JS --></div>
-            <small class="hint">Sélectionne les jours à générer (ex. une moitié de semaine). Les autres seront marqués « absent ».</small>
+            <label for="week_end">Au</label>
+            <input type="date" id="week_end">
         </div>
     </div>
+    <small class="hint" id="range-hint">Période du planning (jour 1 = date de début, max 7 jours).</small>
 
     <div class="build-wrap">
         <div class="build-grid" id="grid">
@@ -214,20 +199,27 @@ for (let d = 1; d <= 7; d++) {
     }
 }
 
-// Jours à planifier (chips multi-select). Nouveau planning → tous ; brouillon
-// rouvert → les jours qui portaient au moins un repas (persons > 0).
+// Période du planning : jours 1..N contigus (N = 1..7), pilotée par le date
+// range « Du / Au ». `activeDays` reste l'ensemble consommé par la grille, la
+// sérialisation et les groupes de midis (jours hors période → « absent »).
 const activeDays = new Set();
-(function initActiveDays() {
-    const seen = new Set();
+function nbDaysInitial() {
+    // Brouillon rouvert : dernier jour porteur d'un repas. Sinon semaine pleine.
+    let maxJour = 0;
     if (Array.isArray(INITIAL_BUILDER)) {
         for (const c of INITIAL_BUILDER) {
-            if (c && (parseInt(c.persons) || 0) > 0) seen.add(parseInt(c.jour));
+            if (c && (parseInt(c.persons) || 0) > 0) maxJour = Math.max(maxJour, parseInt(c.jour) || 0);
         }
     }
-    for (let d = 1; d <= 7; d++) {
-        if (seen.size === 0 || seen.has(d)) activeDays.add(d);
-    }
-})();
+    return maxJour > 0 ? maxJour : 7;
+}
+// Met à jour activeDays = {1..n} (n borné 1..7).
+function setNbDays(n) {
+    n = Math.max(1, Math.min(7, n));
+    activeDays.clear();
+    for (let d = 1; d <= n; d++) activeDays.add(d);
+}
+setNbDays(nbDaysInitial());
 
 // Hydratation depuis un brouillon : on écrase les cases avec les données
 // sauvegardées (persons/group/main/accompagnements). Les noms sont dans le
@@ -349,53 +341,48 @@ function cellHtml(c) {
     return h;
 }
 
-// Chips multi-select des jours à planifier. Toggle → re-render de la grille
-// (les jours non sélectionnés disparaissent et seront marqués « absent »).
-// Applique une sélection de jours (garde toujours >= 1 jour) puis re-render.
-function setActiveDays(days) {
-    if (!days.length) return;
-    activeDays.clear();
-    days.forEach(d => activeDays.add(d));
-    renderGrid();
+// ── Date range « Du / Au » → période contiguë de N jours ───────────
+function _parseDate(v) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '');
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
 }
-
-function renderDayChips() {
-    const box = document.getElementById('day-chips');
-    if (!box) return;
-    box.innerHTML = '';
-    for (let d = 1; d <= 7; d++) {
-        const info = dayInfo(d);
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'day-chip' + (activeDays.has(d) ? ' sel' : '');
-        chip.setAttribute('aria-pressed', activeDays.has(d) ? 'true' : 'false');
-        chip.innerHTML = `<span>${esc(info.court)}</span>` + (info.date ? `<small>${info.date}</small>` : '');
-        chip.addEventListener('click', () => {
-            if (activeDays.has(d)) {
-                if (activeDays.size === 1) return;   // garder au moins 1 jour
-                activeDays.delete(d);
-            } else {
-                activeDays.add(d);
-            }
-            renderGrid();
-        });
-        box.appendChild(chip);
+function _iso(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Écrit la date de fin = début + (N-1 jours) dans le champ « Au ».
+function syncEndInput() {
+    const start = _parseDate(document.getElementById('week_start').value);
+    const endEl = document.getElementById('week_end');
+    if (!start) { endEl.value = ''; return; }
+    const end = new Date(start);
+    end.setDate(end.getDate() + activeDays.size - 1);
+    endEl.value = _iso(end);
+    endEl.min = document.getElementById('week_start').value;
+    const maxEnd = new Date(start); maxEnd.setDate(maxEnd.getDate() + 6);
+    endEl.max = _iso(maxEnd);
+}
+// Recalcule la période depuis les deux champs (borné 1..7 jours) puis re-render.
+function applyRange() {
+    const start = _parseDate(document.getElementById('week_start').value);
+    const end = _parseDate(document.getElementById('week_end').value);
+    let n = activeDays.size;
+    if (start && end) {
+        const diff = Math.round((end - start) / 86400000);   // jours d'écart
+        n = diff + 1;
+        const hint = document.getElementById('range-hint');
+        if (diff < 0) { n = 1; if (hint) hint.textContent = 'La date de fin doit suivre la date de début — période ramenée à 1 jour.'; }
+        else if (diff > 6) { n = 7; if (hint) hint.textContent = 'Période limitée à 7 jours maximum.'; }
+        else if (hint) hint.textContent = `Période du planning : ${n} jour${n > 1 ? 's' : ''} (jour 1 = date de début, max 7 jours).`;
     }
-    // Raccourcis de sélection.
-    const tools = document.createElement('span');
-    tools.className = 'day-chips-tools';
-    [['Tout', [1,2,3,4,5,6,7]], ['Sem.', [1,2,3,4,5]], ['Week-end', [6,7]]].forEach(([lbl, days]) => {
-        const b = document.createElement('button');
-        b.type = 'button'; b.textContent = lbl;
-        b.addEventListener('click', () => setActiveDays(days));
-        tools.appendChild(b);
-    });
-    box.appendChild(tools);
+    setNbDays(n);
+    renderGrid();   // renderGrid resynchronise le champ « Au » via syncEndInput
 }
 
 function renderGrid() {
     consolidateGroups();  // un seul repas par groupe (sur le 1er jour actif)
-    renderDayChips();
+    syncEndInput();
     const grid = document.getElementById('grid');
     grid.querySelectorAll('.b-row-el').forEach(e => e.remove());
     for (let d = 1; d <= 7; d++) {
@@ -647,8 +634,10 @@ fetch('/api/catalogue')
     .then(data => { CATALOGUE = Array.isArray(data) ? data : []; })
     .catch(() => { CATALOGUE = []; });
 
-// Changer la date de début → recalcule les libellés de jours (grille + légende).
+// Date de début : garde la durée (N jours), décale la fin, relabelle la grille.
 document.getElementById('week_start').addEventListener('change', renderGrid);
+// Date de fin : recalcule la durée de la période depuis le range.
+document.getElementById('week_end').addEventListener('change', applyRange);
 
 renderGrid();
 </script>
