@@ -131,6 +131,31 @@ def test_construire_success_then_view(client, monkeypatch):
     assert client.get(r.headers["location"]).status_code == 200
 
 
+def test_construire_repas_libre(client, monkeypatch):
+    """Repas libre : titre saisi à la main (notion_id vide) → plat marqué `libre`,
+    aucun ingrédient dans les courses, rappel affiché sur la page planning."""
+    async def _all():
+        return [_recipe("Poulet", id="p1")]
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    # Case avec un main libre (pas de notion_id) : « Pizzas » le samedi soir.
+    case = {"jour": 6, "moment": "soir", "persons": 3,
+            "main": {"notion_id": "", "nom": "Pizzas", "nature": "Libre", "libre": True},
+            "accompagnements": []}
+    pid = _construire(client, [case])
+
+    # Le plat est bien marqué libre en base.
+    import asyncio
+    data = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])
+    plat = next(p for p in data["plats"] if p["nom_recette"] == "Pizzas")
+    assert plat["libre"] is True and plat["notion_id"] == ""
+    # Un repas libre ne produit aucun ingrédient de courses.
+    assert data["liste_courses"] == []
+
+    # La page planning affiche le rappel « Repas libres ».
+    html = client.get(f"/planning/{pid}").text
+    assert "Repas libre" in html and "Pizzas" in html
+
+
 def test_construire_sans_repas(client, monkeypatch):
     """Aucun repas choisi → on re-affiche le formulaire avec un message."""
     async def _all():
