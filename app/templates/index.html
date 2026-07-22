@@ -64,6 +64,13 @@
 .pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
 .build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .build-actions .btn { flex: 1 1 220px; }
+.day-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.day-chip { display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+    padding: 6px 12px; border: 1px solid var(--bo); border-radius: 999px; cursor: pointer;
+    background: var(--card, #fff); font-size: .85rem; user-select: none; transition: all .12s; }
+.day-chip small { font-size: .68rem; color: var(--t2); }
+.day-chip.sel { background: var(--pr, #e67e22); border-color: var(--pr, #e67e22); color: #fff; }
+.day-chip.sel small { color: rgba(255,255,255,.85); }
 </style>
 
 <div class="hero">
@@ -81,6 +88,14 @@
             <label for="week_start">📅 Date de début</label>
             <input type="date" id="week_start" name="week_start" value="{{ week_start }}" required>
             <small class="hint">1<sup>er</sup> jour du planning (jour 1) ; les jours suivent.</small>
+        </div>
+    </div>
+
+    <div class="form-r">
+        <div class="form-g">
+            <label>🗓️ Jours à planifier</label>
+            <div class="day-chips" id="day-chips"><!-- chips injectés en JS --></div>
+            <small class="hint">Sélectionne les jours à générer (ex. une moitié de semaine). Les autres seront marqués « absent ».</small>
         </div>
     </div>
 
@@ -194,6 +209,21 @@ for (let d = 1; d <= 7; d++) {
     }
 }
 
+// Jours à planifier (chips multi-select). Nouveau planning → tous ; brouillon
+// rouvert → les jours qui portaient au moins un repas (persons > 0).
+const activeDays = new Set();
+(function initActiveDays() {
+    const seen = new Set();
+    if (Array.isArray(INITIAL_BUILDER)) {
+        for (const c of INITIAL_BUILDER) {
+            if (c && (parseInt(c.persons) || 0) > 0) seen.add(parseInt(c.jour));
+        }
+    }
+    for (let d = 1; d <= 7; d++) {
+        if (seen.size === 0 || seen.has(d)) activeDays.add(d);
+    }
+})();
+
 // Hydratation depuis un brouillon : on écrase les cases avec les données
 // sauvegardées (persons/group/main/accompagnements). Les noms sont dans le
 // JSON, pas besoin du catalogue.
@@ -211,7 +241,8 @@ function hydrateBuilder(cases) {
             if (Number.isFinite(g)) cell.group = g;
         }
         cell.main = (c.main && c.main.nom)
-            ? { notion_id: c.main.notion_id || '', nom: c.main.nom, nature: c.main.nature || 'Recette' }
+            ? { notion_id: c.main.notion_id || '', nom: c.main.nom, nature: c.main.nature || 'Recette',
+                libre: !!c.main.libre || !c.main.notion_id }
             : null;
         cell.accompagnements = Array.isArray(c.accompagnements)
             ? c.accompagnements.filter(a => a && a.nom)
@@ -228,6 +259,10 @@ function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&l
 // Libellé du repas principal : lien (nouvel onglet) vers la recette, ou simple
 // texte pour une brique (Nature=Ingrédient, pas de fiche recette dédiée).
 function mainLabel(m) {
+    // Repas libre : titre saisi à la main, non lié à une recette.
+    if (m.libre || !m.notion_id) {
+        return `<span title="Repas libre (pense à acheter les ingrédients)">📝 ${esc(m.nom)}</span>`;
+    }
     const inner = '🍽️ ' + esc(m.nom);
     if (m.nature === 'Recette' && m.notion_id) {
         return `<a href="/recette/${encodeURIComponent(m.notion_id)}" target="_blank" rel="noopener" class="b-main-link" title="Ouvrir la recette">${inner}</a>`;
@@ -241,7 +276,7 @@ function mainLabel(m) {
 function midiEditorDay(group) {
     for (let d = 1; d <= 7; d++) {
         const c = state[d + ':midi'];
-        if (c.group === group && c.persons > 0) return d;
+        if (c.group === group && c.persons > 0 && activeDays.has(d)) return d;
     }
     return null;
 }
@@ -255,7 +290,7 @@ function consolidateGroups() {
     }
     for (const g in byGroup) {
         const all = byGroup[g];                      // triés par jour croissant
-        const active = all.filter(c => c.persons > 0);
+        const active = all.filter(c => c.persons > 0 && activeDays.has(c.jour));
         if (!active.length) continue;
         const editor = active[0];
         const src = all.find(c => c.main);           // repas existant (actif ou non)
@@ -309,11 +344,39 @@ function cellHtml(c) {
     return h;
 }
 
+// Chips multi-select des jours à planifier. Toggle → re-render de la grille
+// (les jours non sélectionnés disparaissent et seront marqués « absent »).
+function renderDayChips() {
+    const box = document.getElementById('day-chips');
+    if (!box) return;
+    box.innerHTML = '';
+    for (let d = 1; d <= 7; d++) {
+        const info = dayInfo(d);
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'day-chip' + (activeDays.has(d) ? ' sel' : '');
+        chip.setAttribute('aria-pressed', activeDays.has(d) ? 'true' : 'false');
+        chip.innerHTML = `<span>${esc(info.court)}</span>` + (info.date ? `<small>${info.date}</small>` : '');
+        chip.addEventListener('click', () => {
+            if (activeDays.has(d)) {
+                if (activeDays.size === 1) return;   // garder au moins 1 jour
+                activeDays.delete(d);
+            } else {
+                activeDays.add(d);
+            }
+            renderGrid();
+        });
+        box.appendChild(chip);
+    }
+}
+
 function renderGrid() {
     consolidateGroups();  // un seul repas par groupe (sur le 1er jour actif)
+    renderDayChips();
     const grid = document.getElementById('grid');
     grid.querySelectorAll('.b-row-el').forEach(e => e.remove());
     for (let d = 1; d <= 7; d++) {
+        if (!activeDays.has(d)) continue;   // jour non sélectionné : masqué
         const label = document.createElement('div');
         label.className = 'b-rowlabel b-row-el';
         label.textContent = dayLabel(d);
@@ -437,7 +500,24 @@ function renderPkList() {
     if (pkBase) items = items.filter(it => (it.base || []).includes(pkBase));
     if (q) items = items.filter(it => it.nom.toLowerCase().includes(q));
     items.sort((a, b) => a.nom.localeCompare(b.nom));
-    if (!items.length) { list.innerHTML = '<div class="pk-empty">Aucun résultat.</div>'; return; }
+    list.innerHTML = '';
+    // Repas libre : proposer d'utiliser le texte saisi comme titre non lié à une
+    // recette (mode « principal » uniquement, quand on a tapé quelque chose).
+    const rawQ = document.getElementById('pk-search').value.trim();
+    if (pkMode === 'main' && rawQ) {
+        const free = document.createElement('button');
+        free.type = 'button';
+        free.className = 'btn btn-ghost pk-free';
+        free.style.cssText = 'width:100%;text-align:left;margin-bottom:12px;';
+        free.innerHTML = `📝 Repas libre : « <strong>${esc(rawQ)}</strong> » <small>(sans recette, ingrédients à acheter à la main)</small>`;
+        free.addEventListener('click', () => chooseFree(rawQ));
+        list.appendChild(free);
+    }
+    if (!items.length) {
+        if (!list.childElementCount) list.innerHTML = '<div class="pk-empty">Aucun résultat.</div>';
+        else list.insertAdjacentHTML('beforeend', '<div class="pk-empty">Aucune recette existante.</div>');
+        return;
+    }
     // Cards façon page « Recettes » (classes globales réutilisées).
     const grid = document.createElement('div');
     grid.className = 'recettes-grid';
@@ -456,7 +536,6 @@ function renderPkList() {
         card.addEventListener('click', () => choose(it));
         grid.appendChild(card);
     });
-    list.innerHTML = '';
     list.appendChild(grid);
 }
 
@@ -485,6 +564,14 @@ function choose(it) {
     renderGrid();
 }
 
+// Repas libre : titre saisi à la main, non lié à une recette Notion.
+function chooseFree(nom) {
+    if (!pkCell || pkMode !== 'main') return;
+    pkCell.main = { notion_id: '', nom: nom, nature: 'Libre', libre: true };
+    closePicker();
+    renderGrid();
+}
+
 document.getElementById('pk-close').addEventListener('click', closePicker);
 document.getElementById('pk').addEventListener('click', e => { if (e.target.id === 'pk') closePicker(); });
 document.getElementById('pk-search').addEventListener('input', renderPkList);
@@ -493,10 +580,14 @@ document.getElementById('pk-search').addEventListener('input', renderPkList);
 function serialize() {
     consolidateGroups();  // 1 repas par groupe (sur le jour éditeur) avant envoi
     const arr = Object.values(state).map(c => {
-        const o = { jour: c.jour, moment: c.moment, persons: c.persons };
+        // Jour non sélectionné : émis « absent » (persons 0, sans repas) → il
+        // atterrit dans off_meals côté serveur. L'état mémoire n'est pas muté :
+        // re-sélectionner le jour restaure le repas saisi.
+        const on = activeDays.has(c.jour);
+        const o = { jour: c.jour, moment: c.moment, persons: on ? c.persons : 0 };
         if (c.moment === 'midi') o.group = c.group;
-        if (c.main) o.main = { notion_id: c.main.notion_id, nom: c.main.nom, nature: c.main.nature };
-        o.accompagnements = c.accompagnements.map(a => ({ notion_id: a.notion_id, nom: a.nom }));
+        if (on && c.main) o.main = { notion_id: c.main.notion_id, nom: c.main.nom, nature: c.main.nature, libre: !!c.main.libre };
+        o.accompagnements = on ? c.accompagnements.map(a => ({ notion_id: a.notion_id, nom: a.nom })) : [];
         return o;
     });
     document.getElementById('meals-input').value = JSON.stringify(arr);
@@ -511,7 +602,7 @@ document.querySelectorAll('#bf button[type="submit"]').forEach(btn => {
 document.getElementById('bf').addEventListener('submit', function (e) {
     serialize();
     document.getElementById('action-input').value = _submitAction;
-    const any = Object.values(state).some(c => c.persons > 0 && c.main);
+    const any = Object.values(state).some(c => activeDays.has(c.jour) && c.persons > 0 && c.main);
     if (!any) {
         e.preventDefault();
         alert('Choisis au moins un repas principal (case avec des convives).');

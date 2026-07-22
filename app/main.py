@@ -392,6 +392,7 @@ async def voir_planning(request: Request, planning_id: int):
             "week_nutrition": await _week_nutrition(plats, day_labels),
             "liste_courses": liste_courses,
             "courses_par_rayon": group_by_rayon(liste_courses),
+            "repas_libres": _repas_libres(plats, day_labels),
             "courses_checked": data.get("courses_checked", []),
             "rayon_order": RAYON_ORDER,
             "per_day": per_day,
@@ -1083,10 +1084,14 @@ def _parse_builder_meals(raw: str) -> list[dict]:
         nom = str(v.get("nom", "")).strip()
         if not nom:
             return None
+        nid = str(v.get("notion_id", "") or "")
         return {
-            "notion_id": str(v.get("notion_id", "") or ""),
+            "notion_id": nid,
             "nom": nom,
             "nature": v.get("nature") or "Recette",
+            # Repas libre : titre saisi à la main, non lié à une recette Notion
+            # (ex. « Pizzas »). Pas d'ingrédients en base → rappel dans les courses.
+            "libre": bool(v.get("libre")) or not nid,
         }
 
     out: list[dict] = []
@@ -1142,11 +1147,42 @@ def _build_plat(item: dict, jour: int, moment: str, persons: int,
         "repas": [],
         "tags": [],
         "accompagnements": [],
+        # Repas libre : voir _parse_builder_meals. Reporté pour l'affichage et le
+        # rappel « ingrédients à acheter » dans la liste de courses.
+        "libre": bool(item.get("libre")),
     }
     r = by_id.get(item.get("notion_id", ""))
     if r:
         _apply_recipe_info(plat, r)
     return plat
+
+
+def _repas_libres(plats: list[dict], day_labels: list[dict] | None = None) -> list[dict]:
+    """Repas libres du planning (titre saisi à la main, sans recette liée).
+
+    Renvoie [{nom, jour, moment, quand}] : sert de rappel « pense à acheter les
+    ingrédients » dans la liste de courses (ces repas ne contribuent aucun
+    ingrédient au cache, cf. _collect_shopping). `quand` = libellé humain
+    (ex. « samedi soir ») dérivé de day_labels si fourni."""
+    out: list[dict] = []
+    for p in plats:
+        if not p.get("libre"):
+            continue
+        jour, moment = p.get("jour"), p.get("moment")
+        jour_lbl = ""
+        try:
+            if day_labels and 1 <= int(jour) <= len(day_labels):
+                jour_lbl = day_labels[int(jour) - 1].get("long", "")
+        except (TypeError, ValueError):
+            pass
+        quand = " ".join(x for x in (jour_lbl.lower(), moment) if x).strip()
+        out.append({
+            "nom": clean_recipe_title(p.get("nom_recette", "")),
+            "jour": jour,
+            "moment": moment,
+            "quand": quand,
+        })
+    return out
 
 
 def _build_side(item: dict, by_id: dict[str, dict]) -> dict:
@@ -1469,6 +1505,9 @@ async def courses_public(request: Request, token: str):
         {
             "request": request,
             "courses_par_rayon": group_by_rayon(restants),
+            "repas_libres": _repas_libres(
+                data.get("plats", []), _day_labels(planning.get("week_start", "")),
+            ),
             "nb_restants": len(restants),
             "nb_total": len(liste_courses),
         },
@@ -1894,6 +1933,8 @@ async def api_update_meal(
         r = _index_by_name(await notion.get_all_recipes()).get(nouvelle_recette.lower().strip())
         if r:
             _apply_recipe_info(target, r)
+        # Nom inconnu au catalogue → repas libre (titre à la main, rappel courses).
+        target["libre"] = not bool(r)
         # Le plat principal change : ses accompagnements ne le concernent plus,
         # on repart d'une assiette vide (l'utilisateur les recompose ensuite).
         target["accompagnements"] = []
@@ -1964,6 +2005,7 @@ async def api_free_meal(planning_id: int, request: Request):
         # que de re-fetch tout le catalogue.
         target["nom_recette"] = nom
         target["notion_id"] = target["url"] = target["notion_url"] = ""
+        target["libre"] = False  # vraie recette Notion créée → plus un repas libre
         _apply_recipe_info(target, {
             "id": page_id,
             "url": "",                        # pas d'URL source pour un repas libre

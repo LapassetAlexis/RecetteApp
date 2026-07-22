@@ -58,7 +58,9 @@
     {% else %}
     <div class="meal-name">{{ plat.nom_recette | clean_title }}</div>
     {% endif %}
-    {% if plat.non_enrichi %}
+    {% if plat.libre %}
+    <span class="meal-warn" title="Repas libre : pense à acheter les ingrédients (voir la liste de courses).">📝 Repas libre</span>
+    {% elif plat.non_enrichi %}
     {% if plat.notion_id %}<a class="meal-warn" href="/recette/{{ plat.notion_id }}/enrichir" title="Recette pas terminée : aucun ingrédient enregistré. Clique pour l'enrichir.">⚠ À compléter</a>
     {% else %}<span class="meal-warn" title="Recette pas terminée : aucun ingrédient enregistré.">⚠ À compléter</span>{% endif %}
     {% endif %}
@@ -269,6 +271,16 @@
             {% endif %}
         </div>
     </div>
+    {% if repas_libres %}
+    <div class="shop-libre" title="Repas libres : pas d'ingrédients en base, à acheter à la main.">
+        <strong>📝 Repas libres — pense à acheter les ingrédients :</strong>
+        <ul>
+            {% for r in repas_libres %}
+            <li>{{ r.nom }}{% if r.quand %} <span class="shop-libre-when">({{ r.quand }})</span>{% endif %}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
     {% if liste_courses %}
     <div id="shop-g">
         {% for grp in courses_par_rayon %}
