@@ -2,20 +2,21 @@
 {% block title %}Construire un planning{% endblock %}
 {% block content %}
 <style>
-.build-wrap { overflow-x: auto; }
+.build-wrap { overflow-x: auto; margin-top: 8px; }
 .build-grid {
     display: grid;
     grid-template-columns: auto 1fr 1fr;
-    gap: 8px;
+    column-gap: 14px;
+    row-gap: 18px;
     min-width: 560px;
     align-items: stretch;
 }
 .b-colhead { text-align: center; font-weight: 700; padding: 4px 0; }
-.b-rowlabel { display: flex; align-items: center; font-weight: 700; padding-right: 6px; white-space: nowrap; }
+.b-rowlabel { display: flex; align-items: center; font-weight: 700; padding-right: 10px; white-space: nowrap; }
 .b-cell {
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 10px; border-radius: 12px;
-    border: 2px solid var(--bd, #ddd); background: var(--bg2, #fafafa);
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px; border-radius: 12px;
+    border: 1.5px solid var(--bd, #ddd); background: var(--bg2, #fafafa);
 }
 .b-cell.off { opacity: .5; filter: grayscale(1); }
 .b-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -64,13 +65,17 @@
 .pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
 .build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .build-actions .btn { flex: 1 1 220px; }
-.day-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-.day-chip { display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
-    padding: 6px 12px; border: 1px solid var(--bo); border-radius: 999px; cursor: pointer;
-    background: var(--card, #fff); font-size: .85rem; user-select: none; transition: all .12s; }
-.day-chip small { font-size: .68rem; color: var(--t2); }
+.day-chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.day-chip { display: inline-flex; align-items: baseline; gap: 7px;
+    padding: 10px 16px; border: 1.5px solid var(--bo); border-radius: 999px; cursor: pointer;
+    background: var(--card, #fff); font-size: .95rem; font-weight: 600; user-select: none; transition: all .12s; }
+.day-chip:hover { border-color: var(--pr, #e67e22); }
+.day-chip small { font-size: .8rem; font-weight: 400; color: var(--t2); }
 .day-chip.sel { background: var(--pr, #e67e22); border-color: var(--pr, #e67e22); color: #fff; }
 .day-chip.sel small { color: rgba(255,255,255,.85); }
+.day-chips-tools { display: inline-flex; gap: 6px; align-items: center; margin-left: 4px; }
+.day-chips-tools button { border: none; background: transparent; color: var(--pr, #e67e22);
+    cursor: pointer; font-size: .82rem; text-decoration: underline; padding: 4px; }
 </style>
 
 <div class="hero">
@@ -322,10 +327,10 @@ function cellHtml(c) {
             if (src.main) {
                 h += `<div class="b-main ro">${mainLabel(src.main)}</div>`;
                 src.accompagnements.forEach(a => { h += `<div class="b-side ro"><span>🥗 ${esc(a.nom)}</span></div>`; });
+                h += `<small class="b-follow-note">↳ même repas que ${dayInfo(ed).court}</small>`;
             } else {
-                h += `<span class="b-follow-note">à définir sur ${dayInfo(ed).court}</span>`;
+                h += `<small class="b-follow-note">↳ même repas que ${dayInfo(ed).court} <em>(à définir)</em></small>`;
             }
-            h += `<small class="b-follow-note">↳ même repas que ${dayInfo(ed).court}</small>`;
             h += '</div>';
             return h;
         }
@@ -346,6 +351,14 @@ function cellHtml(c) {
 
 // Chips multi-select des jours à planifier. Toggle → re-render de la grille
 // (les jours non sélectionnés disparaissent et seront marqués « absent »).
+// Applique une sélection de jours (garde toujours >= 1 jour) puis re-render.
+function setActiveDays(days) {
+    if (!days.length) return;
+    activeDays.clear();
+    days.forEach(d => activeDays.add(d));
+    renderGrid();
+}
+
 function renderDayChips() {
     const box = document.getElementById('day-chips');
     if (!box) return;
@@ -368,6 +381,16 @@ function renderDayChips() {
         });
         box.appendChild(chip);
     }
+    // Raccourcis de sélection.
+    const tools = document.createElement('span');
+    tools.className = 'day-chips-tools';
+    [['Tout', [1,2,3,4,5,6,7]], ['Sem.', [1,2,3,4,5]], ['Week-end', [6,7]]].forEach(([lbl, days]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = lbl;
+        b.addEventListener('click', () => setActiveDays(days));
+        tools.appendChild(b);
+    });
+    box.appendChild(tools);
 }
 
 function renderGrid() {
