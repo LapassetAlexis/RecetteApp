@@ -669,12 +669,16 @@ function copyShop() {
         lines.push('');
     }
     document.querySelectorAll('.shop-rayon').forEach(sec=>{
-        const r=sec.dataset.rayon; lines.push(`\n— ${r} —`);
+        // Uniquement les articles NON cochés (déjà achetés = exclus).
+        const items=[];
         sec.querySelectorAll('.shop-i').forEach(l=>{
+            if(l.querySelector('.shop-c')?.checked) return;
             const nom=l.querySelector('span').textContent.trim();
             const q=l.querySelector('small')?.textContent.trim();
-            lines.push(`- ${nom}${q?` (${q})`:''}`);
+            items.push(`- ${nom}${q?` (${q})`:''}`);
         });
+        if(!items.length) return;   // rayon entièrement coché → omis
+        lines.push(`\n— ${sec.dataset.rayon} —`, ...items);
     });
     copyText(lines.join('\n').trim(), 'Liste copiée ✓');
 }
