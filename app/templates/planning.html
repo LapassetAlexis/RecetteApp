@@ -263,8 +263,10 @@
         <h2>🛒 Liste de courses</h2>
         <div style="display:flex;align-items:center;gap:8px;">
             <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
-            {% if liste_courses %}
+            {% if liste_courses or repas_libres %}
             <button class="btn btn-ghost btn-sm" id="btn-copy" onclick="copyShop()" title="Copier la liste">📋 Copier</button>
+            {% endif %}
+            {% if liste_courses %}
             <button class="btn btn-ghost btn-sm" id="btn-share" onclick="partagerListe()" title="Lien de partage public (lecture seule)">🔗 Partager la liste</button>
             <button class="btn btn-ghost btn-sm" onclick="window.print()" title="Imprimer la liste">🖨️</button>
             <button class="btn btn-ghost btn-sm" id="btn-regen" onclick="genShop(true)" title="Régénérer la liste">↻</button>
@@ -640,6 +642,13 @@ function copyMenu() {
 }
 function copyShop() {
     const lines=[];
+    // Repas libres (rappel « ingrédients à acheter ») en tête de liste.
+    const libres=document.querySelectorAll('.shop-libre li');
+    if(libres.length){
+        lines.push('📝 Repas libres (ingrédients à acheter) :');
+        libres.forEach(li=>lines.push(`- ${li.textContent.trim().replace(/\s+/g,' ')}`));
+        lines.push('');
+    }
     document.querySelectorAll('.shop-rayon').forEach(sec=>{
         const r=sec.dataset.rayon; lines.push(`\n— ${r} —`);
         sec.querySelectorAll('.shop-i').forEach(l=>{
