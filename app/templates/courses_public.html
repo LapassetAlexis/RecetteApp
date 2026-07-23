@@ -92,13 +92,25 @@
         const txt = lines.join('\n').trim();
         const btn = document.getElementById('pub-copy');
         const done = () => { btn.textContent = '✓ Copié'; setTimeout(() => btn.textContent = '📋 Copier', 1500); };
-        navigator.clipboard.writeText(txt).then(done, () => {
-            // Repli si l'API clipboard est refusée (http, anciens navigateurs).
+        const fail = () => { btn.textContent = '✗ Échec'; setTimeout(() => btn.textContent = '📋 Copier', 1500); };
+        // Repli execCommand : hors contexte sécurisé (http via IP locale sur
+        // mobile), navigator.clipboard est ABSENT → l'appel jetterait une
+        // exception synchrone. On teste donc son existence avant de l'utiliser.
+        const legacy = () => {
             const ta = document.createElement('textarea');
-            ta.value = txt; document.body.appendChild(ta); ta.select();
-            try { document.execCommand('copy'); done(); } catch (e) { btn.textContent = '✗ Échec'; }
+            ta.value = txt;
+            ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
             ta.remove();
-        });
+            ok ? done() : fail();
+        };
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(txt).then(done, legacy);
+        } else {
+            legacy();
+        }
     }
     </script>
 </body>

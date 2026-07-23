@@ -618,6 +618,26 @@ async function enrichWeek() {
         if (b) { b.disabled = false; b.textContent = old; }
     }
 }
+// Copie robuste : hors contexte sécurisé (http via IP locale sur mobile),
+// navigator.clipboard est ABSENT et l'appel jetterait une exception synchrone.
+// On teste son existence, sinon repli execCommand sur un textarea temporaire.
+function copyText(txt, okMsg) {
+    const legacy = () => {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        ta.remove();
+        toast(ok ? okMsg : 'Copie impossible', ok ? 'success' : 'error');
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(txt).then(() => toast(okMsg, 'success'), legacy);
+    } else {
+        legacy();
+    }
+}
 function copyMenu() {
     const days = {};  // jour -> {midi, soir}
     document.querySelectorAll('.meal').forEach(cell => {
@@ -637,8 +657,7 @@ function copyMenu() {
         if (days[j].midi) lines.push(`  ☀️ ${days[j].midi}`);
         if (days[j].soir) lines.push(`  🌙 ${days[j].soir}`);
     }
-    navigator.clipboard.writeText(lines.join('\n').trim())
-        .then(() => toast('Menu copié ✓', 'success'), () => toast('Copie impossible', 'error'));
+    copyText(lines.join('\n').trim(), 'Menu copié ✓');
 }
 function copyShop() {
     const lines=[];
@@ -657,8 +676,7 @@ function copyShop() {
             lines.push(`- ${nom}${q?` (${q})`:''}`);
         });
     });
-    const txt=lines.join('\n').trim();
-    navigator.clipboard.writeText(txt).then(()=>toast('Liste copiée ✓','success'),()=>toast('Copie impossible','error'));
+    copyText(lines.join('\n').trim(), 'Liste copiée ✓');
 }
 async function genShop(regen) {
     const btn=document.getElementById('btn-shop') || document.getElementById('btn-regen');
