@@ -611,6 +611,8 @@ def test_partager_et_courses_public(client, monkeypatch):
     page = client.get(d["url"])
     assert page.status_code == 200
     assert "riz" in page.text.lower()
+    # bouton d'export texte présent + son handler
+    assert 'id="pub-copy"' in page.text and "function copyList" in page.text
 
     # une fois coché, l'item disparaît de la page publique
     client.post(f"/api/shopping-check/{pid}", json={"item": "riz", "checked": True})

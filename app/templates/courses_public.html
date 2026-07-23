@@ -15,6 +15,9 @@
         .pub-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
         .pub-h h1 { font-size: 1.4rem; margin: 0; }
         .pub-count { color: var(--t2); font-size: .95rem; }
+        .pub-copy { margin-left: auto; cursor: pointer; border: 1px solid var(--bo); border-radius: 8px;
+            background: var(--card, #fff); color: var(--t1); font-size: .9rem; padding: 8px 14px; }
+        .pub-copy:active { transform: scale(.97); }
         .shop-i { pointer-events: none; }
         .pub-empty { text-align: center; padding: 40px 16px; color: var(--t2); }
         .pub-empty p:first-child { font-size: 1.4rem; margin-bottom: 8px; }
@@ -26,6 +29,9 @@
             <h1>🛒 Liste de courses</h1>
             {% if nb_total %}
             <span class="pub-count">{{ nb_restants }} / {{ nb_total }} restant{{ 's' if nb_restants > 1 else '' }}</span>
+            {% endif %}
+            {% if courses_par_rayon or repas_libres %}
+            <button type="button" class="pub-copy" id="pub-copy" onclick="copyList()">📋 Copier</button>
             {% endif %}
         </div>
 
@@ -64,5 +70,36 @@
         </div>
         {% endif %}
     </main>
+    <script>
+    // Export texte de la liste (repas libres + articles groupés par rayon).
+    function copyList() {
+        const lines = [];
+        const libres = document.querySelectorAll('.shop-libre li');
+        if (libres.length) {
+            lines.push('📝 Repas libres (ingrédients à acheter) :');
+            libres.forEach(li => lines.push(`- ${li.textContent.trim().replace(/\s+/g, ' ')}`));
+            lines.push('');
+        }
+        document.querySelectorAll('.shop-rayon').forEach(sec => {
+            lines.push(`— ${sec.dataset.rayon} —`);
+            sec.querySelectorAll('.shop-i').forEach(l => {
+                const nom = l.querySelector('span').textContent.trim();
+                const q = l.querySelector('small')?.textContent.trim();
+                lines.push(`- ${nom}${q ? ` (${q})` : ''}`);
+            });
+            lines.push('');
+        });
+        const txt = lines.join('\n').trim();
+        const btn = document.getElementById('pub-copy');
+        const done = () => { btn.textContent = '✓ Copié'; setTimeout(() => btn.textContent = '📋 Copier', 1500); };
+        navigator.clipboard.writeText(txt).then(done, () => {
+            // Repli si l'API clipboard est refusée (http, anciens navigateurs).
+            const ta = document.createElement('textarea');
+            ta.value = txt; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { btn.textContent = '✗ Échec'; }
+            ta.remove();
+        });
+    }
+    </script>
 </body>
 </html>
