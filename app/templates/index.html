@@ -65,6 +65,22 @@
 .pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
 .build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .build-actions .btn { flex: 1 1 220px; }
+
+/* Mobile : une seule colonne (midi puis soir empilés) — la grille 3 colonnes
+   à min-width 560px provoquait un scroll horizontal sur téléphone. */
+@media (max-width: 700px) {
+    .build-wrap { overflow-x: visible; }
+    .build-grid { grid-template-columns: 1fr; min-width: 0; row-gap: 10px; }
+    .b-colhead { display: none; }              /* l'entête Midi/Soir est portée par chaque case */
+    .b-rowlabel {
+        padding: 6px 10px; margin-top: 8px; border-radius: 8px;
+        background: var(--bg3, #eee);
+    }
+    .b-cell::before {
+        content: attr(data-moment-label);
+        font-size: .78rem; font-weight: 700; color: var(--t2, #777);
+    }
+}
 </style>
 
 <div class="hero">
@@ -243,7 +259,8 @@ function hydrateBuilder(cases) {
             : null;
         cell.accompagnements = Array.isArray(c.accompagnements)
             ? c.accompagnements.filter(a => a && a.nom)
-                .map(a => ({ notion_id: a.notion_id || '', nom: a.nom, nature: a.nature || 'Recette' }))
+                .map(a => ({ notion_id: a.notion_id || '', nom: a.nom, nature: a.nature || 'Recette',
+                             libre: !!a.libre || !a.notion_id }))
             : [];
     }
 }
@@ -266,6 +283,10 @@ function mainLabel(m) {
     }
     return `<span>${inner}</span>`;
 }
+
+// Accompagnement libre (saisi à la main, sans recette) : même pictogramme que
+// le repas libre pour rappeler qu'il n'apporte aucun ingrédient en base.
+function sideIcon(a) { return (a.libre || !a.notion_id) ? '📝' : '🥗'; }
 
 // ── Groupes de midis : 1 seul repas par groupe ─────────────────────
 // Le repas d'un groupe est édité sur le PREMIER jour ACTIF du groupe ; les
@@ -303,7 +324,10 @@ function consolidateGroups() {
 function cellHtml(c) {
     const col = c.moment === 'midi' ? GROUP_COLORS[(c.group - 1) % GROUP_COLORS.length] : '';
     const off = c.persons === 0;
-    let h = `<div class="b-cell${off ? ' off' : ''}" data-key="${c.jour}:${c.moment}"`
+    // data-moment-label : entête « ☀️ Midi / 🌙 Soir » affichée DANS la case en
+    // mobile (les colonnes disparaissent, cf. media query).
+    const momentLabel = c.moment === 'midi' ? '☀️ Midi' : '🌙 Soir';
+    let h = `<div class="b-cell${off ? ' off' : ''}" data-moment-label="${momentLabel}" data-key="${c.jour}:${c.moment}"`
           + (c.moment === 'midi' && !off ? ` style="border-color:${col}"` : '') + '>';
     h += '<div class="b-top">';
     h += `<div><span class="b-pers-lbl">👥</span> <input type="number" class="b-pers" min="0" max="20" value="${c.persons}" title="Convives (0 = absent)"></div>`;
@@ -318,7 +342,7 @@ function cellHtml(c) {
             const src = state[ed + ':midi'];
             if (src.main) {
                 h += `<div class="b-main ro">${mainLabel(src.main)}</div>`;
-                src.accompagnements.forEach(a => { h += `<div class="b-side ro"><span>🥗 ${esc(a.nom)}</span></div>`; });
+                src.accompagnements.forEach(a => { h += `<div class="b-side ro"><span>${sideIcon(a)} ${esc(a.nom)}</span></div>`; });
                 h += `<small class="b-follow-note">↳ même repas que ${dayInfo(ed).court}</small>`;
             } else {
                 h += `<small class="b-follow-note">↳ même repas que ${dayInfo(ed).court} <em>(à définir)</em></small>`;
@@ -331,7 +355,7 @@ function cellHtml(c) {
         h += `<div class="b-main">${mainLabel(c.main)}<button type="button" class="b-x" data-act="clear-main" title="Retirer">✕</button></div>`;
         for (let i = 0; i < c.accompagnements.length; i++) {
             const a = c.accompagnements[i];
-            h += `<div class="b-side"><span>🥗 ${esc(a.nom)}</span><button type="button" class="b-x" data-act="rm-side" data-i="${i}" title="Retirer">✕</button></div>`;
+            h += `<div class="b-side"><span>${sideIcon(a)} ${esc(a.nom)}</span><button type="button" class="b-x" data-act="rm-side" data-i="${i}" title="Retirer">✕</button></div>`;
         }
         h += `<button type="button" class="b-add" data-act="add-side">+ accompagnement</button>`;
     } else {
@@ -511,15 +535,16 @@ function renderPkList() {
     if (q) items = items.filter(it => it.nom.toLowerCase().includes(q));
     items.sort((a, b) => a.nom.localeCompare(b.nom));
     list.innerHTML = '';
-    // Repas libre : proposer d'utiliser le texte saisi comme titre non lié à une
-    // recette (mode « principal » uniquement, quand on a tapé quelque chose).
+    // Libre : proposer d'utiliser le texte saisi comme titre non lié à une
+    // recette — valable pour le plat principal ET l'accompagnement.
     const rawQ = document.getElementById('pk-search').value.trim();
-    if (pkMode === 'main' && rawQ) {
+    if (rawQ) {
         const free = document.createElement('button');
         free.type = 'button';
         free.className = 'btn btn-ghost pk-free';
         free.style.cssText = 'width:100%;text-align:left;margin-bottom:12px;';
-        free.innerHTML = `📝 Repas libre : « <strong>${esc(rawQ)}</strong> » <small>(sans recette, ingrédients à acheter à la main)</small>`;
+        const lbl = pkMode === 'main' ? '📝 Repas libre' : '📝 Accompagnement libre';
+        free.innerHTML = `${lbl} : « <strong>${esc(rawQ)}</strong> » <small>(sans recette, ingrédients à acheter à la main)</small>`;
         free.addEventListener('click', () => chooseFree(rawQ));
         list.appendChild(free);
     }
@@ -574,10 +599,16 @@ function choose(it) {
     renderGrid();
 }
 
-// Repas libre : titre saisi à la main, non lié à une recette Notion.
+// Libre : titre saisi à la main, non lié à une recette Notion (plat ou
+// accompagnement). Aucun ingrédient en base → rappel dans la liste de courses.
 function chooseFree(nom) {
-    if (!pkCell || pkMode !== 'main') return;
-    pkCell.main = { notion_id: '', nom: nom, nature: 'Libre', libre: true };
+    if (!pkCell) return;
+    const item = { notion_id: '', nom: nom, nature: 'Libre', libre: true };
+    if (pkMode === 'main') {
+        pkCell.main = item;
+    } else if (!pkCell.accompagnements.some(a => a.nom === nom)) {
+        pkCell.accompagnements.push(item);
+    }
     closePicker();
     renderGrid();
 }
@@ -597,7 +628,10 @@ function serialize() {
         const o = { jour: c.jour, moment: c.moment, persons: on ? c.persons : 0 };
         if (c.moment === 'midi') o.group = c.group;
         if (on && c.main) o.main = { notion_id: c.main.notion_id, nom: c.main.nom, nature: c.main.nature, libre: !!c.main.libre };
-        o.accompagnements = on ? c.accompagnements.map(a => ({ notion_id: a.notion_id, nom: a.nom })) : [];
+        o.accompagnements = on
+            ? c.accompagnements.map(a => ({ notion_id: a.notion_id, nom: a.nom,
+                                            nature: a.nature, libre: !!a.libre || !a.notion_id }))
+            : [];
         return o;
     });
     document.getElementById('meals-input').value = JSON.stringify(arr);

@@ -49,7 +49,15 @@
 {% macro meal_inner(run, moment, plat, daylabel) %}
     <div class="meal-head">
         <label class="meal-cb"><input type="checkbox" class="ck" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}"> <span class="meal-tag">{{ daylabel }}</span></label>
-        {% if plat.persons %}<span class="meal-pers" title="Personnes pour ce repas">👤 {{ plat.persons }}</span>{% endif %}
+        {# Case fusionnée (même repas sur N jours) : la liste de courses compte
+           N repas, on l'affiche explicitement (👤 2 × 3 j = 6 parts). #}
+        {% if plat.persons %}
+        {% if run.span > 1 %}
+        <span class="meal-pers" title="{{ run.span }} jours cuisinés en une fois = {{ run.parts }} parts comptées dans la liste de courses">👤 {{ run.parts }} parts · {{ run.span }} j</span>
+        {% else %}
+        <span class="meal-pers" title="Personnes pour ce repas">👤 {{ plat.persons }}</span>
+        {% endif %}
+        {% endif %}
         <button class="meal-ch" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
     </div>
     {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
@@ -70,7 +78,7 @@
         <span class="side-item">
             <span class="side-txt">+
             {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
-            {% else %}{{ acc.nom_recette | clean_title }}{% endif %}{% if acc.non_enrichi %} <span class="side-warn" title="Accompagnement pas terminé : aucun ingrédient enregistré.">⚠</span>{% endif %}</span>
+            {% else %}{{ acc.nom_recette | clean_title }}{% endif %}{% if acc.libre or not acc.notion_id %} <span class="side-warn" title="Accompagnement libre : pense à acheter les ingrédients (voir la liste de courses).">📝</span>{% elif acc.non_enrichi %} <span class="side-warn" title="Accompagnement pas terminé : aucun ingrédient enregistré.">⚠</span>{% endif %}</span>
             <button class="side-ch" data-nom="{{ acc.nom_recette }}" title="Changer cet accompagnement">↻</button>
             <button class="side-rm" data-nom="{{ acc.nom_recette }}" title="Retirer cet accompagnement">✕</button>
         </span>
@@ -293,7 +301,10 @@
                 <label class="shop-i" data-item="{{ item.nom|lower }}">
                     <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
                     {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
-                    {% if item.recettes %}<span class="shop-src" title="{{ item.recettes | join(' · ') }}">🍽</span>{% endif %}
+                    {% if item.recettes %}
+                    <button type="button" class="shop-src" title="{{ item.recettes | join(' · ') }}" aria-label="Voir les recettes liées">🍽</button>
+                    <span class="shop-srcs">🍽 {{ item.recettes | join(' · ') }}</span>
+                    {% endif %}
                 </label>
                 {% endfor %}
             </div>
@@ -393,6 +404,15 @@ function bindShopItems() {
     });
 }
 bindShopItems();
+// 🍽 « recettes liées » : le title ne s'affiche pas au doigt → un tap déplie la
+// liste sous l'ingrédient (sans cocher la case du label).
+document.addEventListener('click', e => {
+    const b = e.target.closest('.shop-src');
+    if (!b) return;
+    e.preventDefault();
+    e.stopPropagation();
+    b.closest('.shop-i')?.classList.toggle('src-open');
+});
 flushQueue();  // rejoue les changements offline en attente
 
 // ── Partage public de la liste (lecture seule, non coché uniquement) ──
@@ -515,10 +535,19 @@ async function rpl(n) {
 
 // ── Repas libre : crée une recette minimale et la place dans le(s) créneau(x) ──
 function resetFree(){
-    // Repas libre : seulement en mode « changer recette » (pas en accompagnement).
-    document.getElementById('free-meal').style.display = sideMode ? 'none' : 'block';
+    // Libre : plat (crée une recette minimale) OU accompagnement (simple titre
+    // sans recette, rappelé dans la liste de courses).
+    document.getElementById('free-meal').style.display = 'block';
+    document.getElementById('free-toggle').textContent =
+        sideMode ? '➕ Accompagnement libre' : '➕ Repas libre';
     document.getElementById('free-form').style.display = 'none';
     document.getElementById('free-nom').value = '';
+    document.getElementById('free-nom').placeholder = sideMode
+        ? "Nom de l'accompagnement (ex. Salade verte)"
+        : 'Nom du repas (ex. Steak + haricots verts)';
+    // Pas d'ingrédients pour un accompagnement libre : rien n'est créé en base.
+    document.getElementById('free-ings').style.display = sideMode ? 'none' : 'block';
+    document.getElementById('free-go').textContent = sideMode ? 'Ajouter' : 'Créer et placer';
     document.getElementById('free-ings').value = '';
     // Brique : disponible dans les deux modes (plat ou accompagnement).
     document.getElementById('brique-box').style.display = 'block';
@@ -538,7 +567,15 @@ document.getElementById('free-toggle').onclick = function(){
 document.getElementById('free-go').onclick = async function(){
     const nom = document.getElementById('free-nom').value.trim();
     const ingredients = document.getElementById('free-ings').value;
-    if(!nom){ toast('Donne un nom au repas', 'error'); return; }
+    if(!nom){ toast(sideMode ? "Donne un nom à l'accompagnement" : 'Donne un nom au repas', 'error'); return; }
+    // Accompagnement libre : simple ajout (aucune recette Notion créée).
+    if(sideMode){
+        if(!sideSlot){ toast('Aucun créneau sélectionné', 'error'); return; }
+        this.disabled = true; this.textContent = '⏳ Ajout...';
+        await setSide(sideSlot, nom);   // recharge la page si l'ajout a réussi
+        this.disabled = false; this.textContent = 'Ajouter';
+        return;
+    }
     if(!bul.length){ toast('Aucun créneau sélectionné', 'error'); return; }
     this.disabled = true; this.textContent = '⏳ Création...';
     let ok = true;
@@ -591,7 +628,13 @@ function usl(items) {
     items.forEach(i=>{ const r=i.rayon||'Autre'; (buckets[r]=buckets[r]||[]).push(i); });
     const order=[...RAYON_ORDER.filter(r=>buckets[r]), ...Object.keys(buckets).filter(r=>!RAYON_ORDER.includes(r))];
     g.innerHTML=order.map(r=>`<div class="shop-rayon" data-rayon="${r}"><h3 class="rayon-h">${r} <span class="rayon-n">${buckets[r].length}</span></h3><div class="shop-grid">`+
-        buckets[r].map(i=>`<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${cap(i.nom)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}${(i.recettes&&i.recettes.length)?`<span class="shop-src" title="${i.recettes.join(' · ').replace(/"/g,'&quot;')}">🍽</span>`:''}</label>`).join('')+
+        buckets[r].map(i=>{
+            const srcs=(i.recettes&&i.recettes.length)?i.recettes.join(' · '):'';
+            const srcHtml=srcs
+                ? `<button type="button" class="shop-src" title="${srcs.replace(/"/g,'&quot;')}" aria-label="Voir les recettes liées">🍽</button><span class="shop-srcs">🍽 ${srcs}</span>`
+                : '';
+            return `<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${cap(i.nom)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}${srcHtml}</label>`;
+        }).join('')+
         `</div></div>`).join('');
     bindShopItems();
 }
