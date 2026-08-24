@@ -156,6 +156,65 @@ def test_construire_repas_libre(client, monkeypatch):
     assert "Repas libre" in html and "Pizzas" in html
 
 
+def test_construire_accompagnement_libre(client, monkeypatch):
+    """Accompagnement libre : titre saisi à la main (sans notion_id) → marqué
+    `libre`, aucun ingrédient dans les courses, rappelé dans « Repas libres »."""
+    poulet = _recipe("Poulet", id="p1")
+
+    async def _all():
+        return [poulet]
+
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    case = _case(1, "midi", poulet, persons=4)
+    case["accompagnements"] = [{"notion_id": "", "nom": "Salade du jardin",
+                                "nature": "Libre", "libre": True}]
+    pid = _construire(client, [case])
+
+    import asyncio
+    data = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])
+    acc = data["plats"][0]["accompagnements"][0]
+    assert acc["libre"] is True and acc["notion_id"] == ""
+    # Seul le plat (enrichi) alimente les courses : pas d'ingrédient inventé.
+    assert [i["nom"] for i in data["liste_courses"]] == ["riz"]
+
+    html = client.get(f"/planning/{pid}").text
+    assert "Repas libres" in html and "Salade du jardin" in html
+
+
+def test_planning_case_fusionnee_affiche_les_parts(client, monkeypatch):
+    """Midis groupés : la case fusionnée annonce le total de parts comptées
+    dans la liste de courses (3 jours × 2 convives = 6 parts)."""
+    poulet = _recipe("Poulet", id="p1")
+
+    async def _all():
+        return [poulet]
+
+    async def _enriched(nid):
+        return {"ingredients": json.dumps([{"nom": "riz", "quantite": "100", "unite": "g"}])}
+
+    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
+    monkeypatch.setattr(main.db, "get_enriched", _enriched)
+
+    # Le front n'envoie le repas que sur le jour éditeur du groupe (j1).
+    pid = _construire(client, [
+        _case(1, "midi", poulet, persons=2, group=1),
+        _case(2, "midi", None, persons=2, group=1),
+        _case(3, "midi", None, persons=2, group=1),
+    ])
+
+    import asyncio
+    data = json.loads(asyncio.run(main.db.get_planning_with_recipes(pid))["data_json"])
+    riz = next(i for i in data["liste_courses"] if i["nom"] == "riz")
+    # 3 repas × 2 pers × 100 g / base 4 = 150 g
+    assert riz["quantite"] == "150"
+    assert "6 parts · 3 j" in client.get(f"/planning/{pid}").text
+
+
 def test_construire_sans_repas(client, monkeypatch):
     """Aucun repas choisi → on re-affiche le formulaire avec un message."""
     async def _all():

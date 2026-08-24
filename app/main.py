@@ -315,7 +315,15 @@ async def _week_nutrition(plats: list[dict], day_labels: list[dict] | None = Non
 def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
     """Regroupe les jours consécutifs partageant le même repas (plat + même
     accompagnement) en « runs » pour fusionner les cases du planning.
-    Retourne {"midi": [run, ...], "soir": [...]} avec run = {start, span, jours, plat}."""
+    Retourne {"midi": [run, ...], "soir": [...]} avec run = {start, span, jours,
+    plat, parts} — `parts` = total des convives des jours fusionnés, c'est-à-dire
+    le nombre de portions que ce repas pèse dans la liste de courses."""
+    def _pers(plat: dict) -> int:
+        try:
+            return max(0, int(plat.get("persons") or 0))
+        except (TypeError, ValueError):
+            return 0
+
     rows: dict[str, list[dict]] = {"midi": [], "soir": []}
     for moment in ("midi", "soir"):
         by_day = {p["jour"]: p for p in plats if p["moment"] == moment}
@@ -333,8 +341,10 @@ def _group_week(plats: list[dict]) -> dict[str, list[dict]]:
             if run and run["key"] == key and run["start"] + run["span"] == jour:
                 run["span"] += 1
                 run["jours"].append(jour)
+                run["parts"] += _pers(plat)
             else:
-                run = {"key": key, "start": jour, "span": 1, "jours": [jour], "plat": plat}
+                run = {"key": key, "start": jour, "span": 1, "jours": [jour],
+                       "plat": plat, "parts": _pers(plat)}
                 rows[moment].append(run)
     return rows
 
@@ -583,7 +593,10 @@ async def _collect_shopping(
             except (json.JSONDecodeError, TypeError):
                 ings = None
         if not ings:
-            non_enrichis.append(title or src.get("nom_recette", ""))
+            # Libre (plat ou accompagnement saisi à la main) : déjà rappelé par
+            # _repas_libres, inutile de le signaler comme « non enrichi ».
+            if not (src.get("libre") or not nid):
+                non_enrichis.append(title or src.get("nom_recette", ""))
             continue
         # Factorisation en aval : re-normalise (unités qui avaient fui dans le
         # nom sur d'anciens caches) et éclate les listes de condiments.
@@ -1158,7 +1171,8 @@ def _build_plat(item: dict, jour: int, moment: str, persons: int,
 
 
 def _repas_libres(plats: list[dict], day_labels: list[dict] | None = None) -> list[dict]:
-    """Repas libres du planning (titre saisi à la main, sans recette liée).
+    """Repas ET accompagnements libres du planning (titre saisi à la main, sans
+    recette liée).
 
     Renvoie [{nom, jour, moment, quand}] : sert de rappel « pense à acheter les
     ingrédients » dans la liste de courses (ces repas ne contribuent aucun
@@ -1166,8 +1180,6 @@ def _repas_libres(plats: list[dict], day_labels: list[dict] | None = None) -> li
     (ex. « samedi soir ») dérivé de day_labels si fourni."""
     out: list[dict] = []
     for p in plats:
-        if not p.get("libre"):
-            continue
         jour, moment = p.get("jour"), p.get("moment")
         jour_lbl = ""
         try:
@@ -1176,12 +1188,17 @@ def _repas_libres(plats: list[dict], day_labels: list[dict] | None = None) -> li
         except (TypeError, ValueError):
             pass
         quand = " ".join(x for x in (jour_lbl.lower(), moment) if x).strip()
-        out.append({
-            "nom": clean_recipe_title(p.get("nom_recette", "")),
-            "jour": jour,
-            "moment": moment,
-            "quand": quand,
-        })
+        # Le plat, puis ses accompagnements libres (mêmes jour/moment).
+        libres = [p] if p.get("libre") else []
+        libres += [a for a in plat_accompagnements(p)
+                   if a.get("libre") or not a.get("notion_id")]
+        for src in libres:
+            out.append({
+                "nom": clean_recipe_title(src.get("nom_recette", "")),
+                "jour": jour,
+                "moment": moment,
+                "quand": quand,
+            })
     return out
 
 
@@ -1192,10 +1209,14 @@ def _build_side(item: dict, by_id: dict[str, dict]) -> dict:
         "notion_id": item.get("notion_id", "") or "",
         "url": "",
         "notion_url": "",
+        # Accompagnement libre : titre saisi à la main, sans recette Notion →
+        # aucun ingrédient en cache, rappel dans la liste de courses.
+        "libre": bool(item.get("libre")) or not item.get("notion_id"),
     }
     r = by_id.get(item.get("notion_id", ""))
     if r:
         side.update(
+            libre=False,
             notion_id=r["id"],
             url=r.get("url", ""),
             notion_url=r.get("notion_url", ""),
@@ -2028,10 +2049,13 @@ async def api_free_meal(planning_id: int, request: Request):
 async def _resolve_side(nom: str) -> dict:
     """Construit le dict accompagnement pour un nom de recette, en reliant à
     Notion si la recette y existe (sinon accompagnement « libre » sans id)."""
-    acc = {"nom_recette": nom, "notion_id": "", "url": "", "notion_url": ""}
+    acc = {"nom_recette": nom, "notion_id": "", "url": "", "notion_url": "",
+           # Nom inconnu au catalogue → accompagnement LIBRE (rappel courses).
+           "libre": True}
     r = _index_by_name(await notion.get_all_recipes()).get(nom.lower().strip())
     if r:
-        acc.update(notion_id=r["id"], url=r.get("url", ""), notion_url=r.get("notion_url", ""))
+        acc.update(libre=False, notion_id=r["id"], url=r.get("url", ""),
+                   notion_url=r.get("notion_url", ""))
     return acc
 
 

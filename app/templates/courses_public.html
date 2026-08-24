@@ -56,7 +56,10 @@
                     <label class="shop-i" data-item="{{ item.nom|lower }}">
                         <span>{{ item.nom|capitalize }}</span>
                         {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
-                        {% if item.recettes %}<span class="shop-src" title="{{ item.recettes | join(' · ') }}">🍽</span>{% endif %}
+                        {% if item.recettes %}
+                        <button type="button" class="shop-src" title="{{ item.recettes | join(' · ') }}" aria-label="Voir les recettes liées">🍽</button>
+                        <span class="shop-srcs">🍽 {{ item.recettes | join(' · ') }}</span>
+                        {% endif %}
                     </label>
                     {% endfor %}
                 </div>
@@ -71,6 +74,15 @@
         {% endif %}
     </main>
     <script>
+    // 🍽 « recettes liées » : au doigt, aucun survol possible → un tap déplie la
+    // liste des recettes sous l'ingrédient.
+    document.addEventListener('click', e => {
+        const b = e.target.closest('.shop-src');
+        if (!b) return;
+        e.preventDefault();
+        b.closest('.shop-i')?.classList.toggle('src-open');
+    });
+
     // Export texte de la liste (repas libres + articles groupés par rayon).
     function copyList() {
         const lines = [];

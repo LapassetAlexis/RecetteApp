@@ -163,10 +163,17 @@ a.meal-warn:hover { background:#f9e0c4; }
 .shop-i:hover { border-color:var(--pr); }
 .shop-i:has(.shop-c:checked) { background:#f0faf0; border-color:var(--sc); text-decoration:line-through; opacity:0.6; }
 .shop-c { width:20px; height:20px; accent-color:var(--sc); cursor:pointer; flex-shrink:0; }
-.shop-i { min-height:40px; }
+.shop-i { min-height:40px; flex-wrap:wrap; }
 .shop-i small { font-size:0.75rem; color:var(--t2); background:var(--bg); padding:1px 6px; border-radius:8px; margin-left:auto; }
-.shop-src { font-size:0.8rem; cursor:help; opacity:0.5; margin-left:auto; flex-shrink:0; }
+/* Bouton « recettes source » : cliquable (mobile) ET survolable (desktop, title). */
+.shop-src { font-size:0.8rem; cursor:pointer; opacity:0.5; margin-left:auto; flex-shrink:0;
+    border:none; background:transparent; padding:2px 4px; line-height:1; pointer-events:auto; }
+.shop-src:hover, .shop-i.src-open .shop-src { opacity:1; }
 .shop-i small + .shop-src { margin-left:4px; }
+/* Ligne dépliée sous l'ingrédient : liste des recettes qui l'utilisent. */
+.shop-srcs { display:none; flex-basis:100%; font-size:0.72rem; color:var(--t2);
+    text-decoration:none; padding:2px 0 0 26px; }
+.shop-i.src-open .shop-srcs { display:block; }
 .shop-libre { background:#fff8ec; border:1px solid #f0c675; border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:0.88rem; }
 .shop-libre strong { display:block; margin-bottom:4px; color:#b7791f; }
 .shop-libre ul { margin:0; padding-left:20px; }
