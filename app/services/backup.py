@@ -6,7 +6,8 @@ SQLite du volume `/data`. Ce module :
 
 - exporte tout dans un JSON versionné (`export_all`) ;
 - valide puis réimporte un tel fichier, en fusion ou en remplacement, dans une
-  seule transaction (`validate_backup`, `import_all`) ;
+  seule transaction (`validate_backup`, `import_all`) : forme des repas
+  vérifiée, jeton de partage déjà pris retiré en fusion ;
 - reconstruit le cache d'ingrédients depuis la copie texte que Notion garde de
   chaque recette (`rehydrate_from_notion`)."""
 
@@ -16,7 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from app.database import Database
-from app.text_utils import parse_ingredient_line
+from app.text_utils import parse_ingredient_lines
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,22 @@ def _is_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
+def _check_plats(where: str, data: dict[str, Any]) -> None:
+    """Repas d'un planning exporté : `plats` absent, ou liste d'objets
+    {jour 1-7, moment midi|soir, nom_recette texte}. Sinon le planning
+    importé ne s'afficherait pas."""
+    if "plats" not in data:
+        return
+    plats = data["plats"]
+    if not isinstance(plats, list):
+        raise BackupError(f"{where} : plats doit être une liste")
+    for k, plat in enumerate(plats):
+        if (not isinstance(plat, dict) or not _is_int(plat.get("jour"))
+                or not 1 <= plat["jour"] <= 7 or plat.get("moment") not in ("midi", "soir")
+                or not isinstance(plat.get("nom_recette"), str)):
+            raise BackupError(f"{where} : plat n°{k + 1} invalide (jour 1-7, moment midi/soir, nom_recette)")
+
+
 def _check_planning(i: int, p: Any) -> dict[str, Any]:
     """Valide et normalise un planning exporté (data_json toujours en texte)."""
     where = f"planning n°{i + 1}"
@@ -65,6 +82,7 @@ def _check_planning(i: int, p: Any) -> dict[str, Any]:
         parsed = None
     if not isinstance(parsed, dict):
         raise BackupError(f"{where} : data_json illisible")
+    _check_plats(where, parsed)
     recipes = p.get("recipes", [])
     if not isinstance(recipes, list):
         raise BackupError(f"{where} : recipes doit être une liste")
@@ -165,9 +183,29 @@ async def import_all(db: Database, data: Any, mode: str = "merge") -> dict[str, 
     if mode not in MODES:
         raise BackupError(f"Mode inconnu : {mode!r}")
     clean = validate_backup(data)
+    if mode == "merge":
+        await _retire_jetons_pris(db, clean["plannings"])
     return await db.restore_all(
         clean["plannings"], clean["enriched"], clean["prefs"], replace=(mode == "replace"),
     )
+
+
+async def _retire_jetons_pris(db: Database, plannings: list[dict[str, Any]]) -> None:
+    """Fusion : un planning importé dont le jeton de partage est déjà pris (par
+    un planning local, ou par un planning importé avant lui) perd ce jeton,
+    sinon un même lien public désignerait deux plannings. Le planning reste
+    importé, sans lien de partage (à régénérer depuis sa page)."""
+    vus: set[str] = set()
+    for p in plannings:
+        data = json.loads(p["data_json"])
+        token = data.get("share_token")
+        if not token:
+            continue
+        if str(token) in vus or await db.get_planning_by_share_token(str(token)):
+            data.pop("share_token")
+            p["data_json"] = json.dumps(data, ensure_ascii=False)
+        else:
+            vus.add(str(token))
 
 
 def _has_ingredients(entry: dict[str, Any] | None) -> bool:
@@ -181,13 +219,10 @@ def _has_ingredients(entry: dict[str, Any] | None) -> bool:
 
 
 def ingredients_from_text(text: str) -> list[dict[str, str]]:
-    """Ingrédients structurés depuis la copie texte Notion (une ligne chacun)."""
-    out = []
-    for line in (text or "").splitlines():
-        ing = parse_ingredient_line(line)
-        if ing and ing.get("nom"):
-            out.append(ing)
-    return out
+    """Ingrédients structurés depuis la copie texte Notion (une ligne chacun ;
+    « sel, poivre » en donne deux)."""
+    return [ing for line in (text or "").splitlines()
+            for ing in parse_ingredient_lines(line) if ing.get("nom")]
 
 
 async def rehydrate_from_notion(db: Database, notion: Any) -> dict[str, int]:
