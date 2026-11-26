@@ -576,17 +576,42 @@ def _place_brique(target: dict, slot: str, nom: str, page_id: str,
     target.pop("accompagnement", None)
 
 
-async def _editable_draft_id(draft_id: str) -> int:
-    """Id du brouillon à mettre à jour (`draft_id` valide et non validé), sinon 0."""
+async def _editable_planning(draft_id: str) -> dict | None:
+    """Planning à mettre à jour par /construire (`draft_id` d'un planning
+    existant, brouillon OU semaine validée rouverte via `/?planning=<id>`),
+    sinon None. Une semaine validée reste validée : `update_planning` ne
+    touche pas à la colonne `valide`."""
     try:
         did = int(draft_id) if draft_id else 0
     except (TypeError, ValueError):
         did = 0
     if did:
-        existing = await db.get_planning_with_recipes(did)
-        if existing and not existing.get("valide", 0):
-            return did
-    return 0
+        return await db.get_planning_with_recipes(did)
+    return None
+
+
+def _merge_existing_data(existing: dict | None, data: dict) -> dict:
+    """Données d'un planning ré-enregistré depuis le constructeur : la nouvelle
+    grille remplace plats, courses et période, mais les autres clés de
+    `data_json` (lien de partage, articles ajoutés à la main…) sont conservées.
+    Les coches de courses ne survivent que pour un article encore présent."""
+    try:
+        old = json.loads(existing["data_json"]) if existing else {}
+    except (json.JSONDecodeError, TypeError, KeyError):
+        old = {}
+    if not isinstance(old, dict):
+        old = {}
+    merged = {**old, **data}
+    if old.get("courses_checked"):
+        noms = {str(it.get("nom", "")).strip().lower() for it in data.get("liste_courses", [])}
+        merged["courses_checked"] = [
+            c for c in old["courses_checked"] if str(c).strip().lower() in noms
+        ]
+    # Ces clés décrivent l'ancienne génération : elles ne valent plus.
+    for k in ("creneaux_non_resolus", "briques_manquantes"):
+        if k not in data:
+            merged.pop(k, None)
+    return merged
 
 
 def _meal_label(plat: dict) -> str:
@@ -596,3 +621,142 @@ def _meal_label(plat: dict) -> str:
     if accs:
         nom += " + " + " + ".join(clean_recipe_title(a.get("nom_recette", "")) for a in accs)
     return nom
+
+
+# ── Période du planning (jours 1..nb_jours) ──────────────────────────────
+
+
+def _jours_plats(plats: list[dict]) -> list[int]:
+    """Jours (1..7) portant un plat."""
+    out = []
+    for p in plats:
+        try:
+            j = int(p.get("jour"))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= j <= 7:
+            out.append(j)
+    return out
+
+
+def _nb_jours(data: dict) -> int:
+    """Dernier jour de la période du planning (1..7).
+
+    `data["nb_jours"]` est enregistré par /construire. Repli pour les anciens
+    plannings : dernier jour porteur d'un plat, sinon 7. On ne descend jamais
+    sous le dernier jour porteur d'un plat (un repas ajouté après coup reste
+    visible)."""
+    dernier_plat = max(_jours_plats(data.get("plats") or []), default=0)
+    try:
+        n = int(data.get("nb_jours") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if 1 <= n <= 7:
+        return max(n, dernier_plat)
+    return dernier_plat or 7
+
+
+def _nb_jours_from_cases(cases: list[dict]) -> int:
+    """Dernier jour de la période saisie dans le constructeur : les jours hors
+    période sont envoyés « absents » (persons 0), donc dernier jour à convives.
+    0 si aucune case active."""
+    return max((c["jour"] for c in cases if c["persons"] > 0), default=0)
+
+
+# ── Édition groupée des repas (POST /api/planning/{id}/meals) ────────────
+
+MEAL_ACTIONS = ("set_main", "add_side", "remove_side")
+
+
+def _parse_slots(raw) -> list[dict] | None:
+    """Valide la liste `slots` du corps : [{jour 1-7, moment midi|soir,
+    persons (optionnel, > 0)}]. Dédoublonne (jour, moment). None si vide ou
+    si une entrée est invalide (on refuse tout plutôt que d'en ignorer)."""
+    if not isinstance(raw, list) or not raw or len(raw) > 14:
+        return None
+    out: list[dict] = []
+    seen: set[tuple[int, str]] = set()
+    for s in raw:
+        if not isinstance(s, dict):
+            return None
+        jour, moment = s.get("jour"), s.get("moment")
+        if isinstance(jour, bool) or not isinstance(jour, int) or not 1 <= jour <= 7:
+            return None
+        if moment not in ("midi", "soir"):
+            return None
+        if (jour, moment) in seen:
+            continue
+        seen.add((jour, moment))
+        try:
+            persons = int(s.get("persons") or 0)
+        except (TypeError, ValueError):
+            persons = 0
+        out.append({"jour": jour, "moment": moment, "persons": max(0, persons)})
+    return out
+
+
+def _new_plat(planning: dict, data: dict, slot: dict, nom: str,
+              recette: dict | None) -> dict:
+    """Crée le plat d'un créneau encore vide (cas de l'ajout depuis une fiche
+    recette) : convives du slot, sinon du jour (`per_day`), sinon du planning."""
+    persons = slot["persons"] or _per_day_list(planning, data)[slot["jour"] - 1]
+    item = {"nom": nom, "notion_id": recette["id"] if recette else "",
+            "nature": recipe_nature(recette) if recette else "Recette",
+            "libre": not recette}
+    by_id = {recette["id"]: recette} if recette else {}
+    return _build_plat(item, slot["jour"], slot["moment"], persons, by_id)
+
+
+async def apply_meals_batch(planning: dict, data: dict, slots: list[dict],
+                            action: str, nom: str, remplace: str = "") -> str | None:
+    """Applique UNE action à plusieurs créneaux, EN MÉMOIRE (`data["plats"]`).
+
+    Renvoie un message d'erreur (rien n'est persisté : l'appelant n'écrit pas)
+    ou None si toutes les mutations ont réussi ; l'appelant régénère alors la
+    liste de courses et écrit une seule fois.
+
+    - set_main : remplace le plat principal (accompagnements remis à zéro) ;
+      un créneau VIDE (ou « absent ») reçoit un nouveau plat ;
+    - add_side : ajoute l'accompagnement `nom` (doublon ignoré) ; si `remplace`
+      est fourni, retire d'abord cet accompagnement (« ↻ Changer ») ;
+    - remove_side : retire l'accompagnement `nom`.
+    Les actions d'accompagnement exigent un plat existant dans chaque créneau."""
+    plats = data.setdefault("plats", [])
+    by_slot = {(p.get("jour"), p.get("moment")): p for p in plats}
+    if action != "set_main" and any((s["jour"], s["moment"]) not in by_slot for s in slots):
+        return "Repas non trouvé dans le planning"
+
+    if action == "set_main":
+        recette = _index_by_name(await notion.get_all_recipes()).get(nom.lower().strip())
+        off = set(data.get("off_meals") or [])
+        for s in slots:
+            target = by_slot.get((s["jour"], s["moment"]))
+            if target is None:
+                plats.append(_new_plat(planning, data, s, nom, recette))
+                off.discard(f"{s['jour']}:{s['moment']}")
+                continue
+            _set_main(target, nom, recette)
+            target["libre"] = not bool(recette)
+            if s["persons"]:
+                target["persons"] = s["persons"]
+        plats.sort(key=lambda p: (p.get("jour", 0), p.get("moment") != "midi"))
+        if "off_meals" in data:
+            data["off_meals"] = sorted(off)
+        if data.get("nb_jours"):
+            data["nb_jours"] = _nb_jours(data)
+        return None
+
+    cle = nom.lower().strip()
+    ancien = remplace.lower().strip()
+    side = await _resolve_side(nom) if action == "add_side" else None
+    for s in slots:
+        target = by_slot[(s["jour"], s["moment"])]
+        accs = plat_accompagnements(target)
+        retire = cle if action == "remove_side" else ancien
+        if retire:
+            accs = [a for a in accs if a.get("nom_recette", "").lower().strip() != retire]
+        if side and not any(a.get("nom_recette", "").lower().strip() == cle for a in accs):
+            accs.append(dict(side))
+        target["accompagnements"] = accs
+        target.pop("accompagnement", None)
+    return None

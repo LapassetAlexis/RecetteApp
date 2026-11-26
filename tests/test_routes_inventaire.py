@@ -12,6 +12,7 @@ ROUTES_ATTENDUES = {
     ("GET", "/api/catalogue"),
     ("GET", "/api/enrich-all/stream"),
     ("GET", "/api/planning/{planning_id}/apercu"),
+    ("POST", "/api/planning/{planning_id}/meals"),
     ("GET", "/courses/{token}"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),
