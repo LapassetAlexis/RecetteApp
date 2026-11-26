@@ -602,11 +602,10 @@ def _merge_existing_data(existing: dict | None, data: dict) -> dict:
     if not isinstance(old, dict):
         old = {}
     merged = {**old, **data}
-    if old.get("courses_checked"):
-        noms = {str(it.get("nom", "")).strip().lower() for it in data.get("liste_courses", [])}
-        merged["courses_checked"] = [
-            c for c in old["courses_checked"] if str(c).strip().lower() in noms
-        ]
+    # Purge par clé d'article (liste + articles manuels, anciennes coches par
+    # nom tolérées) : services.shopping importe ce module, d'où l'import local.
+    from app.services.shopping import purge_orphans
+    purge_orphans(merged)
     # Ces clés décrivent l'ancienne génération : elles ne valent plus.
     for k in ("creneaux_non_resolus", "briques_manquantes"):
         if k not in data:

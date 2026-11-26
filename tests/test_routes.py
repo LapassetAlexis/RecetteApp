@@ -673,13 +673,13 @@ def test_partager_et_courses_public(client, monkeypatch):
     assert page.status_code == 200
     assert "riz" in page.text.lower()
     # bouton d'export texte présent + son handler
-    assert 'id="pub-copy"' in page.text and "function copyList" in page.text
+    assert 'id="pub-copy"' in page.text and "/static/js/courses-public.js" in page.text
 
-    # une fois coché, l'item disparaît de la page publique
+    # une fois coché, l'item passe sous « Déjà pris » (L09 : coche partagée)
     client.post(f"/api/shopping-check/{pid}", json={"item": "riz", "checked": True})
     page2 = client.get(d["url"])
     assert page2.status_code == 200
-    assert "Riz" not in page2.text
+    assert "Riz" in page2.text.split('id="pub-pris"', 1)[1]
 
     # token inconnu -> 404
     assert client.get("/courses/inexistant").status_code == 404

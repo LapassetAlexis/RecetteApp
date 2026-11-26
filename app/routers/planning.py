@@ -46,6 +46,7 @@ from app.services.shopping import (
     _ingredients_to_text,
     _mutate_sides,
     _refresh_shopping_and_save,
+    load_shopping_view,
 )
 from app.text_utils import merge_ingredients, parse_ingredient_line
 
@@ -208,6 +209,7 @@ async def voir_planning(request: Request, planning_id: int):
             "courses_par_rayon": group_by_rayon(liste_courses),
             "repas_libres": _repas_libres(plats, day_labels),
             "courses_checked": data.get("courses_checked", []),
+            "shop": await load_shopping_view(data),
             "rayon_order": RAYON_ORDER,
             "per_day": per_day,
             "off_meals": data.get("off_meals", []),

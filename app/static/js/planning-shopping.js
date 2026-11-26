@@ -1,24 +1,20 @@
 // Page planning : liste de courses (coches persistées + file hors-ligne,
-// recettes liées, copie, partage, génération).
-// Données serveur lues dans #page-data : {pid, courses_checked}.
+// articles ajoutés à la main, masques, placard, recettes liées, copie,
+// partage, génération).
+// Données serveur lues dans #page-data : {pid}. L'état coché est rendu côté
+// serveur dans les cases ; chaque ligne porte sa clé d'article (data-item).
 (function () {
     'use strict';
     const {copyText, postJson, pageData} = window.Common;
-    const DATA = pageData();
-    const pid = DATA.pid;
+    const pid = pageData().pid;
     const $ = id => document.getElementById(id);
 
-    // ── Persistance des cases cochées (côté serveur, cache offline) ────
-    // L'état de référence vient du serveur (courses_checked). On garde localStorage
-    // comme cache offline : les changements non envoyés (réseau HS) sont mis en file
-    // et rejoués au prochain chargement.
-    const SHOP_KEY = 'shop_checked_' + pid;      // cache local de l'état
+    // ── Coches (côté serveur, file d'attente hors-ligne) ───────────────
+    // Les changements non envoyés (réseau HS) sont mis en file et rejoués au
+    // prochain chargement.
+    const SHOP_KEY = 'shop_checked_' + pid;      // ancien cache local, purgé à la régénération
     const SHOP_QUEUE = 'shop_queue_' + pid;      // file des POST en attente
-    const CHECKED = new Set(DATA.courses_checked || []);
 
-    function saveLocal() {
-        try { localStorage.setItem(SHOP_KEY, JSON.stringify([...CHECKED])); } catch (e) {}
-    }
     function loadQueue() {
         try { return JSON.parse(localStorage.getItem(SHOP_QUEUE) || '[]'); }
         catch (e) { return []; }
@@ -39,6 +35,11 @@
     async function flushQueue() {
         const q = loadQueue();
         if (!q.length) return;
+        // Affiche d'abord l'état en attente (le serveur ne l'a pas encore).
+        q.forEach(e => {
+            const cb = document.querySelector(`.shop-i[data-item="${CSS.escape(e.item)}"] .shop-c`);
+            if (cb) cb.checked = e.checked;
+        });
         const rest = [];
         for (const e of q) {
             try { await postCheck(e.item, e.checked); }
@@ -47,20 +48,54 @@
         saveQueue(rest);
     }
     async function onToggle(item, checked) {
-        if (checked) CHECKED.add(item); else CHECKED.delete(item);
-        saveLocal();
         try { await postCheck(item, checked); }
         catch (err) { enqueue(item, checked); }  // réseau HS : on rejouera au load
     }
-    function bindShopItems() {
-        document.querySelectorAll('.shop-i').forEach(l => {
-            const cb = l.querySelector('.shop-c');
-            if (CHECKED.has(l.dataset.item)) cb.checked = true;
-            cb.addEventListener('change', () => onToggle(l.dataset.item, cb.checked));
-        });
+
+    // ── Articles manuels, masques et placard ────────────────────────────
+    // Chaque action renvoie la liste re-rendue côté serveur ({html, nb}).
+    function renderList(d) {
+        const body = $('shop-body');
+        const wasOpen = $('shop-masques')?.open;
+        body.innerHTML = d.html;
+        if (wasOpen && $('shop-masques')) $('shop-masques').open = true;
+        if ($('shop-n')) $('shop-n').textContent = d.nb;
+    }
+    async function listAction(url, body, method) {
+        try {
+            const r = await fetch(url, {
+                method: method || 'POST',
+                headers: body ? {'Content-Type': 'application/json'} : {},
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const d = await r.json();
+            if (d.success) { renderList(d); return true; }
+            toast(d.error || 'Erreur', 'error');
+        } catch (e) { toast('Erreur réseau', 'error'); }
+        return false;
+    }
+    const ACTIONS = {
+        suppr: key => listAction(`/api/courses/${pid}/extra/${encodeURIComponent(key)}`, null, 'DELETE'),
+        masquer: key => listAction(`/api/courses/${pid}/masquer`, {key, masque: true}),
+        restaurer: key => listAction(`/api/courses/${pid}/masquer`, {key, masque: false}),
+        placard: key => listAction(`/api/courses/${pid}/placard`, {key, present: true})
+            .then(ok => ok && toast('Rangé dans « Toujours à la maison » ✓', 'success')),
+        deplacard: key => listAction(`/api/courses/${pid}/placard`, {key, present: false}),
+    };
+
+    async function addExtra(e) {
+        e.preventDefault();
+        const input = $('shop-add-t');
+        const texte = input.value.trim();
+        if (!texte) return;
+        input.disabled = true;
+        const ok = await listAction(`/api/courses/${pid}/extra`, {texte});
+        input.disabled = false;
+        if (ok) input.value = '';
+        input.focus();
     }
 
-    // ── Partage public de la liste (lecture seule, non coché uniquement) ──
+    // ── Partage public de la liste (coches partagées) ───────────────────
     async function partagerListe() {
         const b = $('btn-share');
         if (b) b.disabled = true;
@@ -68,14 +103,14 @@
             const d = await postJson(`/planning/${pid}/partager`);
             if (d.url) {
                 const abs = window.location.origin + d.url;
-                try { await navigator.clipboard.writeText(abs); toast('Lien copié ✓', 'success'); }
-                catch (e) { toast(abs, 'info'); }
+                const ok = await copyText(abs);
+                toast(ok ? 'Lien copié ✓ (la personne pourra cocher)' : abs, ok ? 'success' : 'info');
             } else { toast(d.error || 'Erreur', 'error'); }
         } catch (e) { toast('Erreur réseau', 'error'); }
         finally { if (b) b.disabled = false; }
     }
 
-    // ── Copie de la liste (non cochés uniquement) ───────────────────────
+    // ── Copie de la liste (non cochés uniquement, hors masqués) ─────────
     function copyShop() {
         const lines = [];
         // Repas libres (rappel « ingrédients à acheter ») en tête de liste.
@@ -85,7 +120,7 @@
             libres.forEach(li => lines.push(`- ${li.textContent.trim().replace(/\s+/g, ' ')}`));
             lines.push('');
         }
-        document.querySelectorAll('.shop-rayon').forEach(sec => {
+        document.querySelectorAll('#shop-g .shop-rayon').forEach(sec => {
             // Uniquement les articles NON cochés (déjà achetés = exclus).
             const items = [];
             sec.querySelectorAll('.shop-i').forEach(l => {
@@ -131,23 +166,38 @@
         }
     }
 
-    // ── Branchements ────────────────────────────────────────────────────
-    bindShopItems();
-    // 🍽 « recettes liées » : le title ne s'affiche pas au doigt → un tap déplie la
-    // liste sous l'ingrédient (sans cocher la case du label).
-    document.addEventListener('click', e => {
-        const b = e.target.closest('.shop-src');
-        if (!b) return;
+    // ── Branchements (délégation : la liste est re-rendue après chaque action) ──
+    const body = $('shop-body');
+    body?.addEventListener('change', e => {
+        const cb = e.target.closest('.shop-c');
+        if (cb) onToggle(cb.closest('.shop-i').dataset.item, cb.checked);
+    });
+    body?.addEventListener('click', e => {
+        const b = e.target.closest('button');
+        if (!b || !body.contains(b)) return;
+        if (b.id === 'btn-shop') { genShop(); return; }
+        const line = b.closest('[data-item]');
+        if (!line) return;
+        // Bouton dans un <label> : ne pas cocher la case au passage.
         e.preventDefault();
-        e.stopPropagation();
-        b.closest('.shop-i')?.classList.toggle('src-open');
+        if (b.classList.contains('shop-src')) {
+            // 🍽 « recettes liées » : le title ne s'affiche pas au doigt → un tap
+            // déplie la liste sous l'ingrédient.
+            line.classList.toggle('src-open');
+        } else if (b.classList.contains('shop-more')) {
+            const open = line.classList.toggle('acts-open');
+            b.setAttribute('aria-expanded', String(open));
+        } else if (ACTIONS[b.dataset.act]) {
+            b.disabled = true;
+            ACTIONS[b.dataset.act](line.dataset.item);
+        }
     });
     flushQueue();  // rejoue les changements offline en attente
+    $('shop-add')?.addEventListener('submit', addExtra);
     $('btn-copy')?.addEventListener('click', copyShop);
     $('btn-share')?.addEventListener('click', partagerListe);
     $('btn-print')?.addEventListener('click', () => window.print());
     $('btn-regen')?.addEventListener('click', () => genShop(true));
-    $('btn-shop')?.addEventListener('click', () => genShop());
     // Avertissement recettes non enrichies (posé avant reload par genShop).
     const w = sessionStorage.getItem('shop_warn_' + pid);
     if (w) { sessionStorage.removeItem('shop_warn_' + pid); toast(w, 'error'); }
