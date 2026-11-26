@@ -1,9 +1,9 @@
 // Page planning : semaine (validation, sélection, modale « Changer »,
 // accompagnements, repas libre, brique, enrichissement, copie du menu).
-// Données serveur lues dans #page-data : {pid, day_labels, courses_checked}.
+// Données serveur lues dans #page-data : {pid, day_labels}.
 (function () {
     'use strict';
-    const {copyText, postJson, pageData} = window.Common;
+    const {copyText, requestJson, postJson, pageData, modal} = window.Common;
     const DATA = pageData();
     const pid = DATA.pid;
     const $ = id => document.getElementById(id);
@@ -40,8 +40,18 @@
 
     // Ouvre la modale en mode « changer le repas » pour la sélection courante.
     function openChange(ctx) {
-        sideMode = false; document.querySelector('#modal h3').textContent = '↻ Changer';
+        sideMode = false; addMode = false; document.querySelector('#modal h3').textContent = '↻ Changer';
         $('modal-ctx').textContent = ctx;
+        openModal();
+        $('alt-list').innerHTML = '<p class="empty">⏳</p>';
+        loadAlternatives();
+    }
+    // Créneau vide de la période : même modale, `set_main` crée le plat.
+    function openAdd(jour, m) {
+        selection = [{jours: [jour], m}];
+        sideMode = false; addMode = true;
+        document.querySelector('#modal h3').textContent = '＋ Ajouter un repas';
+        $('modal-ctx').textContent = dayLong(jour) + ' ' + ((DAY_LABELS[jour - 1] || {}).date || '') + ' — ' + m;
         openModal();
         $('alt-list').innerHTML = '<p class="empty">⏳</p>';
         loadAlternatives();
@@ -50,9 +60,11 @@
     // ── Accompagnements (multiples) : ajouter / changer / retirer ──────
     // sideSlot={jours:[...],m} ; sideReplace = nom de l'accompagnement à remplacer
     // (mode ↻) ou null (mode ➕ ajout).
-    let sideMode = false, sideSlot = null, sideReplace = null;
+    // addMode : créneau encore vide (pas de repas libre avec ingrédients ni de
+    // brique : ces deux créations ne visent que des créneaux déjà remplis).
+    let sideMode = false, sideSlot = null, sideReplace = null, addMode = false;
     function openSidePicker(slot, replace) {
-        sideMode = true; sideSlot = slot; sideReplace = replace || null;
+        sideMode = true; addMode = false; sideSlot = slot; sideReplace = replace || null;
         $('modal-ctx').textContent = slotLabel(slot) + ' — accompagnement';
         document.querySelector('#modal h3').textContent = replace ? '🥦 Changer l\'accompagnement' : '🥦 Ajouter un accompagnement';
         openModal();
@@ -81,13 +93,31 @@
     }
 
     // ── Alternatives (modale) ──────────────────────────────────────────
+    // Message d'état de la liste (chargement, vide, erreur), en texte brut.
+    function altMessage(el, txt, erreur) {
+        const p = document.createElement('p');
+        p.className = erreur ? 'empty alt-erreur' : 'empty';
+        if (erreur) p.setAttribute('role', 'alert');
+        p.textContent = txt;
+        el.replaceChildren(p);
+    }
     async function loadAlternatives() {
         resetFree();
-        const r = await fetch(`/api/alternatives/${pid}`); const d = await r.json();
+        const el = $('alt-list');
+        let d;
+        try {
+            d = await requestJson(`/api/alternatives/${pid}`);
+        } catch (e) {
+            d = {error: 'Erreur réseau'};
+        }
+        // Notion indisponible (502) ou autre erreur : message dans la modale.
+        if (d.error) {
+            altMessage(el, `⚠️ ${d.error}`, true);
+            return;
+        }
         let alts = d.alternatives || [];
         // Accompagnement : recettes ET briques dont la Base contient Légume.
         if (sideMode) alts = alts.filter(a => (a.base || []).includes('Légume'));
-        const el = $('alt-list');
         if (!alts.length) { el.innerHTML = '<p class="empty">Aucune alternative.</p>'; return; }
         // Construction DOM (textContent) : un nom contenant « " < > » reste intact
         // et le bouton « Choisir » envoie le nom exact (pas d'injection HTML).
@@ -147,12 +177,14 @@
         $('free-nom').placeholder = sideMode
             ? "Nom de l'accompagnement (ex. Salade verte)"
             : 'Nom du repas (ex. Steak + haricots verts)';
-        // Pas d'ingrédients pour un accompagnement libre : rien n'est créé en base.
-        $('free-ings').style.display = sideMode ? 'none' : 'block';
-        $('free-go').textContent = sideMode ? 'Ajouter' : 'Créer et placer';
+        // Pas d'ingrédients pour un accompagnement libre ni pour un créneau vide
+        // (repas libre par son seul nom) : rien n'est créé en base.
+        const simple = sideMode || addMode;
+        $('free-ings').style.display = simple ? 'none' : 'block';
+        $('free-go').textContent = simple ? 'Ajouter' : 'Créer et placer';
         $('free-ings').value = '';
-        // Brique : disponible dans les deux modes (plat ou accompagnement).
-        $('brique-box').style.display = 'block';
+        // Brique : plat ou accompagnement d'un créneau déjà rempli.
+        $('brique-box').style.display = addMode ? 'none' : 'block';
         $('brique-form').style.display = 'none';
         $('brique-nom').value = '';
         $('brique-qte').value = '';
@@ -179,6 +211,13 @@
             return;
         }
         if (!selection.length) { toast('Aucun créneau sélectionné', 'error'); return; }
+        // Créneau vide : `set_main` avec un nom hors catalogue = repas libre.
+        if (addMode) {
+            this.disabled = true; this.textContent = '⏳ Ajout...';
+            if (await batchMeals(selection, 'set_main', nom)) { window.location.reload(); return; }
+            this.disabled = false; this.textContent = 'Ajouter';
+            return;
+        }
         this.disabled = true; this.textContent = '⏳ Création...';
         // Une requête pour tous les jours (case fusionnée, sélection) : une
         // seule recette créée, appliquée à tous les créneaux ou à aucun.
@@ -247,25 +286,22 @@
         copyText(lines.join('\n').trim()).then(ok => toast(ok ? 'Menu copié ✓' : 'Copie impossible', ok ? 'success' : 'error'));
     }
 
-    // ── Modale : ouverture / fermeture accessibles ──────────────────────
-    // Mémorise l'élément déclencheur pour lui rendre le focus à la fermeture.
-    let modalOpener = null;
+    // ── Modale : ouverture / fermeture accessibles (Common.modal) ────────
+    // Piège Tab, Échap, focus rendu au déclencheur à la fermeture.
+    let modalHandle = null;
     function openModal() {
-        const m = $('modal');
-        if (m.style.display !== 'flex') modalOpener = document.activeElement;
-        m.style.display = 'flex';
-        const f = $('flt');
-        f.value = '';
+        $('flt').value = '';
+        if (modalHandle) return;   // déjà ouverte : on ne change que le contenu
         // Pointeur précis (desktop) : focus sur le filtre. Tactile : sur « Fermer »,
         // pour ne pas ouvrir le clavier virtuel d'office.
         const fine = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
-        (fine ? f : document.querySelector('#modal .modal-x')).focus();
+        modalHandle = modal($('modal'), {
+            initialFocus: fine ? '#flt' : '.modal-x',
+            onClose: () => { modalHandle = null; sideMode = false; addMode = false; sideSlot = null; },
+        });
     }
     function closeModal() {
-        $('modal').style.display = 'none';
-        sideMode = false; sideSlot = null;
-        if (modalOpener && document.contains(modalOpener)) modalOpener.focus();
-        modalOpener = null;
+        if (modalHandle) modalHandle.close();
     }
 
     // ── Branchements ────────────────────────────────────────────────────
@@ -282,6 +318,9 @@
         selection = [{jours: parseJours(this), m: this.dataset.moment}];
         openChange(slotLabel(selection[0]));
     });
+    document.querySelectorAll('.meal-add').forEach(b => b.onclick = function () {
+        openAdd(Number(this.dataset.jour), this.dataset.moment);
+    });
     document.querySelectorAll('.side-add').forEach(b => b.onclick = function () {
         const s = this.closest('.meal-side'); openSidePicker({jours: parseJours(s), m: s.dataset.moment});
     });
@@ -297,8 +336,5 @@
     $('brique-go').onclick = createBrique;
     $('modal-close').addEventListener('click', closeModal);
     $('modal-cancel').addEventListener('click', closeModal);
-    document.querySelector('.modal-bg')?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && $('modal').style.display === 'flex') { e.preventDefault(); closeModal(); }
-    });
+    document.querySelector('#modal .modal-bg')?.addEventListener('click', closeModal);
 })();

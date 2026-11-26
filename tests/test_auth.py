@@ -10,8 +10,11 @@ from starlette.testclient import TestClient
 # (ou `from app.deps import db`) gardent sinon l'ancien objet.
 _MODULES = (
     "app.config", "app.database", "app.notion_client", "app.llm_client", "app.deps",
-    "app.services.planning", "app.services.shopping", "app.services.nutrition_week",
-    "app.services.recettes", "app.services.creations",
+    "app.services.planning", "app.services.store", "app.services.shopping_list",
+    "app.services.planning_builder", "app.services.shopping", "app.services.planning_construire",
+    "app.services.planning_batch", "app.services.nutrition_week",
+    "app.services.recettes", "app.services.recette_edition", "app.services.enrichissement",
+    "app.services.recette_planifier", "app.services.creations",
     "app.routers.pages", "app.routers.planning", "app.routers.courses",
     "app.routers.recettes", "app.routers.catalogue", "app.routers.auth",
     "app.main",
@@ -57,7 +60,8 @@ def test_auth_login_ouvre_session_persistante(tmp_path):
         # session ouverte → route protégée accessible, sans re-login
         assert c.get("/historique").status_code == 200
         # déconnexion → de nouveau protégé
-        c.get("/logout")
+        assert c.get("/logout").status_code == 405   # GET refusé (M09)
+        c.post("/logout")
         assert c.get("/historique", follow_redirects=False).status_code == 303
 
 

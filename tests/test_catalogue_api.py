@@ -4,24 +4,8 @@ d'erreur quand Notion échoue ; gabarit du picker."""
 import asyncio
 import json
 
-import pytest
-from starlette.testclient import TestClient
-
 from app import main
-from tests.test_routes import _case, _recipe
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
+from tests.aides import _case, _recipe
 
 
 def _catalogue(monkeypatch, recettes):

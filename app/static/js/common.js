@@ -2,6 +2,8 @@
 // Exposés sur `window.Common`.
 (function () {
     'use strict';
+    // Chargé deux fois (gabarit de base et page) : la première copie reste.
+    if (window.Common) return;
 
     // Échappe un texte pour l'insérer dans du HTML.
     function esc(s) {
@@ -29,15 +31,111 @@
         return Promise.resolve(legacy());
     }
 
-    // POST JSON et lecture de la réponse JSON. Sans `body`, POST sans corps.
-    async function postJson(url, body) {
-        const opts = {method: 'POST'};
+    // Session expirée : message, puis retour au formulaire de connexion qui
+    // ramènera sur la page courante.
+    let _sessionExpired = false;
+    function sessionExpired() {
+        if (_sessionExpired) return;
+        _sessionExpired = true;
+        if (window.toast) window.toast('Session expirée, reconnecte-toi', 'error');
+        const next = location.pathname + location.search;
+        setTimeout(() => { location.href = '/login?next=' + encodeURIComponent(next); }, 1200);
+    }
+
+    // Requête JSON et lecture de la réponse. `opts` : {method = 'GET', body}.
+    // - réseau coupé : l'exception de fetch remonte (les appelants la gèrent) ;
+    // - 401, ou redirection vers /login (session expirée sur une page) : toast,
+    //   redirection, et la promesse ne se résout jamais (la page s'en va) ;
+    // - réponse non JSON : {error: 'Réponse inattendue du serveur'} ;
+    // - statut d'erreur sans champ `error` : `error` repris de `detail`.
+    async function requestJson(url, opts) {
+        const {method = 'GET', body} = opts || {};
+        const init = {method, headers: {Accept: 'application/json'}};
         if (body !== undefined) {
-            opts.headers = {'Content-Type': 'application/json'};
-            opts.body = JSON.stringify(body);
+            init.headers['Content-Type'] = 'application/json';
+            init.body = JSON.stringify(body);
         }
-        const r = await fetch(url, opts);
-        return r.json();
+        const r = await fetch(url, init);
+        let path = '';
+        try { path = new URL(r.url, location.href).pathname; } catch (e) { path = ''; }
+        if (r.status === 401 || (r.redirected && path === '/login')) {
+            sessionExpired();
+            return new Promise(() => {});
+        }
+        let data;
+        try { data = await r.json(); } catch (e) { return {error: 'Réponse inattendue du serveur'}; }
+        if (!r.ok && data && typeof data === 'object' && !Array.isArray(data) && !data.error) {
+            data.error = typeof data.detail === 'string' ? data.detail : `Erreur serveur (${r.status})`;
+        }
+        return data;
+    }
+
+    // POST JSON. Sans `body`, POST sans corps.
+    function postJson(url, body) {
+        return requestJson(url, {method: 'POST', body});
+    }
+
+    // Modale accessible. `el` : la racine `.modal` (masquée par display:none).
+    // Ouvre, place le focus (`initialFocus` : élément ou sélecteur, sinon le
+    // premier élément focalisable), piège Tab / Maj+Tab, ferme sur Échap et
+    // rend le focus à l'élément qui l'avait à l'ouverture.
+    // Renvoie {close()} ; `onClose` est appelé à chaque fermeture.
+    const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    function modal(el, opts) {
+        const {onClose, initialFocus} = opts || {};
+        const opener = document.activeElement;
+        let open = true;
+        const focusables = () => Array.from(el.querySelectorAll(FOCUSABLE))
+            .filter(f => !f.disabled && f.offsetParent !== null);
+
+        function onKey(e) {
+            if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+            if (e.key !== 'Tab') return;
+            const f = focusables();
+            if (!f.length) { e.preventDefault(); return; }
+            const first = f[0], last = f[f.length - 1];
+            if (!el.contains(document.activeElement)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+            else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+        function close() {
+            if (!open) return;
+            open = false;
+            document.removeEventListener('keydown', onKey);
+            el.style.display = 'none';
+            if (opener && opener.focus && document.contains(opener)) opener.focus();
+            if (onClose) onClose();
+        }
+
+        el.hidden = false;
+        el.style.display = 'flex';
+        document.addEventListener('keydown', onKey);
+        const target = typeof initialFocus === 'string' ? el.querySelector(initialFocus) : initialFocus;
+        (target || focusables()[0])?.focus();
+        return {close};
+    }
+
+    // Confirmation par modale (remplace `confirm()`). `el` : une `.modal` qui
+    // contient un bouton [data-ok] et des éléments [data-cancel] (Annuler, ✕,
+    // fond). Promesse résolue à true (confirmé) ou false (annulé, Échap).
+    function confirmModal(el) {
+        return new Promise(resolve => {
+            let ok = false;
+            const okBtn = el.querySelector('[data-ok]');
+            const cancels = el.querySelectorAll('[data-cancel]');
+            const onOk = () => { ok = true; handle.close(); };
+            const onCancel = () => handle.close();
+            const handle = modal(el, {
+                initialFocus: '.modal-foot [data-cancel]',
+                onClose: () => {
+                    okBtn.removeEventListener('click', onOk);
+                    cancels.forEach(c => c.removeEventListener('click', onCancel));
+                    resolve(ok);
+                },
+            });
+            okBtn.addEventListener('click', onOk);
+            cancels.forEach(c => c.addEventListener('click', onCancel));
+        });
     }
 
     // Quantité affichée avec la virgule décimale française : un nombre est
@@ -58,5 +156,5 @@
         return _data;
     }
 
-    window.Common = {esc, copyText, postJson, pageData, qtyFr};
+    window.Common = {esc, copyText, requestJson, postJson, modal, confirmModal, sessionExpired, pageData, qtyFr};
 })();

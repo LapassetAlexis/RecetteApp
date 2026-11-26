@@ -1,14 +1,16 @@
-"""Pages générales : accueil (constructeur), historique, service worker, santé."""
+"""Pages générales : accueil (constructeur), semaine en cours, historique,
+service worker, santé."""
 
 import json
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.config import settings
 from app.deps import BASE_DIR, db, templates
-from app.services.planning import _attach_label, _builder_from_plats, _nb_jours
+from app.services.planning import attach_label, nb_jours_periode
+from app.services.planning_builder import builder_from_plats
 
 router = APIRouter()
 
@@ -48,13 +50,18 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
     did = _parse_id(planning) or _parse_id(draft)
     if did:
         existing = await db.get_planning_with_recipes(did)
-        if existing and (_parse_id(planning) or not existing.get("valide", 0)):
+        if existing and existing.get("valide", 0) and not _parse_id(planning):
+            # `?draft=` sur une semaine validée (lien ancien, onglet resté
+            # ouvert) : on la rouvre par `?planning=` plutôt qu'un constructeur vide.
+            suite = "&saved=1" if saved else ""
+            return RedirectResponse(url=f"/?planning={did}{suite}", status_code=303)
+        if existing:
             try:
                 data = json.loads(existing["data_json"])
                 b = data.get("builder")
                 if not isinstance(b, list):
                     # Ancien planning sans grille : reconstruite depuis les plats.
-                    b = _builder_from_plats(
+                    b = builder_from_plats(
                         data.get("plats", []), data.get("off_meals"),
                         existing.get("nb_personnes") or 4,
                     )
@@ -65,7 +72,7 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
                     valide = bool(existing.get("valide", 0))
                     # Période enregistrée (un dernier jour absent en fait partie).
                     if data.get("nb_jours"):
-                        nb_jours = _nb_jours(data)
+                        nb_jours = nb_jours_periode(data)
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -84,6 +91,45 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
     )
 
 
+# Nombre de semaines validées examinées pour trouver celle en cours.
+SEMAINE_FENETRE = 60
+
+
+def _periode(planning: dict) -> tuple[date, date] | None:
+    """Premier et dernier jour couverts par un planning (début + période),
+    ou None si la date de début est illisible."""
+    try:
+        debut = date.fromisoformat(str(planning.get("week_start") or ""))
+    except ValueError:
+        return None
+    try:
+        data = json.loads(planning.get("data_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return debut, debut + timedelta(days=nb_jours_periode(data) - 1)
+
+
+def planning_en_cours(plannings: list[dict], today: date) -> dict | None:
+    """Planning validé dont la période contient `today` (le plus récemment
+    créé si plusieurs), sinon le plus récent de la liste, sinon None.
+    `plannings` est trié du plus récent au plus ancien (`list_plannings`)."""
+    for p in plannings:
+        per = _periode(p)
+        if per and per[0] <= today <= per[1]:
+            return p
+    return plannings[0] if plannings else None
+
+
+@router.get("/semaine")
+async def semaine_courante():
+    """« Cette semaine » : planning validé en cours, à défaut le plus récent,
+    à défaut le constructeur (accueil)."""
+    p = planning_en_cours(await db.list_plannings(limit=SEMAINE_FENETRE), date.today())
+    return RedirectResponse(f"/planning/{p['id']}" if p else "/", status_code=303)
+
+
 HISTORIQUE_PAGE = 20
 
 
@@ -95,8 +141,8 @@ async def historique(request: Request, n: int = HISTORIQUE_PAGE):
     une page de 20). On en lit une de plus pour savoir s'il en reste."""
     n = max(HISTORIQUE_PAGE, min(n, 1000))
     lus = await db.list_plannings(limit=n + 1)
-    plannings = [_attach_label(p) for p in lus[:n]]
-    drafts = [_attach_label(p) for p in await db.list_drafts(limit=20)]
+    plannings = [attach_label(p) for p in lus[:n]]
+    drafts = [attach_label(p) for p in await db.list_drafts(limit=20)]
     return templates.TemplateResponse(
         request,
         "historique.html",

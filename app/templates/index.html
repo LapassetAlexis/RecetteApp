@@ -11,6 +11,15 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
+{% if valide and draft_id %}
+{% set parts = (week_start or '').split('-') %}
+<div class="alert alert-warn edit-banner" role="status">
+    ✏️ Tu modifies la semaine validée du
+    <strong>{{ (parts[2] ~ '/' ~ parts[1] ~ '/' ~ parts[0]) if parts | length == 3 else week_start }}</strong>.
+    Elle reste validée après enregistrement.
+</div>
+{% endif %}
+
 <form method="POST" action="/construire" class="card" id="bf">
     <div class="form-r">
         <div class="form-g">
@@ -43,9 +52,18 @@
         🎨 sur les midis, le badge <strong>G</strong> regroupe (même couleur = même repas).
     </small>
 
+    {# « valider » enregistre puis ouvre la page planning ; la validation du
+       brouillon se fait là-bas (décision D1). Semaine validée rouverte : elle
+       le reste, d'où des libellés sans « brouillon ». #}
     <div class="build-actions">
+        {% if valide and draft_id %}
+        <button type="submit" class="btn btn-secondary btn-lg" id="btn-draft" data-action="brouillon">💾 Enregistrer et continuer</button>
+        <button type="submit" class="btn btn-primary btn-lg" id="btn-b" data-action="valider">✅ Enregistrer les modifications</button>
+        <a href="/planning/{{ draft_id }}" class="btn btn-ghost btn-lg" id="btn-cancel">Annuler</a>
+        {% else %}
         <button type="submit" class="btn btn-secondary btn-lg" id="btn-draft" data-action="brouillon">💾 Enregistrer le brouillon</button>
-        <button type="submit" class="btn btn-primary btn-lg" id="btn-b" data-action="valider">✅ Valider ma semaine</button>
+        <button type="submit" class="btn btn-primary btn-lg" id="btn-b" data-action="valider">📅 Enregistrer et voir le planning</button>
+        {% endif %}
     </div>
 </form>
 

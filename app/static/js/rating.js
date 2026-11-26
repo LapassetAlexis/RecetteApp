@@ -14,8 +14,12 @@
         if (typeof window.toast === 'function') window.toast(msg, type);
     }
 
+    // Par Common.postJson (session expirée, réponse non JSON) quand common.js
+    // est chargé ; fetch direct sinon.
     async function postRating(pageId, note) {
-        const r = await fetch('/api/rate/' + encodeURIComponent(pageId), {
+        const url = '/api/rate/' + encodeURIComponent(pageId);
+        if (window.Common && window.Common.postJson) return window.Common.postJson(url, {note: note});
+        const r = await fetch(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({note: note}),

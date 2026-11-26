@@ -8,11 +8,8 @@ import aiosqlite
 import app.main as main
 from app.notion_client import NotionClient
 from app.services import backup
-from app.services.shopping import _ingredients_to_text
-from tests import test_routes
-from tests.test_routes import _recipe
-
-client = test_routes.client  # fixture réutilisée
+from app.services.shopping import ingredients_to_text
+from tests.aides import _recipe
 
 
 def _page(props):
@@ -35,7 +32,7 @@ def test_ingredients_from_text_relit_le_format_ecrit():
     ings = [{"nom": "épinards", "quantite": "700", "unite": "g"},
             {"nom": "œufs", "quantite": "4", "unite": ""},
             {"nom": "huile", "quantite": "", "unite": "c. à s."}]
-    assert backup.ingredients_from_text(_ingredients_to_text(ings)) == ings
+    assert backup.ingredients_from_text(ingredients_to_text(ings)) == ings
     assert backup.ingredients_from_text("") == []
     assert backup.ingredients_from_text("\n  \n- \n") == []
 

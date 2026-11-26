@@ -57,6 +57,10 @@
 .b-group { cursor: pointer; border: none; border-radius: 8px; padding: 4px 8px;
     font-size: .9rem; font-weight: 700; color: #fff; }
 .group-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: .82rem; }
+/* Une entrée par groupe ; --g = couleur du groupe (posée par builder.js). */
+.gl-item { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px;
+    border: 1px solid var(--g); background: color-mix(in srgb, var(--g) 13%, transparent); }
+.gl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--g); display: inline-block; }
 .group-picker { position: absolute; z-index: 60; display: flex; gap: 6px; padding: 6px;
     background: var(--card, #fff); border: 1px solid var(--bo, #ddd); border-radius: 10px;
     box-shadow: 0 4px 16px rgba(0,0,0,.18); }
@@ -92,6 +96,7 @@
 .pk-recent { background: #fff4d6; color: #8a5a00; }
 .build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .build-actions .btn { flex: 1 1 220px; }
+.build-actions #btn-cancel { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
 
 /* Mobile : une seule colonne (midi puis soir empilés) — la grille 3 colonnes
    à min-width 560px provoquait un scroll horizontal sur téléphone. */
@@ -122,4 +127,7 @@
         background: var(--surface); border-top: 1px solid var(--bo);
     }
     .build-actions .btn { flex: 1 1 140px; padding: 10px 12px; font-size: .92rem; }
+    /* Semaine validée rouverte : trois boutons sur une ligne (barre collante basse). */
+    .build-actions:has(#btn-cancel) .btn { flex-basis: 0; }
+    .build-actions #btn-cancel { flex: 0 0 auto; }
 }

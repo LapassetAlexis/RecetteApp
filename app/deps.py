@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 
-from app.config import TAG_GROUPS
+from app.config import TAG_GROUPS, settings
 from app.database import Database
 from app.llm_client import LLMClient
 from app.notion_client import NotionClient
@@ -42,3 +42,6 @@ templates.env.globals["asset_version"] = str(int(time.time()))
 templates.env.filters["clean_title"] = clean_recipe_title
 # Tags groupés par catégorie (affichage des formulaires)
 templates.env.globals["tag_groups"] = TAG_GROUPS
+# Auth active ? (bandeau d'avertissement de la page « Données » sinon). Lu au
+# chargement, comme le middleware d'auth de `app.main`.
+templates.env.globals["auth_enabled"] = settings.auth_enabled

@@ -7,25 +7,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from starlette.testclient import TestClient
 
 from app import main
-from tests.test_routes import _recipe
+from tests.aides import _recipe
 
 JS = Path(main.__file__).resolve().parent / "static" / "js" / "cuisine.js"
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 @pytest.fixture

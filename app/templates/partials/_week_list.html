@@ -17,6 +17,18 @@
         <div class="meal off {{ moment }}"><span class="off-lbl">🚫 {{ day_labels[d-1].long }} {{ day_labels[d-1].date }} — Absent</span></div>
         {% endif %}
         {% endfor %}
+        {# Créneaux vides de la période (ni plat ni « absent ») : case « Ajouter ». #}
+        {% set ns = namespace(pris=[]) %}
+        {% for run in week_rows[moment] %}{% set ns.pris = ns.pris + run.jours %}{% endfor %}
+        {% for d in range(1, (nb_jours | default(7)) + 1) %}
+        {% if d not in ns.pris and (d ~ ':' ~ moment) not in off_meals %}
+        <div class="meal-empty {{ moment }}">
+            <span class="meal-tag">{{ day_labels[d-1].long }} {{ day_labels[d-1].date }}</span>
+            <button type="button" class="meal-add" data-jour="{{ d }}" data-moment="{{ moment }}"
+                    aria-label="Ajouter un repas {{ day_labels[d-1].long }} {{ day_labels[d-1].date }} {{ moment }}">＋ Ajouter un repas</button>
+        </div>
+        {% endif %}
+        {% endfor %}
     </div>
     {% endfor %}
 </div>

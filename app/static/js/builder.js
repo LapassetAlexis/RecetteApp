@@ -1,6 +1,6 @@
 // Constructeur de planning (page « / ») : état, grille, groupes de midis,
 // période « Du / Au », sérialisation et envoi du formulaire.
-// Données serveur lues dans #page-data : {builder, saved}.
+// Données serveur lues dans #page-data : {builder, saved, valide, nb_jours}.
 //
 // Les fonctions pures (sans accès au DOM) sont exposées sur `window.Builder`
 // pour être testables : initialState, hydrateBuilder, nbDaysInitial,
@@ -11,7 +11,10 @@
     // ══ Fonctions pures ═════════════════════════════════════════════════
     const JOURS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
     const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-    const GROUP_COLORS = ['#e67e22', '#27ae60', '#8e44ad', '#2980b9', '#c0392b'];  // 5 couleurs max
+    // Une couleur distincte par groupe possible (7 midis au plus = 7 groupes).
+    // Fond des pastilles « G1… » en texte blanc : chaque teinte atteint 4,5:1
+    // (tests/test_jetons_contraste.py).
+    const GROUP_COLORS = ['#b25e14', '#1e864a', '#8e44ad', '#277ab1', '#c0392b', '#d52f81', '#6d4c41'];
     const DEFAULT_PERS = [2, 2, 2, 2, 2, 4, 4];
     const DEFAULT_GROUPS = [1, 1, 2, 2, 2, 3, 4];
     const BASES = ['Viande', 'Poisson', 'Œuf', 'Légume', 'Féculent', 'Végé'];
@@ -204,7 +207,7 @@
 
     // Groupe « propre » pour le midi du jour `day` : un groupe sans autre midi
     // actif (de préférence totalement inutilisé). Garde le groupe actuel s'il
-    // est déjà seul. Au-delà des 5 couleurs, un nouveau numéro (couleur recyclée).
+    // est déjà seul. 7 couleurs pour 7 midis : il reste toujours un groupe libre.
     function freeGroup(state, activeDays, day) {
         const others = [];
         for (let d = 1; d <= 7; d++) if (d !== day) others.push(state[d + ':midi']);
@@ -388,7 +391,29 @@
         });
     }
 
+    // Groupes de midis à afficher dans la légende : [{group, days:[jours]}],
+    // dans l'ordre du premier jour, limités aux jours de la période à convives.
+    function legendGroups(state, activeDays) {
+        const out = [];
+        const byGroup = {};
+        for (let d = 1; d <= 7; d++) {
+            const c = state[d + ':midi'];
+            if (!activeDays.has(d) || !(c.persons > 0)) continue;
+            if (!byGroup[c.group]) { byGroup[c.group] = { group: c.group, days: [] }; out.push(byGroup[c.group]); }
+            byGroup[c.group].days.push(d);
+        }
+        return out;
+    }
+
+    // Date de début par défaut d'un nouveau planning : aujourd'hui si la date
+    // proposée est passée ou invalide (`today` : Date locale à minuit).
+    function defaultStart(value, today) {
+        const d = parseDate(value);
+        return (!d || d < today) ? isoDate(today) : value;
+    }
+
     window.Builder = {
+        legendGroups, defaultStart,
         GROUP_COLORS, BASES, NON_REPAS, parseDate, isoDate, dayInfo, isSideItem, isMainItem,
         initialState, nbDaysInitial, activeDaysFor, hydrateBuilder, midiEditorDay,
         consolidateGroups, rangeDays, serialize, hasMainMeal, snapshot, stepPersons,
@@ -412,6 +437,15 @@
     // range « Du / Au ». `activeDays` reste l'ensemble consommé par la grille, la
     // sérialisation et les groupes de midis (jours hors période → « absent »).
     const activeDays = activeDaysFor(nbDaysInitial(INITIAL_BUILDER, DATA.nb_jours));
+
+    // Nouveau planning (aucun brouillon ni semaine rouverts) : le serveur propose
+    // le lundi de la semaine, déjà passé dès le mardi → aujourd'hui.
+    if (!INITIAL_BUILDER.length && !$('draft-id-input').value) {
+        const now = new Date();
+        const start = defaultStart($('week_start').value, new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+        $('week_start').setAttribute('value', start);
+        $('week_start').value = start;
+    }
 
     const startDate = () => parseDate($('week_start').value);
     const info = idx => dayInfo(startDate(), idx);
@@ -553,16 +587,14 @@
         bindCells();
     }
 
+    // Légende : groupes des midis de la période qui ont des convives (un jour
+    // hors période ou absent ne partage aucun repas).
     function renderLegend() {
-        const groups = [];
-        for (let d = 1; d <= 7; d++) groups.push(state[d + ':midi'].group);
-        const uniq = [...new Set(groups)];
-        $('group-legend').innerHTML = uniq.map(g => {
-            const days = groups.map((v, i) => v === g ? info(i + 1).court : null).filter(Boolean);
-            const col = GROUP_COLORS[(g - 1) % GROUP_COLORS.length];
-            return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${col}22;border:1px solid ${col};">
-            <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;"></span>
-            ${days.join(' + ')} ${days.length > 1 ? '= même repas' : ''}</span>`;
+        $('group-legend').innerHTML = legendGroups(state, activeDays).map(({ group, days }) => {
+            const col = GROUP_COLORS[(group - 1) % GROUP_COLORS.length];
+            const labels = days.map(d => info(d).court);
+            return `<span class="gl-item" style="--g:${col}"><span class="gl-dot"></span>`
+                + `${labels.join(' + ')}${labels.length > 1 ? ' = même repas' : ''}</span>`;
         }).join('');
     }
 
@@ -637,16 +669,15 @@
     }
 
     // ── Menu « ⋯ » d'une case : copier, déplacer, restes ───────────────
+    // Ouvert par Common.modal : piège Tab, Échap, focus rendu au bouton ⋯.
     let mealMenu = null;
-    let mealMenuOpener = null;
+    let mealMenuHandle = null;
+    // refocus=false (clic ailleurs) : le focus reste là où l'utilisateur a cliqué.
     function closeMealMenu(refocus) {
-        if (!mealMenu) return;
-        mealMenu.remove(); mealMenu = null;
-        if (mealMenuOpener) {
-            mealMenuOpener.setAttribute('aria-expanded', 'false');
-            if (refocus && document.contains(mealMenuOpener)) mealMenuOpener.focus();
-        }
-        mealMenuOpener = null;
+        if (!mealMenuHandle) return;
+        const keep = document.activeElement;
+        mealMenuHandle.close();
+        if (!refocus && keep && keep !== document.body && document.contains(keep)) keep.focus();
     }
     document.addEventListener('click', () => closeMealMenu(false));
 
@@ -716,7 +747,6 @@
         pop.addEventListener('click', ev => ev.stopPropagation());
         document.body.appendChild(pop);
         mealMenu = pop;
-        mealMenuOpener = btn;
         btn.setAttribute('aria-expanded', 'true');
         fillMealMenu(fromKey, 'root');
         // Sous le bouton, aligné à droite, sans déborder de l'écran (mobile).
@@ -725,15 +755,21 @@
         const left = Math.max(8, Math.min(r.right - w, document.documentElement.clientWidth - w - 8));
         pop.style.left = (window.scrollX + left) + 'px';
         pop.style.top = (window.scrollY + r.bottom + 4) + 'px';
+        btn.focus();   // déclencheur : Common.modal lui rend le focus à la fermeture
+        mealMenuHandle = window.Common.modal(pop, {
+            initialFocus: pop.querySelector('.b-menu-item:not([disabled])'),
+            onClose: () => {
+                pop.remove();
+                btn.setAttribute('aria-expanded', 'false');
+                if (mealMenu === pop) { mealMenu = null; mealMenuHandle = null; }
+            },
+        });
     }
 
-    // Échap : ferme d'abord le menu ⋯ ou le sélecteur de groupe, sinon le picker.
+    // Échap : le menu ⋯ et le picker se ferment par Common.modal ; reste le
+    // sélecteur de groupe.
     document.addEventListener('keydown', e => {
-        if (e.key !== 'Escape') return;
-        if (mealMenu) { closeMealMenu(true); return; }
-        if (groupPicker) { closeGroupPicker(); return; }
-        const pk = window.BuilderPicker;
-        if (pk && pk.isOpen()) { e.preventDefault(); pk.close(); }
+        if (e.key === 'Escape' && groupPicker) closeGroupPicker();
     });
 
     // ── Sérialisation + submit ─────────────────────────────────────────
@@ -748,18 +784,15 @@
         // Période explicite : un dernier jour à 0 convive en fait partie.
         $('nb-jours-input').value = activeDays.size;
         if (!hasMainMeal(state, activeDays)) {
+            // base.html ignore un envoi annulé : ni spinner ni barre à défaire.
             e.preventDefault();
-            // base.html (écouteur en capture) a déjà passé le bouton en chargement
-            // et lancé la barre de progression : on annule les deux.
-            form.querySelectorAll('button[type="submit"]').forEach(b => { b.classList.remove('loading'); b.disabled = false; });
-            $('nav-progress')?.classList.remove('active');
             toast('Choisis au moins un repas principal (case avec des convives).', 'error');
             return;
         }
         submitting = true;   // départ volontaire : pas d'alerte « non enregistré »
         const btn = $(submitAction === 'brouillon' ? 'btn-draft' : 'btn-b');
         btn.disabled = true;
-        btn.textContent = submitAction === 'brouillon' ? '⏳ Enregistrement…' : '⏳ Création…';
+        btn.textContent = '⏳ Enregistrement…';
     });
 
     // Message après un retour /?draft=<id>&saved=1 (brouillon) ou

@@ -9,26 +9,8 @@ import pytest
 from starlette.testclient import TestClient
 
 import app.main as main
-from app.services.shopping import apply_check, fmt_quantite, item_key, shopping_view
-from tests.test_routes import _case, _construire, _recipe
-
-
-def make_client(tmp_path, monkeypatch) -> TestClient:
-    """Client sur une base temporaire, Notion simulé (partagé par les tests L09)."""
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    return TestClient(main.app)
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with make_client(tmp_path, monkeypatch) as c:
-        yield c
+from app.services.shopping_list import apply_check, fmt_quantite, item_key, shopping_view
+from tests.aides import _case, _construire, _recipe
 
 
 def make_planning(client, monkeypatch, recettes: dict[str, list[dict]], generate=True) -> int:
@@ -219,8 +201,8 @@ def test_changement_de_repas_purge_les_coches_par_cle(client, monkeypatch):
     })
     for key in ("poulet|masse", "sel|pincee"):
         client.post(f"/api/shopping-check/{pid}", json={"item": key, "checked": True})
-    client.post(f"/api/update-meal/{pid}",
-                json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
+    client.post(f"/api/planning/{pid}/meals",
+                json={"slots": [{"jour": 1, "moment": "midi"}], "action": "set_main", "nom": "Curry"})
     assert data_of(pid)["courses_checked"] == ["sel|pincee"]
 
 

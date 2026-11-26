@@ -13,7 +13,7 @@ from app.categories import RAYON_ORDER, categorize, group_by_rayon
     ("pomme", "Fruits & légumes"),
     ("gousse d'ail", "Fruits & légumes"),
     ("poireaux", "Fruits & légumes"),
-    ("lait de coco", "Boissons"),
+    ("lait de coco", "Épicerie salée"),
     ("lait", "Crémerie & œufs"),
     ("poivrons", "Fruits & légumes"),
     ("thé vert", "Boissons"),

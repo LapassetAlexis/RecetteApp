@@ -3,18 +3,9 @@
 import json
 from urllib.parse import quote
 
-import pytest
-
-from app.services.shopping import add_extra, make_extra, remove_extra, set_masque
-from tests.test_courses_partage import data_of, make_client, make_planning, set_data, share
-from tests.test_routes import _case, _recipe
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with make_client(tmp_path, monkeypatch) as c:
-        yield c
-
+from app.services.shopping_list import add_extra, make_extra, remove_extra, set_masque
+from tests.aides import _case, _recipe
+from tests.test_courses_partage import data_of, make_planning, set_data, share
 
 RIZ = {"Poulet": [{"nom": "riz", "quantite": "100", "unite": "g"},
                   {"nom": "beurre", "quantite": "20", "unite": "g"}]}
@@ -86,7 +77,8 @@ def test_article_manuel_survit_a_un_changement_de_repas(client, monkeypatch):
     pid = make_planning(client, monkeypatch, {**RIZ, "Curry": [{"nom": "curry", "quantite": "1", "unite": "pot"}]})
     client.post(f"/api/courses/{pid}/extra", json={"texte": "café"})
     client.post(f"/api/shopping-check/{pid}", json={"item": "extra:cafe|", "checked": True})
-    client.post(f"/api/update-meal/{pid}", json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
+    client.post(f"/api/planning/{pid}/meals",
+                json={"slots": [{"jour": 1, "moment": "midi"}], "action": "set_main", "nom": "Curry"})
     data = data_of(pid)
     assert [e["key"] for e in data["courses_extra"]] == ["extra:cafe|"]
     assert data["courses_checked"] == ["extra:cafe|"]

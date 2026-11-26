@@ -2,18 +2,9 @@
 
 import asyncio
 
-import pytest
-
 import app.main as main
-from app.services.shopping import get_placard, set_placard, shopping_view
-from tests.test_courses_partage import data_of, make_client, make_planning, share
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with make_client(tmp_path, monkeypatch) as c:
-        yield c
-
+from app.services.shopping_list import get_placard, set_placard, shopping_view
+from tests.test_courses_partage import data_of, make_planning, share
 
 SEL = {"Poulet": [{"nom": "poulet", "quantite": "200", "unite": "g"},
                   {"nom": "Sel", "quantite": "1", "unite": "pincée"}]}

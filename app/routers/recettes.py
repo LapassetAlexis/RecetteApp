@@ -9,24 +9,27 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from app.config import BASE_OPTIONS, REPAS_OPTIONS, TAG_OPTIONS
 from app.deps import RATED_STATUS, db, llm, notion, templates
+from app.http import (
+    ERREUR_INTERNE,
+    ERREUR_LLM,
+    ERREUR_NOTION,
+    depuis_service,
+    erreur,
+    erreur_exception,
+    lire_json,
+)
+from app.services.enrichissement import enrich_all_events, enrich_many, planning_recipes
+from app.services.recette_edition import ajouter, analysis_response, enrichir_context, enrichir_enregistrer
+from app.services.recette_planifier import draft_choices_safe, planifier
 from app.services.recettes import (
-    _ajouter,
-    _analysis_response,
-    _attach_usage,
-    _cached_ingredients,
-    _detail_base_servings,
-    _detail_nutrition,
-    _draft_choices_safe,
-    _enrich_all_events,
-    _enrich_many,
-    _enrichir_context,
-    _enrichir_enregistrer,
-    _form_options,
-    _planifier,
-    _planning_recipes,
-    _recipe_stats,
-    _recipe_usage,
-    _usage_label,
+    attach_usage,
+    cached_ingredients,
+    detail_base_servings,
+    detail_nutrition,
+    form_options,
+    recipe_stats,
+    recipe_usage,
+    usage_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,8 +54,8 @@ async def liste_recettes(request: Request):
         ings_by_id, duree_by_id = {}, {}
 
     # Stats pour les filtres (type / base / état / tag) + usage (tri, badge)
-    stats = _recipe_stats(recettes, ings_by_id, duree_by_id)
-    _attach_usage(recettes, await _recipe_usage())
+    stats = recipe_stats(recettes, ings_by_id, duree_by_id)
+    attach_usage(recettes, await recipe_usage())
 
     return templates.TemplateResponse(
         request,
@@ -77,11 +80,11 @@ async def detail_recette(request: Request, page_id: str):
 
         # Ingrédients structurés depuis le cache local
         cached = await db.get_enriched(page_id)
-        ingredients = _cached_ingredients(cached)
+        ingredients = cached_ingredients(cached)
 
         # Base de portions de CETTE recette : priorité au cache, repli sur la
         # valeur Notion (Portions) lue par _parse_page, défaut 4.
-        base_servings = _detail_base_servings(cached, recette)
+        base_servings = detail_base_servings(cached, recette)
 
         # Instructions depuis les blocks Notion (best-effort)
         try:
@@ -91,7 +94,7 @@ async def detail_recette(request: Request, page_id: str):
             instructions = []
 
         duree = cached.get("cuisson_minutes") if cached else 0
-        usage = (await _recipe_usage()).get(page_id)
+        usage = (await recipe_usage()).get(page_id)
         return templates.TemplateResponse(
             request,
             "recette_detail.html",
@@ -100,10 +103,10 @@ async def detail_recette(request: Request, page_id: str):
                 "ingredients": ingredients,
                 "base_servings": base_servings,
                 "instructions": instructions,
-                "nutrition": _detail_nutrition(cached, ingredients, base_servings),
+                "nutrition": detail_nutrition(cached, ingredients, base_servings),
                 "duree": duree or 0,
-                "usage_label": _usage_label(usage),
-                "drafts": await _draft_choices_safe(),
+                "usage_label": usage_label(usage),
+                "drafts": await draft_choices_safe(),
             },
         )
     except Exception:
@@ -120,7 +123,7 @@ async def enrichir_page(request: Request, page_id: str, url: str = "", refetch: 
     recette = await notion.get_recipe(page_id)
     if not recette:
         return HTMLResponse("Recette non trouvée", status_code=404)
-    ctx = await _enrichir_context(recette, page_id, url=url, refetch=bool(refetch))
+    ctx = await enrichir_context(recette, page_id, url=url, refetch=bool(refetch))
     return templates.TemplateResponse(request, "enrichir.html", ctx)
 
 
@@ -148,7 +151,7 @@ async def enrichir_submit(
     recette = await notion.get_recipe(page_id)
     if not recette:
         return RedirectResponse(url="/recettes", status_code=303)
-    erreur = await _enrichir_enregistrer(page_id, recette, {
+    erreur = await enrichir_enregistrer(page_id, recette, {
         "nom": nom, "repas": repas, "tags": tags, "base": base, "nature": nature,
         "moment": moment, "etat": etat, "ingredients_text": ingredients_text, "steps": steps,
         "image_url": image_url, "nutrition_json": nutrition_json, "duree_minutes": duree_minutes,
@@ -166,17 +169,12 @@ async def api_planifier(page_id: str, request: Request):
     JSON : {planning_id (id d'un brouillon, ou "new"), jour 1-7, moment
     midi|soir, date AAAA-MM-JJ (nouveau brouillon), persons (optionnel)}.
     Le plat du créneau est créé ou remplacé, la liste de courses régénérée."""
+    body = await lire_json(request)
     try:
-        body = await request.json()
-    except Exception:
-        body = None
-    if not isinstance(body, dict):
-        return {"error": "Corps JSON attendu"}
-    try:
-        return await _planifier(page_id, body)
+        return depuis_service(await planifier(page_id, body))
     except Exception as e:
         logger.exception("Erreur ajout au planning")
-        return {"error": str(e)}
+        return erreur_exception(e)
 
 
 @router.post("/recette/{page_id}/supprimer")
@@ -185,10 +183,14 @@ async def supprimer_recette(page_id: str):
     Renvoie du JSON (appelée en fetch depuis la fiche détail)."""
     try:
         await notion.archive_recipe(page_id)
+    except Exception:
+        logger.exception("Erreur suppression recette (Notion)")
+        return erreur("Impossible de supprimer la recette : Notion est injoignable.", 502)
+    try:
         await db.delete_enriched(page_id)
     except Exception:
-        logger.exception("Erreur suppression recette")
-        return {"error": "Impossible de supprimer la recette."}
+        logger.exception("Erreur suppression recette (cache)")
+        return erreur(ERREUR_INTERNE, 500)
     return {"success": True}
 
 
@@ -198,7 +200,7 @@ async def ajouter_page(request: Request):
     return templates.TemplateResponse(
         request,
         "ajouter.html",
-        {**_form_options(), "success": None, "error": None, "form": None},
+        {**form_options(), "success": None, "error": None, "form": None},
     )
 
 
@@ -219,7 +221,7 @@ async def ajouter_recette(
 ):
     """Ajoute une recette depuis une URL ou manuellement. En cas d'erreur, le
     formulaire est ré-affiché à l'étape 2 avec toutes les valeurs saisies."""
-    ctx = await _ajouter({
+    ctx = await ajouter({
         "url": url, "nom": nom, "repas": repas, "tags": tags, "base": base, "nature": nature,
         "moment": moment, "base_servings": base_servings, "ingredients_manual": ingredients_manual,
         "steps": steps, "image_url": image_url,
@@ -230,12 +232,12 @@ async def ajouter_recette(
 @router.post("/api/rate/{page_id}")
 async def api_rate(page_id: str, request: Request):
     """Note une recette (⭐ à ⭐⭐⭐⭐⭐)."""
+    data = await lire_json(request)
+    note = data.get("note", "")
+    # "" = retirer la note ; sinon une des 5 valeurs étoilées
+    if note != "" and note not in ("⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"):
+        return erreur("Note invalide")
     try:
-        data = await request.json()
-        note = data.get("note", "")
-        # "" = retirer la note ; sinon une des 5 valeurs étoilées
-        if note != "" and note not in ("⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"):
-            return {"error": "Note invalide"}
         await notion.update_rating(page_id, note)
         # Noter une recette = elle a été testée → on la sort de « À essayer ».
         warning = ""
@@ -247,70 +249,81 @@ async def api_rate(page_id: str, request: Request):
                 warning = (f"Note enregistrée, mais l'état n'a pas pu passer à "
                            f"« {RATED_STATUS} » (option Notion introuvable ?).")
         return {"success": True, "warning": warning}
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur notation")
-        return {"error": str(e)}
+        return erreur(ERREUR_NOTION, 502)
 
 
 @router.post("/api/analyze-url")
 async def api_analyze_url(request: Request):
     """Analyse une URL et retourne les infos extraites."""
+    data = await lire_json(request)
+    url = str(data.get("url") or "").strip()
+    if not url:
+        return erreur("URL manquante")
     try:
-        data = await request.json()
-        url = data.get("url", "")
-        if not url:
-            return {"error": "URL manquante"}
-
         # Extraction unifiée : titre, type, tags, ingrédients, instructions,
         # image — depuis la page elle-même (JSON-LD si dispo, sinon LLM).
         # Plus de second appel "à l'aveugle" qui hallucinait les ingrédients.
         info = await llm.extract_recipe_from_url(url)
-        return _analysis_response(info, info.get("image_url", ""), info.get("source", ""))
+        return analysis_response(info, info.get("image_url", ""), info.get("source", ""))
 
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur analyse URL")
-        return {"error": str(e)}
+        return erreur("Analyse de la page impossible : vérifie l'adresse ou réessaie plus tard.", 502)
 
 
 @router.post("/api/analyze-text")
 async def api_analyze_text(request: Request):
     """Structure une recette collée en texte libre (Gemini, note perso...)."""
+    data = await lire_json(request)
+    text = data.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return erreur("Texte manquant")
     try:
-        data = await request.json()
-        text = data.get("text", "")
-        if not text or not text.strip():
-            return {"error": "Texte manquant"}
-
         info = await llm.extract_recipe_from_text(text)
-        return _analysis_response(info, "", info.get("source", "llm-text"))
+        return analysis_response(info, "", info.get("source", "llm-text"))
 
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur analyse texte")
-        return {"error": str(e)}
+        return erreur(ERREUR_LLM, 502)
 
 
 @router.post("/api/enrich-week/{planning_id}")
 async def api_enrich_week(planning_id: int):
     """Relance l'enrichissement de toutes les recettes d'un planning (plats +
     accompagnements), sans toucher au reste du catalogue."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return erreur("Planning introuvable", 404)
     try:
-        planning = await db.get_planning_with_recipes(planning_id)
-        if not planning:
-            return {"error": "Planning introuvable"}
         plats = json.loads(planning["data_json"]).get("plats", [])
-
-        recettes = _planning_recipes(plats)
-        counts = await _enrich_many(recettes)
+        recettes = planning_recipes(plats)
+        counts = await enrich_many(recettes)
         return {"success": True, "total": len(recettes), **counts}
     except Exception as e:
         logger.exception("Erreur enrichissement semaine")
-        return {"error": str(e)}
+        return erreur_exception(e, ERREUR_NOTION)
 
 
-@router.get("/api/enrich-all/stream")
-async def api_enrich_all_stream():
-    """Variante SSE : enrichit toutes les recettes en streamant la progression
-    (évite le timeout d'une requête synchrone longue et donne un retour live)."""
-    return StreamingResponse(_enrich_all_events(), media_type="text/event-stream", headers={
+async def _events_sans_detail():
+    """Événements de `enrich_all_events`, l'événement `error` ramené à un
+    message générique (le détail de l'exception est déjà dans les logs)."""
+    async for ev in enrich_all_events():
+        if ev.startswith("event: error"):
+            ev = f"event: error\ndata: {json.dumps({'error': ERREUR_INTERNE}, ensure_ascii=False)}\n\n"
+        yield ev
+
+
+@router.post("/api/enrich-all/stream")
+async def api_enrich_all_stream(request: Request):
+    """Enrichit toutes les recettes en streamant la progression (SSE lu par
+    `fetch` en flux dans `js/recettes-liste.js`).
+
+    L'action écrit dans Notion : POST seulement, et un formulaire HTML
+    (`Accept: text/html`) est refusé (405) ; seul un client de flux la lance."""
+    if "text/html" in request.headers.get("accept", ""):
+        return erreur("Action à lancer depuis la page Recettes.", 405)
+    return StreamingResponse(_events_sans_detail(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
     })

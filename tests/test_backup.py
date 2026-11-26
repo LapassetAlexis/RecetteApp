@@ -12,10 +12,7 @@ import app.main as main
 from app.database import Database
 from app.services import backup
 from scripts import backup as backup_script
-from tests import test_routes
-from tests.test_routes import _case, _construire, _recipe
-
-client = test_routes.client  # fixture réutilisée
+from tests.aides import _case, _construire, _recipe
 
 
 def _db(path) -> Database:

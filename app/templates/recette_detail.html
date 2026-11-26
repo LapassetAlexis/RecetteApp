@@ -154,113 +154,12 @@
         </div>
     </form>
 </div>
-<script type="application/json" id="page-data">{{ {"recette_id": recette.id, "drafts": drafts} | tojson }}</script>
+<script type="application/json" id="page-data">{{ {"recette_id": recette.id, "base_servings": base_servings, "drafts": drafts} | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/js/common.js?v={{ asset_version }}"></script>
 <script src="/static/js/rating.js?v={{ asset_version }}"></script>
 <script src="/static/js/recette-planifier.js?v={{ asset_version }}"></script>
-<script>
-const BASE_SERVINGS = {{ base_servings }};
-let servings = BASE_SERVINGS;
-
-// Parse une quantité : décimales (1,5) et fractions (1/2). null si non numérique.
-function parseQty(s) {
-    s = (s || '').toString().trim().replace(',', '.');
-    if (!s) return null;
-    const frac = s.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
-    if (frac) { const d = parseFloat(frac[2]); return d ? parseFloat(frac[1]) / d : null; }
-    if (/^\d+(?:\.\d+)?$/.test(s)) return parseFloat(s);
-    return null;
-}
-function fmtQty(n) {
-    if (Number.isInteger(n)) return String(n);
-    return String(Math.round(n * 100) / 100);
-}
-
-function render() {
-    const ratio = servings / BASE_SERVINGS;
-    const cookLines = [`>> Serves: ${servings}`, ''];
-    document.querySelectorAll('.ing').forEach(li => {
-        const raw = li.dataset.qty, unit = li.dataset.unit || '';
-        const n = parseQty(raw);
-        const scaled = n !== null ? fmtQty(n * ratio) : raw;
-        // Affichage : virgule décimale (« 1,5 kg ») ; Cooklang garde le point.
-        const shown = window.Common.qtyFr(scaled || '');
-        const qEl = li.querySelector('.ing-q');
-        qEl.textContent = shown ? (unit ? `${shown} ${unit}` : shown) : '';
-        // ligne Cooklang
-        const nom = li.querySelector('.ing-n').textContent;
-        if (scaled && unit) cookLines.push(`@${nom}{${scaled}%${unit}}`);
-        else if (scaled) cookLines.push(`@${nom}{${scaled}}`);
-        else cookLines.push(`@${nom}`);
-    });
-    const srvN = document.getElementById('srv-n');
-    if (srvN) srvN.textContent = servings;  // absent sans ingrédients
-    const ck = document.getElementById('btn-cuisine');
-    if (ck) ck.href = `/recette/{{ recette.id }}/cuisine?portions=${servings}`;
-    const raw = document.getElementById('cook-raw');
-    if (raw) raw.textContent = cookLines.join('\n');
-}
-
-document.getElementById('srv-minus')?.addEventListener('click', () => {
-    servings = Math.max(1, servings - 1); render();
-});
-document.getElementById('srv-plus')?.addEventListener('click', () => {
-    servings = Math.min(50, servings + 1); render();
-});
-render();
-
-// ── Suppression (archive Notion) avec modale de confirmation ──
-const delModal = document.getElementById('del-modal');
-let delOpener = null;  // élément qui a ouvert la modale (focus rendu à la fermeture)
-const delOpen = () => delModal && delModal.style.display !== 'none';
-const closeDel = () => {
-    if (!delOpen()) return;
-    delModal.style.display = 'none';
-    delOpener?.focus();
-    delOpener = null;
-};
-document.getElementById('btn-delete')?.addEventListener('click', function() {
-    if (!delModal) return;
-    delOpener = this;
-    delModal.style.display = 'flex';
-    document.getElementById('del-cancel')?.focus();
-});
-// Échap ferme la modale ; Tab reste piégé entre ses boutons.
-document.addEventListener('keydown', (e) => {
-    if (!delOpen()) return;
-    if (e.key === 'Escape') { e.preventDefault(); closeDel(); return; }
-    if (e.key === 'Tab') {
-        const f = Array.from(delModal.querySelectorAll('button:not([disabled])'));
-        if (!f.length) return;
-        const first = f[0], last = f[f.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-        else if (!delModal.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
-    }
-});
-document.getElementById('del-x')?.addEventListener('click', closeDel);
-document.getElementById('del-cancel')?.addEventListener('click', closeDel);
-delModal?.querySelector('.modal-bg')?.addEventListener('click', closeDel);
-document.getElementById('del-confirm')?.addEventListener('click', async function() {
-    this.disabled = true; this.textContent = '⏳ Suppression...';
-    try {
-        const r = await fetch('/recette/{{ recette.id }}/supprimer', { method: 'POST' });
-        const d = await r.json();
-        if (d.success) {
-            toast('Recette supprimée', 'success');
-            window.navStart?.();
-            window.location.href = '/recettes';
-        } else {
-            toast(d.error || 'Erreur lors de la suppression', 'error');
-            this.disabled = false; this.textContent = '🗑 Supprimer';
-        }
-    } catch (e) {
-        toast('Erreur réseau', 'error');
-        this.disabled = false; this.textContent = '🗑 Supprimer';
-    }
-});
-</script>
+<script src="/static/js/recette-fiche.js?v={{ asset_version }}"></script>
 {% endblock %}

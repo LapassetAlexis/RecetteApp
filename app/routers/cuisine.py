@@ -7,8 +7,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from app import deps
-from app.services.recettes import _cached_ingredients, _detail_base_servings
-from app.services.shopping import fmt_quantite
+from app.services.recettes import cached_ingredients, detail_base_servings
+from app.services.shopping_list import fmt_quantite
 from app.text_utils import scale_ingredients
 
 logger = logging.getLogger(__name__)
@@ -39,11 +39,11 @@ async def mode_cuisine(request: Request, page_id: str, portions: str | None = No
         if not recette:
             return HTMLResponse("Recette non trouvée", status_code=404)
         cached = await deps.db.get_enriched(page_id)
-        base = _detail_base_servings(cached, recette)
+        base = detail_base_servings(cached, recette)
         n = _portions(portions, base)
         # Virgule décimale française à l'affichage (« 1,5 kg »), comme les courses.
         ingredients = [{**i, "quantite": fmt_quantite(i.get("quantite"))}
-                       for i in scale_ingredients(_cached_ingredients(cached), n / base)]
+                       for i in scale_ingredients(cached_ingredients(cached), n / base)]
         try:
             instructions = await deps.notion.get_recipe_instructions(page_id)
         except Exception as e:
