@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 NOTION_VERSION = "2022-06-28"
 BASE_URL = "https://api.notion.com/v1"
 CACHE_TTL = 60  # secondes : durée de vie du cache de la liste des recettes
+RICH_TEXT_MAX = 2000  # caractères max d'un segment rich_text Notion
+
+
+def _rich_text_chunks(text: str, size: int = RICH_TEXT_MAX) -> list[dict[str, Any]]:
+    """Découpe un texte en segments `rich_text` de `size` caractères au plus
+    (Notion refuse un segment plus long ; plusieurs segments se suivent)."""
+    return [{"text": {"content": text[i:i + size]}} for i in range(0, len(text), size)] or [
+        {"text": {"content": ""}}
+    ]
 
 
 class NotionClient:
@@ -80,22 +89,46 @@ class NotionClient:
         recipe = self._parse_page(resp.json())
         return recipe if recipe["nom"] else None
 
-    async def get_recipe_instructions(self, page_id: str) -> list[str]:
-        """Récupère les étapes de cuisson depuis les blocks de la page."""
-        steps: list[str] = []
+    async def _list_children(self, page_id: str) -> list[dict[str, Any]] | None:
+        """Tous les blocs enfants d'une page, en suivant la pagination (100 par
+        appel). None si Notion refuse la lecture (page absente, droits)."""
         client = self._http()
-        resp = await client.get(
-            f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
-            headers=self._headers, timeout=30,
-        )
-        if resp.status_code >= 400:
-            return steps
-        for block in resp.json().get("results", []):
-            if block.get("type") == "numbered_list_item":
-                rt = block["numbered_list_item"].get("rich_text", [])
-                txt = "".join(t.get("plain_text", "") for t in rt).strip()
-                if txt:
-                    steps.append(txt)
+        blocks: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            url = f"{BASE_URL}/blocks/{page_id}/children?page_size=100"
+            if cursor:
+                url += f"&start_cursor={cursor}"
+            resp = await client.get(url, headers=self._headers, timeout=30)
+            if resp.status_code >= 400:
+                return None if not blocks else blocks
+            data = resp.json()
+            blocks.extend(data.get("results", []))
+            cursor = data.get("next_cursor")
+            if not data.get("has_more") or not cursor:
+                return blocks
+
+    async def get_recipe_instructions(self, page_id: str) -> list[str]:
+        """Récupère les étapes de cuisson depuis les blocks de la page.
+
+        Lit toute la page (pagination au-delà de 100 blocs). Une étape est un
+        item de liste numérotée ou un paragraphe ; les paragraphes et listes
+        rangés sous un titre « Ingrédients » sont ignorés."""
+        steps: list[str] = []
+        blocks = await self._list_children(page_id)
+        in_ingredients = False
+        for block in blocks or []:
+            t = block.get("type", "")
+            rt = block.get(t, {}).get("rich_text", []) if isinstance(block.get(t), dict) else []
+            txt = "".join(x.get("plain_text", "") for x in rt).strip()
+            if t.startswith("heading_"):
+                low = txt.lower()
+                in_ingredients = "ingrédient" in low or "ingredient" in low
+                continue
+            if in_ingredients:
+                continue
+            if t in ("numbered_list_item", "paragraph") and txt:
+                steps.append(txt)
         return steps
 
     async def _fetch_all_recipes(self) -> list[dict[str, Any]]:
@@ -275,18 +308,20 @@ class NotionClient:
         page_id: str,
         ingredients_text: str,
     ) -> dict[str, Any]:
-        """Ajoute les ingrédients dans la propriété Ingrédients (colonne Notion)."""
-        # Essayer d'abord la propriété (colonne du tableau)
-        properties = {
-            "Ingrédients": {
-                "rich_text": [{"text": {"content": ingredients_text[:2000]}}]
-            }
-        }
+        """Écrit les ingrédients dans la propriété Ingrédients (colonne Notion).
+
+        Le texte est découpé en segments de 2 000 caractères (limite Notion
+        par segment `rich_text`) au lieu d'être tronqué. L'icône 🥗 n'est posée
+        que si la page n'en a pas déjà une."""
+        properties = {"Ingrédients": {"rich_text": _rich_text_chunks(ingredients_text)}}
+        body: dict[str, Any] = {"properties": properties}
         client = self._http()
+        if not await self._has_icon(page_id):
+            body["icon"] = {"emoji": "🥗"}
         resp = await client.patch(
             f"{BASE_URL}/pages/{page_id}",
             headers=self._headers,
-            json={"properties": properties, "icon": {"emoji": "🥗"}},
+            json=body,
             timeout=30,
         )
         if resp.status_code == 400:
@@ -294,6 +329,19 @@ class NotionClient:
             return await self._append_ingredients_blocks(page_id, ingredients_text)
         resp.raise_for_status()
         return resp.json()
+
+    async def _has_icon(self, page_id: str) -> bool:
+        """La page a-t-elle déjà une icône ? En cas de doute (lecture
+        impossible), on répond oui pour ne rien écraser."""
+        try:
+            resp = await self._http().get(
+                f"{BASE_URL}/pages/{page_id}", headers=self._headers, timeout=30
+            )
+        except httpx.HTTPError:
+            return True
+        if resp.status_code >= 400:
+            return True
+        return bool(resp.json().get("icon"))
 
     async def _append_ingredients_blocks(
         self, page_id: str, ingredients_text: str
@@ -436,14 +484,11 @@ class NotionClient:
         puis ré-écrit les instructions à jour. Évite les doublons et résidus."""
         keywords = ("ingrédient", "ingredient", "préparation", "preparation", "instruction")
         client = self._http()
-        resp = await client.get(
-            f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
-            headers=self._headers, timeout=30,
-        )
         to_delete: list[str] = []
-        if resp.status_code < 400:
+        blocks = await self._list_children(page_id)
+        if blocks is not None:
             in_section = False
-            for b in resp.json().get("results", []):
+            for b in blocks:
                 t = b.get("type", "")
                 if t.startswith("heading_"):
                     txt = "".join(
@@ -506,22 +551,29 @@ class NotionClient:
     async def update_recipe_meta(
         self, page_id: str, repas: list[str] | str = "", tags: list[str] | None = None,
         nature: str = "", base: list[str] | str | None = None,
+        moment: str | None = None, etat: str | None = None,
     ) -> dict[str, Any]:
-        """Met à jour le type (Repas), les tags, la Nature et la Base d'une
-        recette existante. Seuls les champs fournis sont écrits."""
+        """Met à jour le type (Repas), les tags, la Nature, la Base, le Moment et
+        l'État d'une recette existante. Seuls les champs fournis sont écrits :
+        `tags=[]` vide les tags, `moment=""` efface le Moment ; un État vide est
+        ignoré (une propriété status ne peut pas être vidée)."""
         properties: dict[str, Any] = {}
         repas_names = [repas] if isinstance(repas, str) else list(repas)
         repas_names = [n for n in repas_names if n]
         if repas_names:
             properties["Repas"] = {"multi_select": [{"name": n} for n in repas_names]}
         if tags is not None:
-            properties["Tag"] = {"multi_select": [{"name": t} for t in tags]}
+            properties["Tag"] = {"multi_select": [{"name": t} for t in tags if t]}
         if base is not None:
             base_names = [base] if isinstance(base, str) else list(base)
             base_names = [n for n in base_names if n]
             properties["Base"] = {"multi_select": [{"name": n} for n in base_names]}
         if nature:
             properties["Nature"] = {"select": {"name": nature}}
+        if moment is not None:
+            properties["Moment"] = {"select": {"name": moment} if moment else None}
+        if etat:
+            properties["État"] = {"status": {"name": etat}}
         if not properties:
             return {}
         client = self._http()
@@ -532,7 +584,6 @@ class NotionClient:
         resp.raise_for_status()
         self.invalidate_cache()
         return resp.json()
-
 
     async def archive_recipe(self, page_id: str) -> dict[str, Any]:
         """Archive (= supprime) une recette dans Notion. Notion n'a pas de vraie
