@@ -289,7 +289,7 @@ def split_instructions(text: str) -> list[str]:
     text = (text or "").strip()
     if not text:
         return []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
     if len(lines) > 1:
         return lines
     sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÀ-ÝÉÈ0-9])", text)

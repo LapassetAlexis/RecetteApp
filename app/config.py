@@ -34,9 +34,11 @@ class Settings:
     groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
     groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"))
 
-    # Auth HTTP Basic optionnelle. Si AUTH_USER et AUTH_PASSWORD sont tous
-    # deux renseignés, toutes les routes (sauf /health et /static) exigent ces
-    # identifiants. Sinon, aucune authentification (comportement par défaut).
+    # Auth par session optionnelle (formulaire /login, cookie signé 30 jours).
+    # Si AUTH_USER et AUTH_PASSWORD sont tous deux renseignés, toutes les routes
+    # exigent une session, sauf les chemins publics (/health, /static, /sw.js,
+    # /login, /logout et le partage /courses/<token>). Sinon, aucune
+    # authentification (comportement par défaut).
     auth_user: str = field(default_factory=lambda: os.getenv("AUTH_USER", ""))
     auth_password: str = field(default_factory=lambda: os.getenv("AUTH_PASSWORD", ""))
 
@@ -48,7 +50,7 @@ class Settings:
     app_title: str = field(default_factory=lambda: os.getenv("APP_TITLE", "Menu Planner"))
     # Si SECRET_KEY absent : on génère une clé aléatoire au démarrage plutôt
     # qu'une valeur statique devinable (les sessions seront invalidées à chaque
-    # redémarrage, ce qui est acceptable ici — aucune session persistante).
+    # redémarrage : définir SECRET_KEY pour garder les sessions de 30 jours).
     secret_key: str = field(
         default_factory=lambda: os.getenv("SECRET_KEY") or secrets.token_hex(32)
     )

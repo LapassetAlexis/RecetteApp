@@ -1,8 +1,12 @@
 """Tests du nettoyage des titres de recettes."""
 
 from app.text_utils import (
-    clean_recipe_title, merge_ingredients, normalize_cached_ingredient,
-    normalize_title_case, parse_ingredient_line, split_instructions,
+    clean_recipe_title,
+    merge_ingredients,
+    normalize_cached_ingredient,
+    normalize_title_case,
+    parse_ingredient_line,
+    split_instructions,
 )
 
 
@@ -90,7 +94,8 @@ def test_strip_site_suffix_dash():
 
 def test_strip_plat_et_recette():
     assert clean_recipe_title("Tiramisu Léger aux Framboises - Plat et Recette") == "Tiramisu Léger aux Framboises"
-    assert clean_recipe_title("Wok de Poulet aux légumes et Nouilles - Plat et Recette") == "Wok de Poulet aux légumes et Nouilles"
+    assert (clean_recipe_title("Wok de Poulet aux légumes et Nouilles - Plat et Recette")
+            == "Wok de Poulet aux légumes et Nouilles")
 
 
 def test_strip_pipe_suffix():

@@ -6,9 +6,9 @@ from app.llm_client import (
     _flatten_instructions,
     _handler_amandinecooking,
     _ingredients_from_text,
+    _join_fragments,
     _scrape_ingredient_list,
     _split_blob,
-    _join_fragments,
 )
 
 

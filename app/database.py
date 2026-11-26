@@ -1,15 +1,36 @@
 """Couche SQLite — historique des plannings & recettes enrichies."""
 
-import aiosqlite
 import json
 from datetime import date, timedelta
 from typing import Any
+
+import aiosqlite
 
 from app.config import settings
 
 
 def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
     return dict(row) if row else {}
+
+
+async def _insert_planning_recipes(
+    conn: aiosqlite.Connection, planning_id: int, recipes: list[dict[str, Any]],
+) -> None:
+    """Insère les lignes `planning_recipes` d'un planning (sans commit)."""
+    for r in recipes:
+        await conn.execute(
+            """INSERT INTO planning_recipes
+               (planning_id, notion_id, recipe_name, repas_type, jour, moment)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                planning_id,
+                r.get("notion_id"),
+                r["recipe_name"],
+                r.get("repas_type", ""),
+                r["jour"],
+                r["moment"],
+            ),
+        )
 
 
 class Database:
@@ -109,21 +130,7 @@ class Database:
                 (week_start, saison, nb_personnes, ingredients_force, data_json),
             )
             planning_id = cur.lastrowid
-
-            for r in recipes:
-                await db.execute(
-                    """INSERT INTO planning_recipes
-                       (planning_id, notion_id, recipe_name, repas_type, jour, moment)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        planning_id,
-                        r.get("notion_id"),
-                        r["recipe_name"],
-                        r.get("repas_type", ""),
-                        r["jour"],
-                        r["moment"],
-                    ),
-                )
+            await _insert_planning_recipes(db, planning_id, recipes)
             await db.commit()
             return planning_id
 
@@ -155,20 +162,7 @@ class Database:
                 "DELETE FROM planning_recipes WHERE planning_id = ?",
                 (planning_id,),
             )
-            for r in recipes:
-                await db.execute(
-                    """INSERT INTO planning_recipes
-                       (planning_id, notion_id, recipe_name, repas_type, jour, moment)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        planning_id,
-                        r.get("notion_id"),
-                        r["recipe_name"],
-                        r.get("repas_type", ""),
-                        r["jour"],
-                        r["moment"],
-                    ),
-                )
+            await _insert_planning_recipes(db, planning_id, recipes)
             await db.commit()
 
     async def update_planning_data(self, planning_id: int, data_json: str) -> None:
@@ -386,3 +380,29 @@ class Database:
                 "WHERE cuisson_minutes IS NOT NULL AND cuisson_minutes > 0"
             )
         return {nid: int(m) for nid, m in rows}
+
+    # ── Réglages du foyer (table app_prefs, une seule ligne) ──────
+
+    async def get_app_prefs(self) -> dict[str, Any]:
+        """Réglages uniques du foyer (placard, ordre des rayons…), {} si aucun.
+
+        Lecture tolérante : un JSON illisible ou qui n'est pas un objet donne {}."""
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall("SELECT data_json FROM app_prefs WHERE id = 1")
+        if not rows:
+            return {}
+        try:
+            data = json.loads(rows[0][0])
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    async def save_app_prefs(self, data: dict[str, Any]) -> None:
+        """Remplace les réglages du foyer (ligne unique id = 1)."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """INSERT INTO app_prefs (id, data_json) VALUES (1, ?)
+                   ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json""",
+                (json.dumps(data, ensure_ascii=False),),
+            )
+            await db.commit()

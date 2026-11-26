@@ -196,7 +196,10 @@ reste indisponible, l'app se rabat sur Ollama.
 ```
 RecetteApp/
 ├── app/
-│   ├── main.py              # Routes FastAPI + logique métier
+│   ├── main.py              # Application FastAPI : middlewares (auth) et routeurs
+│   ├── deps.py              # Instances partagées (base, Notion, LLM, templates)
+│   ├── routers/             # Routes par domaine (pages, planning, courses, recettes, catalogue, auth)
+│   ├── services/            # Règles métier (planning, courses, nutrition, recettes)
 │   ├── config.py            # Variables d'env, taxonomie (Nature, Repas, Base, Tag)
 │   ├── notion_client.py     # API Notion (lecture/écriture des recettes)
 │   ├── llm_client.py        # Client LLM (Groq/Gemini/Ollama) + extraction de pages
@@ -204,7 +207,6 @@ RecetteApp/
 │   ├── categories.py        # Rayon de magasin d'un ingrédient
 │   ├── text_utils.py        # Parsing et fusion des ingrédients, nettoyage des titres
 │   ├── nutrition.py         # Estimation nutritionnelle
-│   ├── cooklang.py          # Rendu Cooklang
 │   ├── templates/           # Pages Jinja2
 │   │   ├── base.html            # Layout commun
 │   │   ├── index.html           # Constructeur de semaine
