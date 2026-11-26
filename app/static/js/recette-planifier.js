@@ -9,7 +9,7 @@
 
     const modal = document.getElementById('plan-modal');
     const openBtn = document.getElementById('btn-planifier');
-    if (!modal || !openBtn || !window.Common) return;
+    if (!modal || !openBtn || !window.Common || !window.Common.modal) return;
 
     const {pageData, postJson} = window.Common;
     const data = pageData();
@@ -24,7 +24,6 @@
     const done = document.getElementById('plan-done');
     const doneText = document.getElementById('plan-done-text');
     const doneLink = document.getElementById('plan-done-link');
-    let opener = null;
 
     const today = () => {
         const d = new Date();
@@ -80,21 +79,18 @@
         refreshDays();
     }
 
-    const isOpen = () => modal.style.display !== 'none';
+    // Ouverture par Common.modal : focus initial, piège Tab, Échap, focus rendu.
+    let handle = null;
     function open() {
-        opener = document.activeElement;
         if (!dateInput.value) dateInput.value = today();
         done.hidden = true;
         refreshDays();
-        modal.style.display = 'flex';
-        draftSel.focus();
+        handle = window.Common.modal(modal, {
+            initialFocus: draftSel,
+            onClose: () => { handle = null; },
+        });
     }
-    function close() {
-        if (!isOpen()) return;
-        modal.style.display = 'none';
-        opener?.focus();
-        opener = null;
-    }
+    const close = () => { if (handle) handle.close(); };
 
     openBtn.addEventListener('click', open);
     document.getElementById('plan-x')?.addEventListener('click', close);
@@ -103,20 +99,6 @@
     draftSel.addEventListener('change', refreshDays);
     daySel.addEventListener('change', refreshWarn);
     momentSel.addEventListener('change', refreshWarn);
-
-    // Échap ferme ; Tab reste piégé dans la modale.
-    document.addEventListener('keydown', (e) => {
-        if (!isOpen()) return;
-        if (e.key === 'Escape') { e.preventDefault(); close(); return; }
-        if (e.key !== 'Tab') return;
-        const f = Array.from(modal.querySelectorAll('a[href], button, select, input'))
-            .filter(el => !el.disabled && el.offsetParent !== null);
-        if (!f.length) return;
-        const first = f[0], last = f[f.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-        else if (!modal.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
-    });
 
     document.getElementById('plan-form').addEventListener('submit', async (e) => {
         e.preventDefault();

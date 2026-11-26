@@ -76,7 +76,8 @@ def test_liste_chips_de_filtre_en_boutons(client, monkeypatch):  # noqa: F811
     assert chips and all("aria-pressed=" in c for c in chips)
     assert re.search(r'aria-pressed="true" class="stat-chip active" data-filter="nature" data-value="Recette"', html)
     assert 'id="chip-rapide" aria-pressed="false"' in html
-    assert "setTimeout(applyFilters, 120)" in html                   # recherche temporisée
+    js = client.get("/static/js/recettes-liste.js").text          # JS sorti en fichier (M08)
+    assert "setTimeout(applyFilters, 120)" in js                     # recherche temporisée
 
 
 def test_fiche_notation_partagee_et_modale_accessible(client, monkeypatch):  # noqa: F811
@@ -88,7 +89,7 @@ def test_fiche_notation_partagee_et_modale_accessible(client, monkeypatch):  # n
     assert re.search(r'class="star-clear"[^>]*aria-label="Retirer la note">', html)  # visible
     assert 'role="dialog"' in html and 'aria-modal="true"' in html
     assert 'aria-labelledby="del-title"' in html and 'id="del-title"' in html
-    assert "'Escape'" in html
+    assert "'Escape'" in html + client.get("/static/js/common.js").text  # Common.modal (M08)
 
 
 def test_aucun_bloc_de_notation_inline():

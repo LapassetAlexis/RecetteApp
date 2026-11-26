@@ -151,25 +151,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script type="application/json" id="page-data">{{ {"recette_id": recette.id} | tojson }}</script>
+<script src="/static/js/common.js?v={{ asset_version }}"></script>
 <script src="/static/js/steps-editor.js?v={{ asset_version }}"></script>
-<script>
-// Éditeur d'étapes : /static/js/steps-editor.js
-
-// « Ré-extraire » : recharge le formulaire pré-rempli depuis la source (les
-// champs actuels sont remplacés, rien n'est écrit avant « Valider »).
-document.getElementById('btn-extract')?.addEventListener('click', () => {
-    const u = document.getElementById('source_url').value.trim();
-    if (!u) { window.toast?.('Entre une URL d\'abord', 'error'); return; }
-    if (!confirm('Ré-extraire depuis la source ? Cela remplace les champs ci-dessous.')) return;
-    window.navStart?.();
-    window.location.href = '/recette/{{ recette.id }}/enrichir?refetch=1&url=' + encodeURIComponent(u);
-});
-
-// Retour visuel pendant l'enregistrement (le POST fait plusieurs appels Notion)
-document.getElementById('enrich-form')?.addEventListener('submit', () => {
-    const b = document.getElementById('enrich-submit');
-    if (b) { b.disabled = true; b.textContent = '⏳ Enregistrement...'; }
-    document.getElementById('enrich-loading')?.classList.add('show');
-});
-</script>
+<script src="/static/js/enrichir.js?v={{ asset_version }}"></script>
 {% endblock %}

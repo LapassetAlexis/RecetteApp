@@ -24,7 +24,7 @@ from app.services.planning import (
     plat_accompagnements,
 )
 from app.services.shopping import _ing_lines, _ingredients_to_text, _refresh_shopping_and_save
-from app.text_utils import normalize_title_case, parse_ingredient_line, split_instructions
+from app.text_utils import normalize_title_case, parse_ingredient_lines, split_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -293,8 +293,7 @@ async def _enrichir_context(recette: dict, page_id: str, url: str = "", refetch:
     if source_url and (refetch or url.strip() or not ingredients):
         try:
             info = await llm.extract_recipe_from_url(source_url)
-            src_ings = [i for i in (parse_ingredient_line(x) for x in info.get("ingredients", []))
-                        if i and i["nom"]]
+            src_ings = _parse_lines(info.get("ingredients", []))
             if src_ings:
                 ingredients = src_ings
             instructions_text = info.get("instructions", "")
@@ -327,6 +326,12 @@ async def _enrichir_context(recette: dict, page_id: str, url: str = "", refetch:
     }
 
 
+def _parse_lines(lines) -> list[dict]:
+    """Ingrédients structurés d'une saisie ligne à ligne : « sel, poivre »
+    donne deux ingrédients (`parse_ingredient_lines`), lignes vides ignorées."""
+    return [i for line in lines for i in parse_ingredient_lines(str(line or "")) if i.get("nom")]
+
+
 def _positive(value, default: int) -> int:
     """Entier strictement positif soumis, sinon `default`."""
     try:
@@ -349,10 +354,7 @@ async def _enrichir_enregistrer(page_id: str, recette: dict, f: dict) -> dict | 
     nom_norm = normalize_title_case(nom_source) if nom_source.isupper() else nom_source
     source_url = (f.get("source_url") or "").strip()
     steps = [s.strip() for s in f.get("steps") or [] if s.strip()]
-    structured = [
-        i for i in (parse_ingredient_line(line) for line in (f.get("ingredients_text") or "").split("\n"))
-        if i and i["nom"]
-    ]
+    structured = _parse_lines((f.get("ingredients_text") or "").split("\n"))
     nutrition_json = f.get("nutrition_json") or ""
     try:
         nutrition = nutrition_json if json.loads(nutrition_json) else ""
@@ -362,12 +364,13 @@ async def _enrichir_enregistrer(page_id: str, recette: dict, f: dict) -> dict | 
     bs = _positive(f.get("base_servings"), BASE_SERVINGS)
     image_url = f.get("image_url") or ""
     echecs: list[str] = []
-    cache_local_ok = False
+    reussites: list[str] = []
 
     async def _etape(label: str, coro) -> None:
         """Exécute une écriture Notion en isolant son échec éventuel."""
         try:
             await coro
+            reussites.append(label)
         except Exception:
             logger.exception(f"Erreur validation enrichissement : {label}")
             echecs.append(label)
@@ -376,14 +379,20 @@ async def _enrichir_enregistrer(page_id: str, recette: dict, f: dict) -> dict | 
         await _etape("titre", notion.update_recipe_title(page_id, nom_norm))
     if source_url and source_url != (recette.get("url") or ""):
         await _etape("URL source", notion.update_recipe_url(page_id, source_url))
+    # Cache local : portions, durée et nutrition écrites même sans ingrédient
+    # (la base de portions du cache prime sur Notion) ; une liste
+    # d'ingrédients vidée vide aussi le cache. Notion n'est pas vidé : le
+    # formulaire n'affiche que le cache, un champ vide n'y vaut pas effacement.
+    try:
+        await db.save_enriched(page_id, nom_norm,
+                               ingredients=json.dumps(structured) if structured else "",
+                               cuisson_minutes=duree_minutes, nutrition=nutrition,
+                               base_servings=bs)
+        cache_local_ok = True
+    except Exception:
+        logger.exception("Erreur validation enrichissement : cache local")
+        cache_local_ok = False
     if structured:
-        try:
-            await db.save_enriched(page_id, nom_norm, ingredients=json.dumps(structured),
-                                   cuisson_minutes=duree_minutes, nutrition=nutrition,
-                                   base_servings=bs)
-            cache_local_ok = True
-        except Exception:
-            logger.exception("Erreur validation enrichissement : cache local")
         await _etape("ingrédients", notion.update_ingredients(page_id, _ingredients_to_text(structured)))
     await _etape("portions", notion.update_portions(page_id, bs))
     if steps:
@@ -401,11 +410,12 @@ async def _enrichir_enregistrer(page_id: str, recette: dict, f: dict) -> dict | 
     if not echecs:
         return None
     msg = "Échec d'enregistrement dans Notion pour : " + ", ".join(echecs) + "."
-    if structured:
-        msg += (" Le cache local des ingrédients a bien été enregistré."
-                if cache_local_ok else
-                " Le cache local des ingrédients n'a pas non plus pu être enregistré.")
-    msg += " Rien n'a été validé : corrige puis re-valide."
+    if reussites:
+        msg += " Bien enregistré dans Notion : " + ", ".join(reussites) + "."
+    quoi = "des ingrédients" if structured else "(portions, durée)"
+    msg += (f" Le cache local {quoi} a bien été enregistré." if cache_local_ok
+            else f" Le cache local {quoi} n'a pas pu être enregistré.")
+    msg += " Corrige puis re-valide pour réécrire ce qui a échoué."
     # La saisie est reportée sur la recette pour re-cocher type/tags/nom.
     recette.update(nom=nom_norm, **{k: v for k, v in meta.items()})
     return {
@@ -486,8 +496,7 @@ async def _ajouter(f: dict) -> dict:
     if page_id and image_url:
         await _etape("l'image", notion.update_image(page_id, image_url))
     if page_id and ingredients:
-        ings_list = [i for i in (parse_ingredient_line(line) for line in ingredients.split("\n"))
-                     if i and i["nom"]]
+        ings_list = _parse_lines(ingredients.split("\n"))
         await _etape("le cache local des ingrédients", db.save_enriched(
             notion_id=page_id, recipe_name=nom, ingredients=json.dumps(ings_list), base_servings=bs,
         ))
