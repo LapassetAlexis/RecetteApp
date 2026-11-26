@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.deps import db, templates
+from app.http import ERREUR_INTERNE, erreur, lire_json
 from app.services import store
 from app.services.planning import _day_labels, _per_day_list, _repas_libres
 from app.services.shopping import (
@@ -36,16 +37,13 @@ router = APIRouter()
 
 
 def _error(message: str, status: int) -> JSONResponse:
-    return JSONResponse({"error": message}, status_code=status)
+    return erreur(message, status)
 
 
-async def _body(request: Request) -> dict:
-    """Corps JSON de la requête ({} s'il est absent ou illisible)."""
-    try:
-        body = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return {}
-    return body if isinstance(body, dict) else {}
+async def _body(request: Request, code: str | None = None) -> dict:
+    """Corps JSON de la requête ({} s'il est absent) ; illisible → 400, plus
+    de 64 Ko → 413 (cf. `app.http.lire_json`)."""
+    return await lire_json(request, code)
 
 
 async def _liste_html(planning_id: int, data: dict) -> dict:
@@ -126,11 +124,13 @@ async def generate_shopping(planning_id: int, request: Request):
     try:
         data, res = await store.update_planning(planning_id, fn)
         if data is None:
-            return {"error": "Planning introuvable"}
+            return _error("Planning introuvable", 404)
+        if isinstance(res, dict) and res.get("error"):
+            return _error(res["error"], 400)
         return res
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur génération liste courses")
-        return {"error": str(e)}
+        return _error(ERREUR_INTERNE, 500)
 
 
 @router.post("/api/shopping-check/{planning_id}")
@@ -140,25 +140,23 @@ async def shopping_check(planning_id: int, request: Request):
     Body JSON : {"item": "<clé d'article>", "checked": true|false}. Un nom seul
     (ancien client) est encore accepté. L'état est persisté dans
     planning_data["courses_checked"] (liste de clés)."""
+    body = await _body(request)
+    item = str(body.get("item", "")).strip().lower()
+    checked = bool(body.get("checked"))
+    if not item:
+        return _error("Item manquant", 400)
     try:
-        body = await _body(request)
-        item = str(body.get("item", "")).strip().lower()
-        checked = bool(body.get("checked"))
-        if not item:
-            return {"error": "Item manquant"}
-
         data, ok = await mutate_planning_data(
             planning_id, lambda d: apply_check(d, item, checked),
         )
-        if data is None:
-            return {"error": "Planning introuvable"}
-        # Clé inconnue (article disparu, coche rejouée hors-ligne) : rien à faire,
-        # mais ce n'est pas une erreur à rejouer.
-        return {"success": True, "ignored": not ok}
-
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur mise à jour case liste de courses")
-        return {"error": str(e)}
+        return _error(ERREUR_INTERNE, 500)
+    if data is None:
+        return _error("Planning introuvable", 404)
+    # Clé inconnue (article disparu, coche rejouée hors-ligne) : rien à faire,
+    # mais ce n'est pas une erreur à rejouer.
+    return {"success": True, "ignored": not ok}
 
 
 @router.post("/planning/{planning_id}/partager")
@@ -180,11 +178,11 @@ async def partager_liste(planning_id: int, request: Request):
     try:
         data, token = await store.update_planning(planning_id, fn)
         if data is None:
-            return {"error": "Planning introuvable"}
+            return _error("Planning introuvable", 404)
         return {"url": f"/courses/{token}" if token else None}
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur lien de partage")
-        return {"error": str(e)}
+        return _error(ERREUR_INTERNE, 500)
 
 
 # ── Page publique : lecture + coches uniquement ─────────────────────────
@@ -237,7 +235,7 @@ async def courses_public_check(token: str, request: Request):
     planning = await db.get_planning_by_share_token(token)
     if not planning:
         return _revoque()
-    body = await _body(request)
+    body = await _body(request, code="corps")
     item = str(body.get("item", ""))
     checked = bool(body.get("checked"))
     data, ok = await mutate_planning_data(

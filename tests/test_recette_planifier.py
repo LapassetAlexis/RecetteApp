@@ -126,7 +126,9 @@ def test_erreur_inattendue_renvoyee_en_json(client, monkeypatch):  # noqa: F811
     async def _ko(pid):
         raise RuntimeError("Notion HS")
     monkeypatch.setattr(main.notion, "get_recipe", _ko)
-    assert _post(client, "curry", {"moment": "midi"})["error"] == "Notion HS"
+    r = client.post("/api/recette/curry/planifier", json={"moment": "midi"})
+    # Statut 500 et message générique : le texte de l'exception reste dans les logs (M09).
+    assert r.status_code == 500 and r.json()["error"] and "Notion HS" not in r.text
 
 
 def test_fiche_liste_les_brouillons(client, monkeypatch):  # noqa: F811
