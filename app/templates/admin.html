@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Données{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/admin.css?v={{ asset_version }}">{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>💾 Données</h1>
+    <p>Sauvegarder et restaurer les plannings, listes de courses, ingrédients et réglages.</p>
+</div>
+
+<div class="admin-wrap">
+    {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+
+    {% if done %}
+    <div class="alert alert-success" role="status">
+        Import {{ 'en remplacement' if done.mode == 'replace' else 'en fusion' }} appliqué :
+        {{ done.plannings }} planning(s) et {{ done.enriched }} recette(s) en cache ajoutés.
+    </div>
+    {% endif %}
+
+    {% if rehydrated %}
+    <div class="alert alert-success" role="status">
+        Réhydratation terminée : {{ rehydrated.restaurees }} recette(s) restaurée(s) depuis Notion,
+        {{ rehydrated.deja_en_cache }} déjà en cache, {{ rehydrated.sans_texte }} sans ingrédients dans Notion.
+    </div>
+    {% endif %}
+
+    {% if recap %}
+    <section class="card admin-recap" aria-labelledby="recap-title">
+        <h2 id="recap-title" class="admin-h2">Vérifier avant d'importer</h2>
+        <p class="admin-muted">Fichier « {{ nom_fichier }} »{% if recap.exported_at %}, exporté le {{ recap.exported_at[:10] }}{% endif %}.</p>
+        <table class="admin-table">
+            <thead><tr><th scope="col"></th><th scope="col">Fichier</th><th scope="col">Base actuelle</th></tr></thead>
+            <tbody>
+                <tr><th scope="row">Semaines validées</th><td>{{ recap.plannings }}</td><td>{{ counts.plannings }}</td></tr>
+                <tr><th scope="row">Brouillons</th><td>{{ recap.brouillons }}</td><td>{{ counts.brouillons }}</td></tr>
+                <tr><th scope="row">Listes de courses</th><td>{{ recap.listes }}</td><td>—</td></tr>
+                <tr><th scope="row">Recettes en cache</th><td>{{ recap.enriched }}</td><td>{{ counts.enriched }}</td></tr>
+                <tr><th scope="row">Réglages</th><td>{{ recap.prefs | join(', ') if recap.prefs else 'aucun' }}</td><td>—</td></tr>
+            </tbody>
+        </table>
+        {% if recap_mode == 'replace' %}
+        <div class="alert alert-warn">Mode remplacement : toutes les données actuelles seront effacées puis remplacées par celles du fichier.</div>
+        {% else %}
+        <p class="admin-muted">Mode fusion : seuls les plannings, recettes et réglages absents de la base seront ajoutés. Rien n'est écrasé.</p>
+        {% endif %}
+        <form method="post" action="/admin/import" class="admin-actions">
+            <input type="hidden" name="jeton" value="{{ jeton }}">
+            <input type="hidden" name="mode" value="{{ recap_mode }}">
+            <button type="submit" class="btn {{ 'btn-danger' if recap_mode == 'replace' else 'btn-primary' }}">Confirmer l'import</button>
+            <a href="/admin" class="btn btn-ghost">Annuler</a>
+        </form>
+    </section>
+    {% endif %}
+
+    <section class="card" aria-labelledby="etat-title">
+        <h2 id="etat-title" class="admin-h2">Base locale</h2>
+        <ul class="admin-stats">
+            <li><strong>{{ counts.plannings }}</strong> semaine(s) validée(s)</li>
+            <li><strong>{{ counts.brouillons }}</strong> brouillon(s)</li>
+            <li><strong>{{ counts.enriched }}</strong> recette(s) avec ingrédients en cache</li>
+        </ul>
+    </section>
+
+    <section class="card" aria-labelledby="export-title">
+        <h2 id="export-title" class="admin-h2">Exporter</h2>
+        <p class="admin-muted">Télécharge un fichier JSON avec toutes les données locales. Les recettes elles-mêmes restent dans Notion.</p>
+        <a href="/admin/export" class="btn btn-primary" download>⬇️ Télécharger la sauvegarde</a>
+    </section>
+
+    <section class="card" aria-labelledby="import-title">
+        <h2 id="import-title" class="admin-h2">Importer</h2>
+        <form method="post" action="/admin/import" enctype="multipart/form-data">
+            <div class="form-g">
+                <label for="fichier">Fichier de sauvegarde (.json)</label>
+                <input type="file" id="fichier" name="fichier" accept="application/json,.json" required class="admin-file">
+            </div>
+            <fieldset class="form-g admin-modes">
+                <legend>Mode</legend>
+                <label><input type="radio" name="mode" value="merge" checked> Fusionner : ajouter ce qui manque</label>
+                <label><input type="radio" name="mode" value="replace"> Remplacer : effacer la base puis restaurer</label>
+            </fieldset>
+            <button type="submit" class="btn btn-secondary">Vérifier le fichier</button>
+            <small class="admin-muted">Un récapitulatif s'affiche avant toute modification.</small>
+        </form>
+    </section>
+
+    <section class="card" aria-labelledby="rehydr-title">
+        <h2 id="rehydr-title" class="admin-h2">Relire les ingrédients depuis Notion</h2>
+        <p class="admin-muted">Pour les recettes sans ingrédients en cache, reconstruit la liste à partir de la colonne « Ingrédients » de Notion. Les ingrédients déjà présents ne sont jamais écrasés.</p>
+        <form method="post" action="/admin/rehydrater">
+            <button type="submit" class="btn btn-ghost">🔄 Réhydrater depuis Notion</button>
+        </form>
+    </section>
+</div>
+{% endblock %}
