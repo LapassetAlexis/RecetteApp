@@ -35,6 +35,7 @@ ROUTES_ATTENDUES = {
     ("GET", "/recette/{page_id}/cuisine"),
     ("GET", "/recettes"),
     ("GET", "/redoc"),
+    ("GET", "/semaine"),
     ("GET", "/sw.js"),
     ("HEAD", "/docs"),
     ("HEAD", "/docs/oauth2-redirect"),

@@ -1,10 +1,11 @@
-"""Pages générales : accueil (constructeur), historique, service worker, santé."""
+"""Pages générales : accueil (constructeur), semaine en cours, historique,
+service worker, santé."""
 
 import json
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.config import settings
 from app.deps import BASE_DIR, db, templates
@@ -82,6 +83,45 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
             "saved": bool(saved),
         },
     )
+
+
+# Nombre de semaines validées examinées pour trouver celle en cours.
+SEMAINE_FENETRE = 60
+
+
+def _periode(planning: dict) -> tuple[date, date] | None:
+    """Premier et dernier jour couverts par un planning (début + période),
+    ou None si la date de début est illisible."""
+    try:
+        debut = date.fromisoformat(str(planning.get("week_start") or ""))
+    except ValueError:
+        return None
+    try:
+        data = json.loads(planning.get("data_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return debut, debut + timedelta(days=_nb_jours(data) - 1)
+
+
+def planning_en_cours(plannings: list[dict], today: date) -> dict | None:
+    """Planning validé dont la période contient `today` (le plus récemment
+    créé si plusieurs), sinon le plus récent de la liste, sinon None.
+    `plannings` est trié du plus récent au plus ancien (`list_plannings`)."""
+    for p in plannings:
+        per = _periode(p)
+        if per and per[0] <= today <= per[1]:
+            return p
+    return plannings[0] if plannings else None
+
+
+@router.get("/semaine")
+async def semaine_courante():
+    """« Cette semaine » : planning validé en cours, à défaut le plus récent,
+    à défaut le constructeur (accueil)."""
+    p = planning_en_cours(await db.list_plannings(limit=SEMAINE_FENETRE), date.today())
+    return RedirectResponse(f"/planning/{p['id']}" if p else "/", status_code=303)
 
 
 HISTORIQUE_PAGE = 20

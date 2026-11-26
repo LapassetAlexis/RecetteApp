@@ -3,7 +3,7 @@
 {% block content %}
 <div class="hero"><h1>🔒 Connexion</h1></div>
 
-<form method="POST" action="/login" class="card" style="max-width:380px;margin:0 auto;" autocomplete="on">
+<form method="POST" action="/login" class="card login-card" autocomplete="on">
     <input type="hidden" name="next" value="{{ next }}">
     {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
     <div class="form-g">
@@ -16,6 +16,6 @@
         <input type="password" id="password" name="password" class="inp"
                autocomplete="current-password" required>
     </div>
-    <button type="submit" class="btn btn-primary btn-lg" style="margin-top:6px;">Se connecter</button>
+    <button type="submit" class="btn btn-primary btn-lg login-submit">Se connecter</button>
 </form>
 {% endblock %}
