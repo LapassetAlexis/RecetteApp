@@ -13,13 +13,22 @@ from app.services.planning import _attach_label, _builder_from_plats
 router = APIRouter()
 
 
+def _parse_id(raw: str) -> int:
+    try:
+        return int(raw) if raw else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request, draft: str = "", saved: str = ""):
+async def index(request: Request, draft: str = "", planning: str = "", saved: str = ""):
     """Page d'accueil : constructeur manuel de planning (grille 7 jours × 2).
 
     `?draft=<id>` rouvre un brouillon existant : on ré-injecte la grille du
     formulaire (stockée dans `data["builder"]`) pour l'éditer puis la mettre à
-    jour. `?saved=1` affiche un message « brouillon enregistré »."""
+    jour. `?planning=<id>` fait de même pour N'IMPORTE QUEL planning, validé
+    ou non (« ✏️ Modifier dans le constructeur ») : à l'enregistrement, une
+    semaine validée le reste. `?saved=1` affiche un message « enregistré »."""
     today = date.today()
     # Calcul du lundi de la semaine
     lundi = today - timedelta(days=today.weekday())
@@ -32,30 +41,26 @@ async def index(request: Request, draft: str = "", saved: str = ""):
     # Réouverture d'un brouillon : on hydrate la grille depuis data["builder"].
     builder: list = []
     draft_id = ""
-    if draft:
-        try:
-            did = int(draft)
-        except (TypeError, ValueError):
-            did = 0
-        if did:
-            planning = await db.get_planning_with_recipes(did)
-            # Uniquement les brouillons (valide=0) sont ré-éditables.
-            if planning and not planning.get("valide", 0):
-                try:
-                    data = json.loads(planning["data_json"])
-                    b = data.get("builder")
-                    if not isinstance(b, list):
-                        # Ancien brouillon sans grille : reconstruite depuis les plats.
-                        b = _builder_from_plats(
-                            data.get("plats", []), data.get("off_meals"),
-                            planning.get("nb_personnes") or 4,
-                        )
-                    if isinstance(b, list):
-                        builder = b
-                        draft_id = str(did)
-                        week_start = planning.get("week_start") or week_start
-                except (json.JSONDecodeError, TypeError):
-                    pass
+    # ?planning= : tout planning ; ?draft= : uniquement un brouillon (valide=0).
+    did = _parse_id(planning) or _parse_id(draft)
+    if did:
+        existing = await db.get_planning_with_recipes(did)
+        if existing and (_parse_id(planning) or not existing.get("valide", 0)):
+            try:
+                data = json.loads(existing["data_json"])
+                b = data.get("builder")
+                if not isinstance(b, list):
+                    # Ancien planning sans grille : reconstruite depuis les plats.
+                    b = _builder_from_plats(
+                        data.get("plats", []), data.get("off_meals"),
+                        existing.get("nb_personnes") or 4,
+                    )
+                if isinstance(b, list):
+                    builder = b
+                    draft_id = str(did)
+                    week_start = existing.get("week_start") or week_start
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     return templates.TemplateResponse(
         request,
@@ -70,15 +75,24 @@ async def index(request: Request, draft: str = "", saved: str = ""):
     )
 
 
+HISTORIQUE_PAGE = 20
+
+
 @router.get("/historique", response_class=HTMLResponse)
-async def historique(request: Request):
-    """Liste les plannings précédents (validés) et les brouillons en cours."""
-    plannings = [_attach_label(p) for p in await db.list_plannings(limit=20)]
+async def historique(request: Request, n: int = HISTORIQUE_PAGE):
+    """Liste les plannings précédents (validés) et les brouillons en cours.
+
+    `?n=<nombre>` : nombre de semaines validées affichées (« Voir plus » ajoute
+    une page de 20). On en lit une de plus pour savoir s'il en reste."""
+    n = max(HISTORIQUE_PAGE, min(n, 1000))
+    lus = await db.list_plannings(limit=n + 1)
+    plannings = [_attach_label(p) for p in lus[:n]]
     drafts = [_attach_label(p) for p in await db.list_drafts(limit=20)]
     return templates.TemplateResponse(
         request,
         "historique.html",
-        {"plannings": plannings, "drafts": drafts},
+        {"plannings": plannings, "drafts": drafts,
+         "next_n": n + HISTORIQUE_PAGE if len(lus) > n else 0},
     )
 
 

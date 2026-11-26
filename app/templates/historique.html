@@ -5,18 +5,25 @@
     <h1>📚 Historique des plannings</h1>
 </div>
 
+{# Bouton 👁 : aperçu déplié DANS la carte (utilisable au toucher et au clavier). #}
+{% macro preview_toggle(p) %}
+<button type="button" class="btn btn-ghost btn-sm hist-pv-btn" data-id="{{ p.id }}" aria-expanded="false" aria-controls="pv-{{ p.id }}" title="Aperçu de la semaine">👁 Aperçu</button>
+<div class="hist-pv" id="pv-{{ p.id }}" hidden></div>
+{% endmacro %}
+
 {% if drafts %}
 <h2 class="section-title">📝 Brouillons</h2>
 <div class="hist-grid" id="drafts-grid">
     {% for p in drafts %}
-    <div class="hist-item" data-draft="{{ p.id }}" data-preview="{{ p.id }}">
-        <a href="/?draft={{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
+    <div class="hist-item" data-card="{{ p.id }}" data-preview="{{ p.id }}">
+        <a href="/?draft={{ p.id }}" class="hist-link">
             <div class="date">📅 {{ p.label }}</div>
             <div class="meta">Créé le {{ p.created_at[:10] }}</div>
         </a>
         <div class="hist-actions">
             <a href="/?draft={{ p.id }}" class="btn btn-ghost btn-sm">✏️ Reprendre</a>
-            <button class="btn btn-ghost btn-sm hist-del" data-id="{{ p.id }}" title="Supprimer ce brouillon">🗑️ Supprimer</button>
+            {{ preview_toggle(p) }}
+            <button type="button" class="btn btn-ghost btn-sm hist-del" data-id="{{ p.id }}" data-kind="brouillon" data-label="{{ p.label }}" title="Supprimer ce brouillon">🗑️ Supprimer</button>
         </div>
     </div>
     {% endfor %}
@@ -25,18 +32,28 @@
 
 {% if plannings %}
 <h2 class="section-title">✅ Semaines validées</h2>
-<div class="hist-grid">
+<div class="hist-grid" id="valid-grid">
     {% for p in plannings %}
-    <div class="hist-item" data-preview="{{ p.id }}">
-        <a href="/planning/{{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
+    <div class="hist-item" data-card="{{ p.id }}" data-preview="{{ p.id }}">
+        <a href="/planning/{{ p.id }}" class="hist-link">
             <div class="date">📅 {{ p.label }}</div>
             {% if p.nb_personnes %}<div class="meta">{{ p.nb_personnes }} pers.</div>{% endif %}
             <div class="meta">Créé le {{ p.created_at[:10] }}</div>
         </a>
-        <button class="btn btn-ghost btn-sm hist-dup" data-id="{{ p.id }}" title="Refaire cette semaine en brouillon">🔁 Refaire</button>
+        <div class="hist-actions">
+            <button type="button" class="btn btn-ghost btn-sm hist-dup" data-id="{{ p.id }}" title="Refaire cette semaine en brouillon">🔁 Refaire</button>
+            <a href="/?planning={{ p.id }}" class="btn btn-ghost btn-sm" title="Modifier cette semaine dans le constructeur">✏️ Modifier</a>
+            {{ preview_toggle(p) }}
+            <button type="button" class="btn btn-ghost btn-sm hist-del" data-id="{{ p.id }}" data-kind="semaine" data-label="{{ p.label }}" title="Supprimer cette semaine">🗑️ Supprimer</button>
+        </div>
     </div>
     {% endfor %}
 </div>
+{% if next_n %}
+<div class="act">
+    <a href="/historique?n={{ next_n }}" class="btn btn-secondary" id="hist-more">Voir plus</a>
+</div>
+{% endif %}
 {% endif %}
 
 {% if not plannings and not drafts %}
@@ -46,92 +63,172 @@
 </div>
 {% endif %}
 
+<!-- Confirmation de suppression -->
+<div id="del-modal" class="modal" style="display:none">
+    <div class="modal-bg" id="del-bg"></div>
+    <div class="modal-box" role="alertdialog" aria-modal="true" aria-labelledby="del-title" aria-describedby="del-msg">
+        <div class="modal-top">
+            <h3 id="del-title">🗑️ Supprimer</h3>
+        </div>
+        <div class="modal-body">
+            <p id="del-msg"></p>
+        </div>
+        <div class="modal-foot hist-modal-foot">
+            <button type="button" class="btn btn-ghost btn-sm" id="del-cancel">Annuler</button>
+            <button type="button" class="btn btn-primary btn-sm hist-danger" id="del-ok">Supprimer</button>
+        </div>
+    </div>
+</div>
+
 <style>
-.hist-preview { position: fixed; z-index: 80; max-width: 320px; background: var(--card, #fff);
-    border: 1px solid var(--bo, #ddd); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
-    padding: 10px 12px; font-size: .82rem; pointer-events: none; }
-.hist-preview h4 { margin: 0 0 6px; font-size: .85rem; }
-.hist-preview .pv-day { display: grid; grid-template-columns: 34px 1fr; gap: 6px; padding: 2px 0; }
-.hist-preview .pv-j { font-weight: 700; color: var(--t2, #777); }
-.hist-preview .pv-m { line-height: 1.25; }
-.hist-preview .pv-empty { color: var(--t2, #999); }
+.hist-link { text-decoration:none; color:inherit; display:block; }
+.hist-actions .hist-danger, .hist-danger { background:#c0392b; border-color:#c0392b; color:#fff; }
+.hist-modal-foot { display:flex; justify-content:flex-end; gap:8px; }
+.hist-pv { margin-top:8px; padding:8px 10px; border-radius:8px; background:var(--bg, #faf7f2); font-size:.82rem; }
+.hist-pv .pv-day, .hist-preview .pv-day { display:grid; grid-template-columns:34px 1fr; gap:6px; padding:2px 0; }
+.hist-pv .pv-j, .hist-preview .pv-j { font-weight:700; color:var(--t2, #777); }
+.hist-pv .pv-m, .hist-preview .pv-m { line-height:1.25; overflow-wrap:anywhere; }
+.hist-pv .pv-empty, .hist-preview .pv-empty { color:var(--t2, #999); }
+.hist-preview { position:fixed; z-index:80; max-width:320px; background:var(--card, #fff);
+    border:1px solid var(--bo, #ddd); border-radius:10px; box-shadow:0 8px 28px rgba(0,0,0,.18);
+    padding:10px 12px; font-size:.82rem; pointer-events:none; }
+.hist-preview h4 { margin:0 0 6px; font-size:.85rem; }
 </style>
 <script>
-// ── Aperçu de la semaine au survol ─────────────────────────────────
-const _pvCache = {};
-let _pvEl = null;
-function pvHide() { if (_pvEl) { _pvEl.remove(); _pvEl = null; } }
-function pvShow(html, rect) {
-    pvHide();
-    const el = document.createElement('div');
-    el.className = 'hist-preview';
-    el.innerHTML = html;
-    document.body.appendChild(el);
-    // Positionne à droite de la carte, repli à gauche si déborde.
-    let left = rect.right + 10, top = rect.top;
-    const w = el.offsetWidth;
-    if (left + w > window.innerWidth - 8) left = Math.max(8, rect.left - w - 10);
-    el.style.left = left + 'px';
-    el.style.top = Math.max(8, Math.min(top, window.innerHeight - el.offsetHeight - 8)) + 'px';
-    _pvEl = el;
-}
-function pvRender(data) {
-    if (!data || !data.jours || !data.jours.length) return '<div class="pv-empty">Semaine vide.</div>';
-    let h = '<h4>🍽️ Aperçu</h4>';
-    data.jours.forEach(j => {
-        const lines = [];
-        if (j.midi) lines.push('☀️ ' + j.midi);
-        if (j.soir) lines.push('🌙 ' + j.soir);
-        h += `<div class="pv-day"><span class="pv-j">${j.jour}</span><span class="pv-m">${lines.map(esc).join('<br>')}</span></div>`;
-    });
-    return h;
-}
-function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-document.querySelectorAll('.hist-item[data-preview]').forEach(card => {
-    const id = card.dataset.preview;
-    card.addEventListener('mouseenter', async () => {
-        const rect = card.getBoundingClientRect();
-        if (_pvCache[id]) { pvShow(pvRender(_pvCache[id]), rect); return; }
-        try {
+(function () {
+    'use strict';
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const toastMsg = (m, t) => { if (window.toast) window.toast(m, t); };
+
+    // ── Aperçu de la semaine ────────────────────────────────────────────
+    const cache = {};
+    async function apercu(id) {
+        if (!cache[id]) {
             const r = await fetch(`/api/planning/${id}/apercu`);
-            const d = await r.json();
-            _pvCache[id] = d;
-            if (card.matches(':hover')) pvShow(pvRender(d), card.getBoundingClientRect());
-        } catch (e) { /* silencieux */ }
-    });
-    card.addEventListener('mouseleave', pvHide);
-});
-
-document.querySelectorAll('.hist-dup').forEach(b => b.onclick = async function() {
-    this.disabled = true; this.textContent = '⏳';
-    try {
-        const r = await fetch(`/planning/${this.dataset.id}/dupliquer`, {method:'POST'});
-        const d = await r.json();
-        if (d.success) { if (window.navStart) window.navStart(); window.location.href = `/planning/${d.planning_id}`; }
-        else { this.disabled = false; this.textContent = '🔁 Refaire'; }
-    } catch(e) { this.disabled = false; this.textContent = '🔁 Refaire'; }
-});
-
-document.querySelectorAll('.hist-del').forEach(b => b.onclick = async function() {
-    if (!confirm('Supprimer ce brouillon ?')) return;
-    this.disabled = true; this.textContent = '⏳';
-    try {
-        const r = await fetch(`/planning/${this.dataset.id}/supprimer`, {method:'POST'});
-        const d = await r.json();
-        if (d.success) {
-            const card = document.querySelector(`.hist-item[data-draft="${this.dataset.id}"]`);
-            if (card) card.remove();
-            if (window.toast) toast('Brouillon supprimé ✓', 'success');
-            const grid = document.getElementById('drafts-grid');
-            if (grid && !grid.querySelector('.hist-item')) location.reload();
-        } else {
-            this.disabled = false; this.textContent = '🗑️ Supprimer';
-            if (window.toast) toast(d.error || 'Erreur', 'error');
+            cache[id] = await r.json();
         }
-    } catch(e) {
-        this.disabled = false; this.textContent = '🗑️ Supprimer';
-        if (window.toast) toast('Erreur réseau', 'error');
+        return cache[id];
     }
-});
+    function pvRender(data, titre) {
+        if (!data || !data.jours || !data.jours.length) return '<div class="pv-empty">Semaine vide.</div>';
+        let h = titre ? '<h4>🍽️ Aperçu</h4>' : '';
+        data.jours.forEach(j => {
+            const lines = [];
+            if (j.midi) lines.push('☀️ ' + j.midi);
+            if (j.soir) lines.push('🌙 ' + j.soir);
+            h += `<div class="pv-day"><span class="pv-j">${esc(j.jour)}</span><span class="pv-m">${lines.map(esc).join('<br>')}</span></div>`;
+        });
+        return h;
+    }
+
+    // Survol (souris uniquement) : bulle flottante à côté de la carte.
+    let pvEl = null;
+    function pvHide() { if (pvEl) { pvEl.remove(); pvEl = null; } }
+    function pvShow(html, rect) {
+        pvHide();
+        const el = document.createElement('div');
+        el.className = 'hist-preview';
+        el.innerHTML = html;
+        document.body.appendChild(el);
+        let left = rect.right + 10;
+        const w = el.offsetWidth;
+        if (left + w > window.innerWidth - 8) left = Math.max(8, rect.left - w - 10);
+        el.style.left = left + 'px';
+        el.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - el.offsetHeight - 8)) + 'px';
+        pvEl = el;
+    }
+    if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+        document.querySelectorAll('.hist-item[data-preview]').forEach(card => {
+            card.addEventListener('mouseenter', async () => {
+                // Aperçu déjà déplié dans la carte : pas de bulle en double.
+                if (!card.querySelector('.hist-pv').hidden) return;
+                try {
+                    const d = await apercu(card.dataset.preview);
+                    if (card.matches(':hover')) pvShow(pvRender(d, true), card.getBoundingClientRect());
+                } catch (e) { /* silencieux */ }
+            });
+            card.addEventListener('mouseleave', pvHide);
+        });
+    }
+
+    // Bouton 👁 : déplie / replie l'aperçu dans la carte (tactile, clavier).
+    document.querySelectorAll('.hist-pv-btn').forEach(b => b.addEventListener('click', async function () {
+        const box = document.getElementById('pv-' + this.dataset.id);
+        const open = this.getAttribute('aria-expanded') === 'true';
+        pvHide();
+        if (open) {
+            box.hidden = true;
+            this.setAttribute('aria-expanded', 'false');
+            return;
+        }
+        box.hidden = false;
+        box.innerHTML = '<div class="pv-empty">⏳</div>';
+        this.setAttribute('aria-expanded', 'true');
+        try { box.innerHTML = pvRender(await apercu(this.dataset.id), false); }
+        catch (e) { box.innerHTML = '<div class="pv-empty">Aperçu indisponible.</div>'; }
+    }));
+
+    // ── Refaire une semaine validée ─────────────────────────────────────
+    document.querySelectorAll('.hist-dup').forEach(b => b.addEventListener('click', async function () {
+        this.disabled = true; this.textContent = '⏳';
+        try {
+            const r = await fetch(`/planning/${this.dataset.id}/dupliquer`, {method: 'POST'});
+            const d = await r.json();
+            if (d.success) { if (window.navStart) window.navStart(); window.location.href = `/planning/${d.planning_id}`; return; }
+        } catch (e) { /* bouton rétabli ci-dessous */ }
+        this.disabled = false; this.textContent = '🔁 Refaire';
+    }));
+
+    // ── Suppression (brouillon ou semaine validée), confirmée par modale ──
+    const modal = document.getElementById('del-modal');
+    let pending = null, opener = null;
+    function openDel(btn) {
+        pending = btn; opener = document.activeElement;
+        const quoi = btn.dataset.kind === 'semaine' ? 'la semaine validée' : 'le brouillon';
+        document.getElementById('del-msg').textContent =
+            `Supprimer ${quoi} « ${btn.dataset.label} » ? Cette action est définitive.`;
+        modal.style.display = 'flex';
+        document.getElementById('del-cancel').focus();
+    }
+    function closeDel() {
+        modal.style.display = 'none';
+        pending = null;
+        if (opener && document.contains(opener)) opener.focus();
+        opener = null;
+    }
+    async function confirmDel() {
+        const btn = pending;
+        if (!btn) return;
+        const ok = document.getElementById('del-ok');
+        ok.disabled = true;
+        try {
+            const r = await fetch(`/planning/${btn.dataset.id}/supprimer`, {method: 'POST'});
+            const d = await r.json();
+            if (d.success) {
+                const card = btn.closest('.hist-item');
+                const grid = card && card.parentElement;
+                opener = null;   // la carte disparaît : pas de retour de focus dessus
+                closeDel();
+                if (card) card.remove();
+                toastMsg(btn.dataset.kind === 'semaine' ? 'Semaine supprimée ✓' : 'Brouillon supprimé ✓', 'success');
+                if (grid && !grid.querySelector('.hist-item')) location.reload();
+            } else {
+                toastMsg(d.error || 'Erreur', 'error');
+                closeDel();
+            }
+        } catch (e) {
+            toastMsg('Erreur réseau', 'error');
+            closeDel();
+        }
+        ok.disabled = false;
+    }
+    document.querySelectorAll('.hist-del').forEach(b => b.addEventListener('click', function () { openDel(this); }));
+    document.getElementById('del-cancel').addEventListener('click', closeDel);
+    document.getElementById('del-bg').addEventListener('click', closeDel);
+    document.getElementById('del-ok').addEventListener('click', confirmDel);
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && modal.style.display === 'flex') { e.preventDefault(); closeDel(); }
+    });
+})();
 </script>
 {% endblock %}

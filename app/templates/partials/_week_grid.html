@@ -1,12 +1,14 @@
 {% from "partials/_meal.html" import meal_inner %}
 <!-- Planning 7 jours (cases fusionnées si même repas sur jours consécutifs) -->
 {# `day_labels` (fourni par le serveur) : libellés jour 1..7 dérivés de la date
-   du jour 1 (week_start). Chaque entrée : {jour, court, long, date}. #}
+   du jour 1 (week_start). Chaque entrée : {jour, court, long, date}.
+   `nb_jours` : dernier jour de la période ; les jours suivants sont masqués. #}
+{% set nbj = nb_jours | default(7) %}
 <!-- Grille (desktop / tablette) -->
 <div class="week-wrapper">
-    <div class="week-grid">
+    <div class="week-grid" style="--nb-jours:{{ nbj }}">
         <div class="corner" style="grid-column:1;grid-row:1;"></div>
-        {% for jour in range(1, 8) %}
+        {% for jour in range(1, nbj + 1) %}
         <div class="day-head" style="grid-column:{{ jour + 1 }};grid-row:1;">
             <span>{{ day_labels[jour-1].court }} {{ day_labels[jour-1].date }}</span>
             {% if per_day %}<span class="day-pers" title="Personnes ce jour">👤 {{ per_day[jour-1] }}</span>{% endif %}
@@ -27,7 +29,7 @@
         {# Créneaux désactivés (absent) : cases grisées #}
         {% for moment in ['midi','soir'] %}
         {% set row = 2 if moment == 'midi' else 3 %}
-        {% for d in range(1, 8) %}
+        {% for d in range(1, nbj + 1) %}
         {% if (d ~ ':' ~ moment) in off_meals %}
         <div class="meal off {{ moment }}" style="grid-column:{{ d + 1 }} / span 1;grid-row:{{ row }};">
             <span class="off-lbl">🚫 Absent</span>

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Planning semaine{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/planning.css?v={{ asset_version }}">{% endblock %}
 {% block content %}
 <div class="hero">
     <h1>📅 Planning semaine</h1>
@@ -18,6 +19,7 @@
 {% endif %}
 
 <div class="week-toolbar">
+    <a class="btn btn-ghost btn-sm" id="btn-edit-builder" href="/?planning={{ planning.id }}" title="Rouvrir cette semaine dans la grille du constructeur">✏️ Modifier dans le constructeur</a>
     <button class="btn btn-ghost btn-sm" id="btn-copy-menu" title="Copier le menu de la semaine">📋 Copier le menu</button>
     <button class="btn btn-ghost btn-sm" id="btn-enrich-week" title="Relancer l'enrichissement de toutes les recettes de la semaine">🍲 Enrichir ma semaine</button>
 </div>
