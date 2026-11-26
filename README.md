@@ -11,8 +11,11 @@ il ne choisit pas les repas.
 - 📝 Brouillons : plusieurs semaines en préparation en parallèle, réouvrables et modifiables jusqu'à validation
 - 🧱 Briques (steak, riz, œuf…) et ➕ repas libres, créés à la volée depuis le planning
 - 🥗 Accompagnements multiples par repas
-- 🛒 Liste de courses calculée depuis les ingrédients enregistrés : quantités mises à l'échelle, fusionnées, groupées par rayon, cases à cocher
-- 🔗 Partage de la liste par lien public en lecture seule, sans connexion
+- 🛒 Liste de courses calculée depuis les ingrédients enregistrés : quantités mises à l'échelle, fusionnées, groupées par rayon, cases à cocher, articles ajoutés à la main, articles masqués et placard
+- 🔗 Partage de la liste par lien public, sans connexion : on y coche les articles, synchronisés avec la page planning
+- 👨‍🍳 Mode cuisine : une recette en plein écran, étape par étape, avec minuteurs
+- 💾 Page « Données » (`/admin`) : export, import et réhydratation ; sauvegarde périodique en cron
+- 📶 Hors ligne : la liste partagée reste consultable et cochable sans réseau
 - 📊 Estimation nutritionnelle de la semaine et par recette
 - 📚 Historique des semaines validées, aperçu au survol, « Refaire » une semaine
 - 📖 Livre de recettes Notion : filtres, notation ⭐, fiche détail avec portions ajustables
@@ -69,6 +72,28 @@ Vérifications (les mêmes qu'en CI) :
 Les tests n'appellent ni Notion ni un LLM : ils tournent sur une base SQLite
 temporaire avec des clients simulés.
 
+### Tests de bout en bout (Playwright)
+
+Les parcours navigateur sont dans `tests/e2e/` et exclus de la suite par
+défaut (`addopts = "-m 'not e2e'"`). Ils démarrent l'app dans un sous-processus,
+sur une base temporaire, avec un faux Notion (`tests/e2e/fake_notion.py`).
+
+```bash
+.venv/bin/playwright install chromium          # une fois
+.venv/bin/python -m pytest -m e2e
+.venv/bin/python -m pytest -m e2e --headed     # voir le navigateur
+```
+
+Le service worker est bloqué dans ces tests, sauf dans
+`test_parcours_hors_ligne.py` qui ouvre son propre contexte pour le vérifier.
+En CI, le job `e2e` tourne à part et n'est pas encore bloquant.
+
+Pour essayer l'app à la main avec ce faux Notion (sans clé ni réseau) :
+
+```bash
+.venv/bin/python -m tests.e2e.fake_notion /tmp/menu.db 8799   # http://127.0.0.1:8799
+```
+
 ---
 
 ## 📖 Guide d'utilisation
@@ -106,18 +131,45 @@ temporaire avec des clients simulés.
   enregistrés pour chaque recette (pas d'appel LLM), mis à l'échelle du nombre
   de personnes, fusionnés par nom et unité, groupés par rayon. Les recettes
   sans ingrédients sont signalées : il faut d'abord les enrichir.
-- Les cases cochées sont enregistrées côté serveur.
+- Les cases cochées sont enregistrées côté serveur, article par article ; sans
+  réseau, elles sont mises en file et envoyées au retour de la connexion.
+- **Articles ajoutés à la main** (« 2 l jus d'orange », « Papier toilette ») :
+  ils rejoignent la liste dans leur rayon ; **✕ Retirer de la liste** les enlève.
+- **Je l'ai déjà** masque un article pour cette semaine ; **🏠 Toujours à la
+  maison** le range dans le placard, un réglage du foyer qui le masque dans
+  toutes les listes. Les articles masqués restent listés sous **Masqués**, d'où
+  on les restaure (ou on les retire du placard).
+- Chaque article indique les recettes qui l'utilisent (🍽).
 - **📋 Copier** copie les articles non cochés.
-- **🔗 Partager la liste** crée un lien `/courses/<jeton>` public, sans
-  connexion : il affiche les articles restants, groupés par rayon.
 
-### 4. Historique (`/historique`)
+### 4. Courses partagées (`/courses/<jeton>`)
+
+**🔗 Partager la liste** crée un lien public, ouvert sans connexion. Le jeton
+ne donne accès qu'à cette liste et ne permet que de cocher :
+
+- articles restants groupés par rayon, articles cochés repliés sous
+  **Déjà pris** (on peut les décocher) ;
+- coches partagées avec la page planning, dans les deux sens : la page
+  publique se met à jour toutes les 20 s quand l'onglet est visible ;
+- **📋 Copier** la liste restante.
+
+Sans réseau, la page reste utilisable (voir la section Hors ligne).
+
+### 5. Mode cuisine (`/recette/{id}/cuisine`)
+
+Depuis une fiche recette, **👨‍🍳 Mode cuisine** ouvre la recette en plein
+écran, au nombre de portions choisi sur la fiche : ingrédients cochables,
+étapes une à une (boutons, balayage ou flèches du clavier), écran maintenu
+allumé, et minuteurs proposés pour les durées lues dans le texte (« 20 min »,
+« 1 h 30 »).
+
+### 6. Historique (`/historique`)
 
 Brouillons en cours et semaines validées, avec aperçu au survol.
 **🔁 Refaire** recopie une semaine en nouveau brouillon ; **🗑️ Supprimer**
 efface un planning.
 
-### 5. Recettes (`/recettes`, `/recette/{id}`)
+### 7. Recettes (`/recettes`, `/recette/{id}`)
 
 - Liste des recettes Notion, recherche (nom ou ingrédient), filtres par nature, type, base, état et tags, notation ⭐
   (enregistrée dans Notion).
@@ -128,7 +180,7 @@ efface un planning.
 - **Enrichir** une recette (`/recette/{id}/enrichir`) : relit la source,
   pré-remplit un formulaire éditable, puis enregistre dans Notion après validation.
 
-### 6. Ajouter une recette (`/ajouter`)
+### 8. Ajouter une recette (`/ajouter`)
 
 Trois entrées :
 - **🔗 Depuis une URL** (site, vidéo) → **🔍 Analyser** : lecture des données
@@ -139,6 +191,58 @@ Trois entrées :
 Le formulaire pré-rempli (nom, nature, type, base, tags, moment, portions,
 ingrédients, instructions, image) reste éditable avant **💾 Ajouter la recette**,
 qui crée la page dans Notion.
+
+---
+
+## 💾 Données (`/admin`)
+
+Les recettes vivent dans Notion, mais les plannings, listes de courses,
+ingrédients structurés et réglages du foyer n'existent que dans la base SQLite
+du volume `/data`. La page **Données** (lien en pied de page, protégée par la
+connexion quand elle est active) permet de :
+
+- **Exporter** toute la base locale dans un fichier JSON ;
+- **Importer** un tel fichier, en **fusion** ou en **remplacement** : le
+  fichier est d'abord validé et un récapitulatif est affiché ; rien n'est écrit
+  avant la confirmation, puis tout s'applique en une seule transaction ;
+- **Réhydrater** le cache d'ingrédients depuis Notion : les ingrédients
+  manquants en local sont reconstruits à partir de la copie texte que Notion
+  garde de chaque recette.
+
+### Sauvegarde périodique
+
+`scripts/backup.py` écrit un export (même format que la page **Données**)
+dans un dossier et ne garde que les N plus récents (8 par défaut) :
+
+```bash
+python -m scripts.backup /data/backups            # garde 8 fichiers
+python -m scripts.backup /data/backups --keep 14
+```
+
+Exemple de crontab sur l'hôte, chaque nuit à 3 h :
+
+```
+0 3 * * * docker exec -u appuser menu-planner python -m scripts.backup /data/backups
+```
+
+---
+
+## 📶 Hors ligne
+
+L'app est installable (PWA) et enregistre un service worker, **seulement en
+contexte sécurisé : HTTPS, ou `localhost` / `127.0.0.1`**. Servie en HTTP
+simple sur une autre adresse (IP du réseau local, par exemple), elle marche
+normalement mais sans mode hors ligne.
+
+- La **liste partagée** `/courses/<jeton>` est mise en cache à chaque visite :
+  sans réseau, elle se recharge depuis le cache avec le dernier état connu, un
+  bandeau signale le mode hors ligne, et les coches sont mises en file puis
+  envoyées au retour du réseau. Au plus 20 listes sont gardées (les plus
+  anciennes sont retirées).
+- Les **autres pages** ne sont jamais gardées en cache (elles peuvent être
+  privées) : sans réseau, elles affichent une page « Hors ligne ».
+- Les fichiers statiques (CSS, JS, icônes) sont servis depuis le cache puis
+  rafraîchis en arrière-plan ; une seule version de chaque fichier est gardée.
 
 ---
 
@@ -180,7 +284,7 @@ reste indisponible, l'app se rabat sur Ollama.
 > active un formulaire de connexion (`/login`). La session dure 30 jours (cookie
 > signé avec `SECRET_KEY` : la fixer pour ne pas être déconnecté à chaque
 > redémarrage). Restent publics : `/health`, `/static`, `/login`, `/logout` et
-> les listes partagées `/courses/<jeton>`. Les deux vides = accès libre.
+> les listes partagées `/courses/<jeton>` (lecture et coches). Les deux vides = accès libre.
 
 ### Sécurité des appels sortants
 
@@ -198,8 +302,22 @@ RecetteApp/
 ├── app/
 │   ├── main.py              # Application FastAPI : middlewares (auth) et routeurs
 │   ├── deps.py              # Instances partagées (base, Notion, LLM, templates)
-│   ├── routers/             # Routes par domaine (pages, planning, courses, recettes, catalogue, auth)
-│   ├── services/            # Règles métier (planning, courses, nutrition, recettes)
+│   ├── routers/             # Routes HTTP par domaine
+│   │   ├── pages.py             # Constructeur, historique, /sw.js, /health
+│   │   ├── planning.py          # Construction, page planning, changements de repas
+│   │   ├── courses.py           # Liste de courses, coches, lien public, articles manuels, placard
+│   │   ├── recettes.py          # Livre de recettes, fiche, enrichissement, ajout, import
+│   │   ├── cuisine.py           # Mode cuisine
+│   │   ├── catalogue.py         # Catalogue JSON du sélecteur
+│   │   ├── admin.py             # Page « Données » : export, import, réhydratation
+│   │   └── auth.py              # Connexion / déconnexion
+│   ├── services/            # Règles métier, sans HTTP
+│   │   ├── planning.py          # Construction et modification des plannings
+│   │   ├── creations.py         # Briques et repas libres
+│   │   ├── shopping.py          # Calcul de la liste, coches, masques, placard
+│   │   ├── recettes.py          # Recettes : détail, enrichissement, import
+│   │   ├── nutrition_week.py    # Nutrition de la semaine
+│   │   └── backup.py            # Export, import, réhydratation
 │   ├── config.py            # Variables d'env, taxonomie (Nature, Repas, Base, Tag)
 │   ├── notion_client.py     # API Notion (lecture/écriture des recettes)
 │   ├── llm_client.py        # Client LLM (Groq/Gemini/Ollama) + extraction de pages
@@ -211,16 +329,26 @@ RecetteApp/
 │   │   ├── base.html            # Layout commun
 │   │   ├── index.html           # Constructeur de semaine
 │   │   ├── planning.html        # Planning + liste de courses
-│   │   ├── courses_public.html  # Liste partagée (lecture seule)
+│   │   ├── courses_public.html  # Liste partagée (coches)
+│   │   ├── cuisine.html         # Mode cuisine
 │   │   ├── historique.html      # Brouillons et semaines validées
 │   │   ├── recettes.html        # Livre de recettes
 │   │   ├── recette_detail.html  # Fiche recette
 │   │   ├── enrichir.html        # Enrichissement d'une recette
 │   │   ├── ajouter.html         # Ajout de recette
-│   │   └── login.html           # Connexion
-│   └── static/              # CSS, service worker, manifest, icône
-├── scripts/                 # Scripts ponctuels (migration Notion, briques, portions)
+│   │   ├── admin.html           # Page « Données »
+│   │   ├── login.html           # Connexion
+│   │   └── partials/            # Morceaux partagés (grille, repas, liste de courses, modales)
+│   └── static/
+│       ├── style.css            # Styles communs
+│       ├── css/                 # Styles par page
+│       ├── js/                  # Scripts par page ; common.js = utilitaires partagés
+│       ├── sw.js                # Service worker (hors ligne)
+│       ├── offline.html         # Page de secours hors ligne
+│       └── manifest.json        # PWA, avec les icônes
+├── scripts/                 # Sauvegarde (backup.py) et scripts ponctuels (migration Notion, briques, portions)
 ├── tests/                   # pytest (Notion et LLM simulés)
+│   └── e2e/                 # Parcours Playwright (faux Notion, pytest -m e2e)
 ├── docker-compose.yml       # App + Ollama
 ├── Dockerfile
 ├── pyproject.toml           # Config pytest et ruff
@@ -280,7 +408,7 @@ manquent ; une propriété absente donne une valeur vide sans bloquer l'app.
   détail (repas, liste de courses, cases cochées, jeton de partage) est dans `data_json`
 - **`planning_recipes`** : recettes utilisées par chaque planning
 - **`enriched_recipes`** : cache des ingrédients, portions et nutrition par recette
-- **`app_prefs`** : réglages du foyer
+- **`app_prefs`** : réglages du foyer, dont le placard
 
 ---
 
