@@ -2,6 +2,8 @@
 // Exposés sur `window.Common`.
 (function () {
     'use strict';
+    // Chargé deux fois (gabarit de base et page) : la première copie reste.
+    if (window.Common && window.Common.requestJson) return;
 
     // Échappe un texte pour l'insérer dans du HTML.
     function esc(s) {

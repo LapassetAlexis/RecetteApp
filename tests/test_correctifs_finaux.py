@@ -257,8 +257,9 @@ def test_mode_cuisine_virgule_decimale(client, monkeypatch):
 
 
 def test_fiche_recette_affiche_via_qtyfr():
-    html = (Path(main.__file__).resolve().parent / "templates" / "recette_detail.html").read_text(encoding="utf-8")
-    assert "window.Common.qtyFr(scaled" in html
+    # JS de la fiche sorti dans js/recette-fiche.js (M08).
+    js = (Path(main.__file__).resolve().parent / "static" / "js" / "recette-fiche.js").read_text(encoding="utf-8")
+    assert "qtyFr(scaled" in js
 
 
 NODE_QTY = r"""

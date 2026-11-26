@@ -1,0 +1,15 @@
+/* Historique des plannings : cartes, aperçu d'une semaine, modale de
+   suppression. La grille et les actions (.hist-grid, .hist-actions) sont
+   dans style.css. */
+.hist-link { text-decoration: none; color: inherit; display: block; }
+.hist-actions .hist-danger, .hist-danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+.hist-modal-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.hist-pv { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg, #faf7f2); font-size: .82rem; }
+.hist-pv .pv-day, .hist-preview .pv-day { display: grid; grid-template-columns: 34px 1fr; gap: 6px; padding: 2px 0; }
+.hist-pv .pv-j, .hist-preview .pv-j { font-weight: 700; color: var(--t2, #777); }
+.hist-pv .pv-m, .hist-preview .pv-m { line-height: 1.25; overflow-wrap: anywhere; }
+.hist-pv .pv-empty, .hist-preview .pv-empty { color: var(--t2, #999); }
+.hist-preview { position: fixed; z-index: 80; max-width: 320px; background: var(--card, #fff);
+    border: 1px solid var(--bo, #ddd); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+    padding: 10px 12px; font-size: .82rem; pointer-events: none; }
+.hist-preview h4 { margin: 0 0 6px; font-size: .85rem; }
