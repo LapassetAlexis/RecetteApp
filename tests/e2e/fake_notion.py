@@ -15,8 +15,14 @@ import json
 import os
 import sys
 import uuid
+from datetime import date
 
 NOM_PIEGE = 'Salade "César" <b>x</b>'
+
+# « Aujourd'hui » vu par la duplication (« Refaire ») du serveur e2e : un
+# mercredi fixe, pour que le test B3 (copie datée du jour, pas du lundi) ne
+# dépende pas du jour réel où il tourne.
+AUJOURDHUI_SERVEUR = date(2026, 12, 2)
 
 
 def _recette(rid, nom, repas=("Plat",), base=(), nature="Recette", tags=(), note="", etat=""):
@@ -126,6 +132,19 @@ def install(client) -> FakeNotion:
     return fake
 
 
+class _DateFigee(date):
+    @classmethod
+    def today(cls):
+        return AUJOURDHUI_SERVEUR
+
+
+def _figer_aujourdhui() -> None:
+    """Fige `date.today()` du routeur planning (seul usage : la duplication)."""
+    import app.routers.planning as routeur
+
+    routeur.date = _DateFigee
+
+
 def serve(db_path: str, port: int) -> None:
     os.environ["DATABASE_PATH"] = db_path
     for var in ("AUTH_USER", "AUTH_PASSWORD", "NOTION_TOKEN", "GEMINI_API_KEY", "GROQ_API_KEY"):
@@ -138,6 +157,7 @@ def serve(db_path: str, port: int) -> None:
     main.db.path = db_path
     main.settings.database_path = db_path
     install(main.notion)
+    _figer_aujourdhui()
 
     async def seed():
         await main.db.init()

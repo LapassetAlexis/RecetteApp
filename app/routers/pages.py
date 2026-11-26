@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from app.config import settings
 from app.deps import BASE_DIR, db, templates
-from app.services.planning import _attach_label, _builder_from_plats
+from app.services.planning import _attach_label, _builder_from_plats, _nb_jours
 
 router = APIRouter()
 
@@ -28,7 +28,8 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
     formulaire (stockée dans `data["builder"]`) pour l'éditer puis la mettre à
     jour. `?planning=<id>` fait de même pour N'IMPORTE QUEL planning, validé
     ou non (« ✏️ Modifier dans le constructeur ») : à l'enregistrement, une
-    semaine validée le reste. `?saved=1` affiche un message « enregistré »."""
+    semaine validée le reste. `?saved=1` affiche un message « enregistré »
+    (« Semaine mise à jour » pour une semaine validée)."""
     today = date.today()
     # Calcul du lundi de la semaine
     lundi = today - timedelta(days=today.weekday())
@@ -41,6 +42,8 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
     # Réouverture d'un brouillon : on hydrate la grille depuis data["builder"].
     builder: list = []
     draft_id = ""
+    nb_jours = 0
+    valide = False
     # ?planning= : tout planning ; ?draft= : uniquement un brouillon (valide=0).
     did = _parse_id(planning) or _parse_id(draft)
     if did:
@@ -59,6 +62,10 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
                     builder = b
                     draft_id = str(did)
                     week_start = existing.get("week_start") or week_start
+                    valide = bool(existing.get("valide", 0))
+                    # Période enregistrée (un dernier jour absent en fait partie).
+                    if data.get("nb_jours"):
+                        nb_jours = _nb_jours(data)
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -70,6 +77,8 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
             "planning_id": planning_id,
             "builder": builder,
             "draft_id": draft_id,
+            "nb_jours": nb_jours,
+            "valide": valide,
             "saved": bool(saved),
         },
     )

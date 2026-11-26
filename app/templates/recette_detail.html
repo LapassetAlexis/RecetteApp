@@ -186,8 +186,10 @@ function render() {
         const raw = li.dataset.qty, unit = li.dataset.unit || '';
         const n = parseQty(raw);
         const scaled = n !== null ? fmtQty(n * ratio) : raw;
+        // Affichage : virgule décimale (« 1,5 kg ») ; Cooklang garde le point.
+        const shown = window.Common.qtyFr(scaled || '');
         const qEl = li.querySelector('.ing-q');
-        qEl.textContent = scaled ? (unit ? `${scaled} ${unit}` : `${scaled}`) : '';
+        qEl.textContent = shown ? (unit ? `${shown} ${unit}` : shown) : '';
         // ligne Cooklang
         const nom = li.querySelector('.ing-n').textContent;
         if (scaled && unit) cookLines.push(`@${nom}{${scaled}%${unit}}`);

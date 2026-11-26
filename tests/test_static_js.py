@@ -101,7 +101,7 @@ def test_page_data_constructeur_echappe(client, monkeypatch):
     data = _page_data(html)
     assert data["saved"] is True
     assert data["builder"][0]["main"]["nom"] == "Poulet </script><b>x</b>"
-    assert _page_data(client.get("/").text) == {"builder": [], "saved": False}
+    assert _page_data(client.get("/").text) == {"builder": [], "saved": False, "valide": False, "nb_jours": 0}
 
 
 def test_fonctions_pures_du_constructeur_exposees():
@@ -110,7 +110,7 @@ def test_fonctions_pures_du_constructeur_exposees():
     for fn in ("consolidateGroups", "midiEditorDay", "serialize", "rangeDays", "hydrateBuilder"):
         assert re.search(rf"function {fn}\(state|function {fn}\(", src), fn
     common = (STATIC / "js" / "common.js").read_text(encoding="utf-8")
-    assert "window.Common = {esc, copyText, postJson, pageData}" in common
+    assert "window.Common = {esc, copyText, postJson, pageData, qtyFr}" in common
 
 
 def test_page_publique_utilise_common(client, monkeypatch):

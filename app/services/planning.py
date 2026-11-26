@@ -655,6 +655,16 @@ def _nb_jours(data: dict) -> int:
     return dernier_plat or 7
 
 
+def _periode_saisie(raw) -> int:
+    """Durée de la période envoyée par le constructeur (champ `nb_jours`),
+    1..7, ou 0 si absente ou invalide (repli sur les cases)."""
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+    return n if 1 <= n <= 7 else 0
+
+
 def _nb_jours_from_cases(cases: list[dict]) -> int:
     """Dernier jour de la période saisie dans le constructeur : les jours hors
     période sont envoyés « absents » (persons 0), donc dernier jour à convives.

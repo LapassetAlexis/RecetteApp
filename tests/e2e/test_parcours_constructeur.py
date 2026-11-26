@@ -5,11 +5,12 @@ Bugs couverts : B1 (date du brouillon), B2 et B3 (« Refaire » puis
 « Reprendre »), B5 (jours hors période affichés « Absent »)."""
 
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.e2e.fake_notion import AUJOURDHUI_SERVEUR
 from tests.e2e.outils import (
     cellule,
     choisir_plat,
@@ -84,7 +85,9 @@ def test_brouillon_puis_changement_de_date_puis_validation(page: Page, server):
 def test_refaire_puis_reprendre(page: Page, server):
     """« Refaire » une semaine validée commencée un mercredi, puis « Reprendre »
     la copie : grille pré-remplie, jour 1 = aujourd'hui (B3), enregistrement
-    sur le même brouillon (B2)."""
+    sur le même brouillon (B2). Le serveur e2e fige « aujourd'hui » à un
+    mercredi (`AUJOURDHUI_SERVEUR`) : l'ancien recalage sur le lundi se voit
+    quel que soit le jour où le test tourne."""
     cases = semaine(3, {"1:midi": ("p1", 1), "2:midi": (None, 1), "1:soir": "c1", "3:soir": "s1"})
     src = semaine_validee(page, server, cases, "2026-11-04")
 
@@ -98,8 +101,9 @@ def test_refaire_puis_reprendre(page: Page, server):
     page.locator(f'#drafts-grid [data-card="{copie}"]').get_by_role("link", name="✏️ Reprendre").click()
     page.wait_for_url(f"{server}/?draft={copie}")
     expect(page.locator("#draft-id-input")).to_have_value(str(copie))
-    expect(page.locator("#week_start")).to_have_value(date.today().isoformat())
-    expect(page.locator(".b-rowlabel")).to_have_count(3)
+    assert AUJOURDHUI_SERVEUR.weekday() == 2  # un mercredi, jamais un lundi
+    expect(page.locator("#week_start")).to_have_value(AUJOURDHUI_SERVEUR.isoformat())
+    expect(page.locator(".b-rowlabel")).to_have_text(["Mer 02/12", "Jeu 03/12", "Ven 04/12"])
     expect(cellule(page, "1:midi").locator(".b-main")).to_contain_text("Poulet rôti")
     expect(cellule(page, "2:midi").locator(".b-main.ro")).to_contain_text("Poulet rôti")
     expect(cellule(page, "1:soir").locator(".b-main")).to_contain_text("Curry de lentilles")
@@ -157,19 +161,15 @@ def test_reouverture_semaine_validee(page: Page, server):
     expect(page.locator('.week-grid .meal.soir[data-jours="1"] .meal-name')).to_have_text("Bœuf bourguignon")
 
 
-@pytest.mark.xfail(strict=True, reason="Défaut connu : « Brouillon enregistré ✓ » affiché pour une semaine "
-                                       "validée rouverte (app/static/js/builder.js:743)")
 def test_reouverture_validee_message_enregistrement(page: Page, server):
     """Enregistrer sans valider une semaine validée rouverte : elle reste
-    validée, le message ne doit pas parler de brouillon."""
+    validée, le message ne parle pas de brouillon."""
     pid = _semaine_validee_ouverte(page, server)
     page.click("#btn-draft")
     page.wait_for_url(f"{server}/?planning={pid}&saved=1")
-    assert "Brouillon" not in _toast(page)
+    assert _toast(page).strip() == "Semaine mise à jour ✓"
 
 
-@pytest.mark.xfail(strict=True, reason="Défaut connu : dernier jour de période à 0 convive ignoré dans nb_jours "
-                                       "(app/services/planning.py:662, app/static/js/builder.js:73)")
 def test_periode_dernier_jour_absent(page: Page, server):
     """Période de 4 jours dont le dernier est entièrement absent : la période
     reste de 4 jours (jour 4 affiché « Absent »), dans le planning comme à la
@@ -189,6 +189,32 @@ def test_periode_dernier_jour_absent(page: Page, server):
     expect(page.locator("#week_end")).to_have_value(fin.isoformat(), timeout=1000)
     page.goto(f"{server}/planning/{pid}")
     expect(page.locator(".week-grid .day-head")).to_have_count(4, timeout=1000)
+
+
+def test_change_convives_pendant_le_rendu(page: Page, server):
+    """Un `change` sur le champ « convives » qui a le focus, déclenché pendant
+    un re-rendu de la grille (le champ est retiré du DOM), ne lève pas
+    d'erreur (« The node to be removed is no longer a child ») et la grille
+    reste cohérente."""
+    page.goto(server + "/")
+    periode(page, "2026-12-07", "2026-12-09")
+    expect(page.locator(".b-rowlabel")).to_have_count(3)
+    page.evaluate("""() => {
+        const champ = document.querySelector('.b-cell[data-key="1:midi"] .b-pers');
+        champ.focus();
+        champ.value = '0';
+        champ.dispatchEvent(new Event('input', {bubbles: true}));
+        // Pendant le rendu déclenché par « + » d'une autre case, le champ qui a
+        // le focus est retiré : son change (blur) relance un rendu imbriqué.
+        champ.addEventListener('blur', () => champ.dispatchEvent(new Event('change')));
+        document.querySelector('.b-cell[data-key="2:soir"] .b-step[data-step="1"]').click();
+        // change par script sur un champ déjà retiré du DOM.
+        champ.dispatchEvent(new Event('change'));
+    }""")
+    expect(page.locator(".b-rowlabel")).to_have_count(3)
+    expect(page.locator(".b-cell")).to_have_count(6)
+    expect(cellule(page, "1:midi")).to_have_class(re.compile(r"\boff\b"))
+    expect(cellule(page, "2:soir").locator(".b-pers")).to_have_value("3")
 
 
 def test_construire_sans_repas_reste_sur_la_page(page: Page, server):

@@ -40,6 +40,14 @@
         return r.json();
     }
 
+    // Quantité affichée avec la virgule décimale française : un nombre est
+    // arrondi à 2 décimales (1.5 → « 1,5 »), un texte garde sa forme mais son
+    // point décimal devient une virgule. Même règle que `fmt_quantite` (serveur).
+    function qtyFr(v) {
+        const s = typeof v === 'number' ? String(Math.round(v * 100) / 100) : String(v ?? '').trim();
+        return s.replace(/(\d)\.(?=\d)/g, '$1,');
+    }
+
     // Données serveur de la page : bloc <script type="application/json" id="page-data">.
     let _data = null;
     function pageData() {
@@ -50,5 +58,5 @@
         return _data;
     }
 
-    window.Common = {esc, copyText, postJson, pageData};
+    window.Common = {esc, copyText, postJson, pageData, qtyFr};
 })();
