@@ -3,6 +3,7 @@
 Heuristique par mots-clés, sans réseau. L'ordre des rayons suit un parcours de
 magasin classique (frais d'abord, surgelés en fin)."""
 
+import re
 import unicodedata
 
 # Ordre d'affichage = ordre de parcours en magasin.
@@ -37,7 +38,7 @@ _RAYON_KEYWORDS: dict[str, list[str]] = {
         "boeuf", "porc", "poulet", "dinde", "veau", "agneau", "lardon", "jambon",
         "saucisse", "steak", "viande", "saumon", "thon", "cabillaud", "crevette",
         "poisson", "merlu", "colin", "truite", "moule", "calamar", "chorizo", "bacon",
-        "escalope", "filet", "cuisse", "magret", "merguez",
+        "escalope", "filet", "cuisse", "magret", "merguez", "volaille",
     ],
     "Crémerie & œufs": [
         "oeuf", "lait", "creme", "beurre", "fromage", "yaourt", "parmesan", "mozzarella",
@@ -78,22 +79,43 @@ def _norm(s: str) -> str:
     return s
 
 
+def _keyword_regex(mot: str) -> re.Pattern:
+    """Motif « mot entier » d'un mot-clé, pluriel (s/x) toléré sur chaque mot :
+    « ail » ne matche plus « volaille », « eau » plus « gâteau », et
+    « pomme de terre » matche « pommes de terre »."""
+    parts = [re.escape(w) + r"[sx]?" for w in mot.split()]
+    return re.compile(r"\b" + r"[\s-]+".join(parts) + r"\b")
+
+
+# Motifs compilés une fois : (rayon, longueur du mot-clé, regex).
+_RAYON_PATTERNS: list[tuple[str, int, re.Pattern]] = [
+    (rayon, len(m), _keyword_regex(m))
+    for rayon, mots in _RAYON_KEYWORDS.items()
+    for m in dict.fromkeys(mots)
+]
+
+
 def categorize(nom: str) -> str:
-    """Retourne le rayon d'un ingrédient (« Autre » si rien ne matche)."""
+    """Retourne le rayon d'un ingrédient (« Autre » si rien ne matche).
+
+    Recherche par mot entier ; le mot-clé le plus long gagne (plus spécifique :
+    « pomme de terre » > « pomme », « lait de coco » > « lait »)."""
     n = _norm(nom)
     best = ("Autre", 0)
-    for rayon, mots in _RAYON_KEYWORDS.items():
-        for m in mots:
-            # match plus long = plus spécifique (ex. « pomme de terre » > « pomme »)
-            if m in n and len(m) > best[1]:
-                best = (rayon, len(m))
+    for rayon, size, rx in _RAYON_PATTERNS:
+        if size > best[1] and rx.search(n):
+            best = (rayon, size)
     return best[0]
 
 
 def group_by_rayon(items: list[dict]) -> list[dict]:
     """Groupe une liste d'ingrédients par rayon, dans l'ordre du magasin.
-    Retourne [{rayon, items:[...]}] (rayons vides omis)."""
+    Retourne [{rayon, items:[...]}] (rayons vides omis). Un rayon inconnu
+    (ancienne donnée, faute de frappe) retombe dans « Autre »."""
     buckets: dict[str, list[dict]] = {r: [] for r in RAYON_ORDER}
     for it in items:
-        buckets.setdefault(it.get("rayon") or categorize(it.get("nom", "")), []).append(it)
+        rayon = it.get("rayon") or categorize(it.get("nom", ""))
+        if rayon not in buckets:
+            rayon = "Autre"
+        buckets[rayon].append(it)
     return [{"rayon": r, "items": buckets[r]} for r in RAYON_ORDER if buckets.get(r)]
