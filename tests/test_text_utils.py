@@ -142,7 +142,8 @@ def test_normalize_form_merges_ligature_and_punct():
     ail = normalize_cached_ingredient({"nom": "Ail", "quantite": "2", "unite": "gousse"})
     ail += normalize_cached_ingredient({"nom": "Ail hachées", "quantite": "1.5", "unite": "gousse"})
     r = merge_ingredients(ail)
-    assert len(r) == 1 and r[0]["quantite"] == "3.5"
+    # 2 + 1.5 = 3.5 gousses, arrondi « courses » à l'entier supérieur (L02)
+    assert len(r) == 1 and r[0]["quantite"] == "4"
 
 
 def test_split_condiments_compound_line():
