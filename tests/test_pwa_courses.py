@@ -78,7 +78,7 @@ def _precache() -> list[str]:
 
 
 def test_cache_incremente():
-    assert "const CACHE = 'menu-planner-v5'" in SW  # M04
+    assert "const CACHE = 'menu-planner-v6'" in SW  # M04
 
 
 def test_precache_assets_de_la_page_publique(client):

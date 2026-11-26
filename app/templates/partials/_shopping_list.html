@@ -19,6 +19,9 @@
                 <span class="shop-acts">
                     {% if item.extra %}
                     <button type="button" class="shop-act" data-act="suppr">✕ Retirer de la liste</button>
+                    <select class="shop-act shop-rayon-sel" aria-label="Rayon de {{ item.nom }}">
+                        {% for r in shop.rayons %}<option value="{{ r }}"{% if r == item.rayon %} selected{% endif %}>{{ r }}</option>{% endfor %}
+                    </select>
                     {% else %}
                     <button type="button" class="shop-act" data-act="masquer">Je l'ai déjà</button>
                     <button type="button" class="shop-act" data-act="placard">🏠 Toujours à la maison</button>

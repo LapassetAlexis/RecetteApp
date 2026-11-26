@@ -11,8 +11,6 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
     <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
     <link rel="stylesheet" href="/static/css/courses.css?v={{ asset_version }}">
-    {# Bandeau hors-ligne : informatif (orange), pas une erreur. courses.css est hors du lot L15. #}
-    <style>.pub-offline { background:#fff3e0; color:#8a4b08; }</style>
 </head>
 <body>
     {% macro ligne(item) -%}
@@ -26,6 +24,15 @@
     </label>
     {%- endmacro %}
     <main class="pub-wrap">
+        {# Lien révoqué : affiché d'office (404) ou par le script quand la liste
+           ouverte est révoquée entre-temps. #}
+        <div class="pub-empty pub-revoque" id="pub-revoque"{% if not revoque %} hidden{% endif %}>
+            <p>🔒</p>
+            <p>Ce lien n'est plus valide.</p>
+            <p class="pub-revoque-s">Demande un nouveau lien à la personne qui te l'a envoyé.</p>
+        </div>
+        {% if not revoque %}
+        <div id="pub-liste">
         <div class="pub-h">
             <h1>🛒 Liste de courses</h1>
             {% if shop.nb_total %}
@@ -77,8 +84,10 @@
             <p>La liste est vide pour l'instant.</p>
         </div>
         {% endif %}
+        </div>
+        {% endif %}
     </main>
-    <script type="application/json" id="page-data">{{ {"version": shop.version} | tojson }}</script>
+    <script type="application/json" id="page-data">{{ ({"revoque": True} if revoque else {"version": shop.version}) | tojson }}</script>
     <script src="/static/js/common.js?v={{ asset_version }}"></script>
     <script src="/static/js/courses-public.js?v={{ asset_version }}"></script>
 </body>

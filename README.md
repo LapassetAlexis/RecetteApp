@@ -132,20 +132,29 @@ Pour essayer l'app à la main avec ce faux Notion (sans clé ni réseau) :
   de personnes, fusionnés par nom et unité, groupés par rayon. Les recettes
   sans ingrédients sont signalées : il faut d'abord les enrichir.
 - Les cases cochées sont enregistrées côté serveur, article par article ; sans
-  réseau, elles sont mises en file et envoyées au retour de la connexion.
-- **Articles ajoutés à la main** (« 2 l jus d'orange », « Papier toilette ») :
-  ils rejoignent la liste dans leur rayon ; **✕ Retirer de la liste** les enlève.
+  réseau, elles sont mises en file et envoyées au retour de la connexion. Les
+  coches faites ailleurs (lien public) arrivent toutes les 20 s, sans recharger.
+- **↻** régénère la liste ; si des articles sont cochés, l'app demande
+  confirmation (leurs coches sont perdues, sauf celles des articles manuels).
+- **Articles ajoutés à la main** (« 2 l jus d'orange », « Papier toilette
+  (x6) ») : ils rejoignent la liste dans leur rayon, qu'on peut changer dans le
+  menu **⋯** ; **✕ Retirer de la liste** les enlève. Un nom sans lettre est refusé.
 - **Je l'ai déjà** masque un article pour cette semaine ; **🏠 Toujours à la
   maison** le range dans le placard, un réglage du foyer qui le masque dans
   toutes les listes. Les articles masqués restent listés sous **Masqués**, d'où
-  on les restaure (ou on les retire du placard).
+  on les restaure (ou on les retire du placard). **🏠 Placard (n)** liste tout
+  le placard et permet d'en retirer un article sans passer par un planning.
 - Chaque article indique les recettes qui l'utilisent (🍽).
 - **📋 Copier** copie les articles non cochés.
 
 ### 4. Courses partagées (`/courses/<jeton>`)
 
-**🔗 Partager la liste** crée un lien public, ouvert sans connexion. Le jeton
-ne donne accès qu'à cette liste et ne permet que de cocher :
+**🔗 Partager la liste** crée un lien public, ouvert sans connexion (possible
+dès que la liste a un article, même ajouté à la main). Le jeton ne donne accès
+qu'à cette liste et ne permet que de cocher (120 coches par minute au plus).
+**Révoquer le lien** le désactive : il répond 404, la page publique ouverte
+affiche « Ce lien n'est plus valide », oublie ses coches en attente, et le
+service worker le retire de son cache. Partager à nouveau crée un autre lien.
 
 - articles restants groupés par rayon, articles cochés repliés sous
   **Déjà pris** (on peut les décocher) ;

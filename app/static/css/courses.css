@@ -35,6 +35,19 @@
 .shop-m-why { font-size:0.75rem; }
 .shop-m .shop-act { margin-left:auto; }
 
+/* Rayon d'un article manuel, dans le menu « ⋯ ». */
+.shop-rayon-sel { cursor:pointer; max-width:100%; }
+
+/* Partage : « Partager » et « Révoquer le lien » côte à côte. */
+.shop-share { display:inline-flex; flex-wrap:wrap; gap:6px; }
+.shop-share[hidden], .shop-share [hidden] { display:none; }
+
+/* Écran du placard (modale). */
+.placard-l { list-style:none; margin:0; padding:0; }
+.placard-l li { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--bo); }
+.placard-l li span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.placard-l .shop-act { flex-shrink:0; min-height:44px; }
+
 .shop-empty { text-align:center; padding:24px 8px 8px; }
 .shop-empty-t { font-size:1.2rem; margin-bottom:10px; }
 .shop-empty-s { color:var(--t2); margin-bottom:16px; }
@@ -50,6 +63,10 @@
 .pub-copy:active { transform:scale(.97); }
 .pub-status { background:#fdecea; color:#a93226; border-radius:8px; padding:8px 12px; margin-bottom:12px;
     font-size:0.9rem; }
+/* Bandeau hors-ligne : informatif (orange), pas une erreur. */
+.pub-offline { background:#fff3e0; color:#8a4b08; }
+.pub-revoque p:nth-child(2) { font-size:1.1rem; font-weight:600; color:var(--text); }
+.pub-revoque-s { font-size:0.9rem; margin-top:6px; }
 /* Une colonne : liste lue en magasin, lignes sans retour à la ligne parasite. */
 .pub-wrap .shop-grid { grid-template-columns:1fr; }
 /* Cibles tactiles de 48 px : toute la ligne coche l'article. */

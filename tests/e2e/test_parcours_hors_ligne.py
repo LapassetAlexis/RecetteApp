@@ -19,7 +19,7 @@ from tests.e2e.outils import semaine, semaine_validee
 
 pytestmark = pytest.mark.e2e
 
-CACHE = "menu-planner-v5"
+CACHE = "menu-planner-v6"
 
 
 def _liste_partagee(page: Page, server: str, week_start: str) -> tuple[int, str]:

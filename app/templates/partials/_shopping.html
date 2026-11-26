@@ -8,11 +8,30 @@
             {% if shop.articles or repas_libres %}
             <button class="btn btn-ghost btn-sm" id="btn-copy" title="Copier la liste">📋 Copier</button>
             {% endif %}
+            <button class="btn btn-ghost btn-sm" id="btn-placard" title="Articles toujours à la maison" aria-haspopup="dialog">🏠 Placard (<span id="placard-n">{{ shop.nb_placard }}</span>)</button>
+            {# Partage possible dès qu'il y a une liste, même faite seulement d'articles manuels. #}
+            <span class="shop-share" id="shop-share"{% if not (shop.genere or shop.articles) %} hidden{% endif %}>
+                <button class="btn btn-ghost btn-sm" id="btn-share" title="Lien de partage public : la personne qui le reçoit peut cocher les articles">🔗 Partager la liste</button>
+                <button class="btn btn-ghost btn-sm" id="btn-unshare" title="Le lien actuel ne fonctionnera plus"{% if not shop.partage %} hidden{% endif %}>Révoquer le lien</button>
+            </span>
             {% if shop.genere %}
-            <button class="btn btn-ghost btn-sm" id="btn-share" title="Lien de partage public : la personne qui le reçoit peut cocher les articles">🔗 Partager la liste</button>
             <button class="btn btn-ghost btn-sm" id="btn-print" title="Imprimer la liste" aria-label="Imprimer la liste">🖨️</button>
             <button class="btn btn-ghost btn-sm" id="btn-regen" title="Régénérer la liste" aria-label="Régénérer la liste">↻</button>
             {% endif %}
+        </div>
+    </div>
+    <div id="placard-modal" class="modal" style="display:none">
+        <div class="modal-bg" data-close></div>
+        <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="placard-title">
+            <div class="modal-top">
+                <h3 id="placard-title">🏠 Toujours à la maison</h3>
+                <button class="modal-x" data-close title="Fermer" aria-label="Fermer">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-ctx">Ces articles ne sont jamais ajoutés aux listes de courses. Retire-en un pour qu'il y revienne.</p>
+                <ul class="placard-l" id="placard-l"></ul>
+                <p class="shop-vide" id="placard-vide" hidden>Le placard est vide.</p>
+            </div>
         </div>
     </div>
     {% if repas_libres %}
