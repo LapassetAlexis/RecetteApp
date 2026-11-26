@@ -123,25 +123,9 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/steps-editor.js?v={{ asset_version }}"></script>
 <script>
-function renumberSteps() {
-    document.querySelectorAll('#steps .step-num').forEach((el, i) => { el.textContent = (i + 1) + '.'; });
-}
-function bindDel(btn) {
-    btn.addEventListener('click', () => { btn.closest('.step-row').remove(); renumberSteps(); });
-}
-document.querySelectorAll('.step-del').forEach(bindDel);
-document.getElementById('add-step')?.addEventListener('click', () => {
-    const row = document.createElement('div');
-    row.className = 'step-row';
-    row.innerHTML = '<span class="step-num"></span><textarea name="steps" rows="2" class="inp"></textarea>'
-        + '<button type="button" class="step-del" title="Supprimer l\'étape">✕</button>';
-    document.getElementById('steps').appendChild(row);
-    bindDel(row.querySelector('.step-del'));
-    renumberSteps();
-    row.querySelector('textarea').focus();
-});
-renumberSteps();
+// Éditeur d'étapes : /static/js/steps-editor.js
 
 // « Extraire » : recharge la page d'enrichissement avec l'URL fournie pour
 // pré-remplir le formulaire depuis la source (puis on valide).

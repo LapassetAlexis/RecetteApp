@@ -1,0 +1,20 @@
+/* Recettes (liste et fiche) : styles propres au lot accessibilité.
+   Complète style.css sans le modifier. */
+
+/* Carte : le titre est un lien étiré sur toute la carte (pseudo-élément). */
+.recipe-card { position: relative; }
+.recipe-card-link { color: inherit; text-decoration: none; }
+.recipe-card-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.recipe-card-link:focus-visible { outline: none; }
+.recipe-card-link:focus-visible::after { outline: 2px solid var(--pr); outline-offset: -2px; }
+/* Les étoiles restent cliquables au-dessus du lien étiré. */
+.recipe-card .recipe-stars { position: relative; z-index: 1; }
+
+/* Étoiles et bouton d'effacement devenus de vrais boutons. */
+button.star { background: none; border: 0; font-family: inherit; }
+button.star:focus-visible,
+button.star-clear:focus-visible { outline: 2px solid var(--pr); outline-offset: 1px; border-radius: 6px; }
+
+/* Chips de filtre devenues des boutons. */
+button.stat-chip { font-family: inherit; color: var(--text); }
+button.stat-chip:focus-visible { outline: 2px solid var(--pr); outline-offset: 2px; }
