@@ -69,8 +69,11 @@
         return state;
     }
 
-    // Brouillon rouvert : dernier jour porteur d'un repas. Sinon semaine pleine.
-    function nbDaysInitial(builder) {
+    // Brouillon rouvert : période enregistrée (`saved`, 1..7) si connue, sinon
+    // dernier jour porteur d'un repas (anciens brouillons). Sinon semaine pleine.
+    function nbDaysInitial(builder, saved) {
+        const n = parseInt(saved);
+        if (Number.isFinite(n) && n >= 1 && n <= 7) return n;
         let maxJour = 0;
         if (Array.isArray(builder)) {
             for (const c of builder) {
@@ -408,7 +411,7 @@
     // Période du planning : jours 1..N contigus (N = 1..7), pilotée par le date
     // range « Du / Au ». `activeDays` reste l'ensemble consommé par la grille, la
     // sérialisation et les groupes de midis (jours hors période → « absent »).
-    const activeDays = activeDaysFor(nbDaysInitial(INITIAL_BUILDER));
+    const activeDays = activeDaysFor(nbDaysInitial(INITIAL_BUILDER, DATA.nb_jours));
 
     const startDate = () => parseDate($('week_start').value);
     const info = idx => dayInfo(startDate(), idx);
@@ -509,7 +512,25 @@
         renderGrid();   // renderGrid resynchronise le champ « Au » via syncEndInput
     }
 
+    // Re-rendu réentrant : retirer un champ « convives » qui a le focus déclenche
+    // son blur, donc son `change` → renderGrid() en plein rendu, qui retirerait
+    // les mêmes nœuds (« The node to be removed is no longer a child »). Un
+    // appel imbriqué est différé : le rendu en cours est refait une fois fini.
+    let rendering = false, renderAgain = false;
     function renderGrid() {
+        if (rendering) { renderAgain = true; return; }
+        rendering = true;
+        try {
+            do {
+                renderAgain = false;
+                renderGridOnce();
+            } while (renderAgain);
+        } finally {
+            rendering = false;
+        }
+    }
+
+    function renderGridOnce() {
         consolidateGroups(state, activeDays);  // un seul repas par groupe (sur le 1er jour actif)
         syncEndInput();
         const grid = $('grid');
@@ -724,6 +745,8 @@
     form.addEventListener('submit', function (e) {
         $('meals-input').value = JSON.stringify(serialize(state, activeDays));
         $('action-input').value = submitAction;
+        // Période explicite : un dernier jour à 0 convive en fait partie.
+        $('nb-jours-input').value = activeDays.size;
         if (!hasMainMeal(state, activeDays)) {
             e.preventDefault();
             // base.html (écouteur en capture) a déjà passé le bouton en chargement
@@ -739,8 +762,9 @@
         btn.textContent = submitAction === 'brouillon' ? '⏳ Enregistrement…' : '⏳ Création…';
     });
 
-    // Message « brouillon enregistré » après un retour /?draft=<id>&saved=1.
-    if (DATA.saved && window.toast) toast('Brouillon enregistré ✓', 'success');
+    // Message après un retour /?draft=<id>&saved=1 (brouillon) ou
+    // /?planning=<id>&saved=1 (semaine validée rouverte, qui le reste).
+    if (DATA.saved && window.toast) toast(DATA.valide ? 'Semaine mise à jour ✓' : 'Brouillon enregistré ✓', 'success');
 
     // Date de début : garde la durée (N jours), décale la fin, relabelle la grille.
     $('week_start').addEventListener('change', renderGrid);

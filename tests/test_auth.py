@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 _MODULES = (
     "app.config", "app.database", "app.notion_client", "app.llm_client", "app.deps",
     "app.services.planning", "app.services.shopping", "app.services.nutrition_week",
-    "app.services.recettes",
+    "app.services.recettes", "app.services.creations",
     "app.routers.pages", "app.routers.planning", "app.routers.courses",
     "app.routers.recettes", "app.routers.catalogue", "app.routers.auth",
     "app.main",

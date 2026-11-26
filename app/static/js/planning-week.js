@@ -63,8 +63,7 @@
     // sélection multiple) ; le serveur applique tout ou rien.
     // sel = [{jours:[...], m}] ; extra = champs en plus (ex. remplace).
     async function batchMeals(sel, action, nom, extra) {
-        const slots = [];
-        sel.forEach(s => s.jours.forEach(j => slots.push({jour: j, moment: s.m})));
+        const slots = toSlots(sel);
         try {
             const d = await postJson(`/api/planning/${pid}/meals`, Object.assign({slots, action, nom}, extra || {}));
             if (d.success) return true;
@@ -125,6 +124,18 @@
         else loadAlternatives();
     }
 
+    // Sélection [{jours:[...], m}] → créneaux [{jour, moment}] (un par jour).
+    const toSlots = sel => sel.flatMap(s => s.jours.map(j => ({jour: j, moment: s.m})));
+    // POST d'une création (repas libre, brique) : true si réussie, sinon toast.
+    async function postCreation(url, body, fallback) {
+        try {
+            const d = await postJson(url, body);
+            if (d.success) return true;
+            toast(d.error || fallback, 'error');
+        } catch (e) { toast('Erreur réseau', 'error'); }
+        return false;
+    }
+
     // ── Repas libre : crée une recette minimale et la place dans le(s) créneau(x) ──
     function resetFree() {
         // Libre : plat (crée une recette minimale) OU accompagnement (simple titre
@@ -169,11 +180,9 @@
         }
         if (!selection.length) { toast('Aucun créneau sélectionné', 'error'); return; }
         this.disabled = true; this.textContent = '⏳ Création...';
-        let ok = true;
-        for (const s of selection) for (const j of s.jours) {
-            const d = await postJson(`/api/free-meal/${pid}`, {jour: j, moment: s.m, nom, ingredients});
-            if (!d.success) { ok = false; toast(d.error || 'Erreur repas libre', 'error'); break; }
-        }
+        // Une requête pour tous les jours (case fusionnée, sélection) : une
+        // seule recette créée, appliquée à tous les créneaux ou à aucun.
+        const ok = await postCreation(`/api/free-meal/${pid}`, {slots: toSlots(selection), nom, ingredients}, 'Erreur repas libre');
         if (ok) { toast('Repas libre créé ✓', 'success'); window.location.reload(); }
         else { this.disabled = false; this.textContent = 'Créer et placer'; }
     }
@@ -189,11 +198,7 @@
         if (!slots.length) { toast('Aucun créneau sélectionné', 'error'); return; }
         const slot = sideMode ? 'accompagnement' : 'plat';
         this.disabled = true; this.textContent = '⏳ Création...';
-        let ok = true;
-        for (const s of slots) for (const j of s.jours) {
-            const d = await postJson(`/api/brique/${pid}`, {jour: j, moment: s.m, slot, nom, base, quantite, unite});
-            if (!d.success) { ok = false; toast(d.error || 'Erreur brique', 'error'); break; }
-        }
+        const ok = await postCreation(`/api/brique/${pid}`, {slots: toSlots(slots), slot, nom, base, quantite, unite}, 'Erreur brique');
         if (ok) { toast('Brique créée ✓', 'success'); window.location.reload(); }
         else { this.disabled = false; this.textContent = 'Créer et placer'; }
     }

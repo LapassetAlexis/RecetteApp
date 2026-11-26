@@ -63,3 +63,17 @@ def test_ajout_depuis_la_fiche_nouveau_brouillon(page: Page, server):
     expect(page.locator("#week_start")).to_have_value("2026-12-10")
     expect(page.locator(".b-rowlabel")).to_have_text(["Jeu 10/12"])
     expect(cellule(page, "1:midi").locator(".b-main")).to_contain_text("Gratin dauphinois")
+
+
+def test_fiche_et_mode_cuisine_virgule_decimale(page: Page, server):
+    """Mise à l'échelle des portions sur la fiche (4 → 6 : 1 kg de poulet →
+    « 1,5 kg ») puis mode cuisine pour 6 : virgule décimale partout."""
+    page.goto(f"{server}/recette/p1")
+    expect(page.locator("#srv-n")).to_have_text("4")
+    page.click("#srv-plus")
+    page.click("#srv-plus")
+    poulet = page.locator(".ing").filter(has_text="poulet").locator(".ing-q")
+    expect(poulet).to_have_text("1,5 kg")
+    page.click("#btn-cuisine")
+    page.wait_for_url(re.compile(r"/recette/p1/cuisine\?portions=6$"))
+    expect(page.locator(".ck-ing-q").filter(has_text="kg")).to_have_text("1,5 kg")

@@ -11,11 +11,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.config import BASE_OPTIONS, REPAS_OPTIONS
 from app.deps import db, notion, templates
+from app.services.creations import place_brique, place_free_meal
 from app.services.nutrition_week import _week_nutrition
 from app.services.planning import (
     MEAL_ACTIONS,
     _alternatives,
-    _brique_ingredients,
     _builder_from_plats,
     _day_labels,
     _editable_planning,
@@ -32,7 +32,7 @@ from app.services.planning import (
     _parse_slots,
     _per_day_from_cases,
     _per_day_list,
-    _place_brique,
+    _periode_saisie,
     _plats_from_cases,
     _recipe_rows,
     _repas_libres,
@@ -43,12 +43,11 @@ from app.services.planning import (
 )
 from app.services.shopping import (
     _collect_shopping,
-    _ingredients_to_text,
     _mutate_sides,
     _refresh_shopping_and_save,
     load_shopping_view,
 )
-from app.text_utils import merge_ingredients, parse_ingredient_line
+from app.text_utils import merge_ingredients
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -61,6 +60,7 @@ async def construire(
     meals: str = Form(""),
     action: str = Form("valider"),
     draft_id: str = Form(""),
+    nb_jours: str = Form(""),
 ):
     """Construit un planning À LA MAIN depuis la grille du formulaire.
 
@@ -79,7 +79,10 @@ async def construire(
     créer un nouveau. Les brouillons multiples coexistent (aucune purge). Une
     semaine validée rouverte (`/?planning=<id>`) reste validée, et « brouillon »
     renvoie alors vers `/?planning=<id>`.
-    `data["nb_jours"]` = dernier jour de la période (dernier jour à convives)."""
+    `nb_jours` (1..7) : durée de la période choisie dans le constructeur,
+    enregistrée telle quelle dans `data["nb_jours"]` (un dernier jour entièrement
+    absent reste dans la période). Sans ce champ (anciens clients) : dernier
+    jour à convives."""
 
     def _error_ctx(message: str) -> dict:
         # On repasse la grille saisie (builder) + le draft_id pour ne pas perdre
@@ -89,6 +92,7 @@ async def construire(
             "week_start": week_start,
             "builder": _json_or_none(meals) or [],
             "draft_id": draft_id,
+            "nb_jours": _periode_saisie(nb_jours),
             "saved": False,
         }
 
@@ -131,7 +135,8 @@ async def construire(
             "per_day": per_day,
             "off_meals": off_meals,
             "builder": _json_or_none(meals) or [],
-            "nb_jours": _nb_jours_from_cases(cases) or _nb_jours({"plats": plats}),
+            "nb_jours": (_periode_saisie(nb_jours) or _nb_jours_from_cases(cases)
+                         or _nb_jours({"plats": plats})),
         }
         recipes = _recipe_rows(plats)
 
@@ -423,64 +428,15 @@ async def api_update_meal(
 @router.post("/api/free-meal/{planning_id}")
 async def api_free_meal(planning_id: int, request: Request):
     """Crée une recette minimale « repas libre » (nom + quelques ingrédients)
-    puis la place dans un créneau du planning. Utile pour un plat qui n'existe
-    pas encore en base (ex. « Steak + haricots verts »).
+    puis la place dans un ou plusieurs créneaux du planning. Utile pour un plat
+    qui n'existe pas encore en base (ex. « Steak + haricots verts »).
 
-    JSON attendu : {jour:int, moment:str, nom:str, ingredients:str}
-    (ingredients = texte multi-lignes, une ligne par ingrédient).
-    """
-    data = await request.json()
-    jour = data.get("jour")
-    moment = data.get("moment")  # "midi" ou "soir"
-    nom = (data.get("nom") or "").strip()
-    ingredients_text = data.get("ingredients") or ""
-
-    if jour not in range(1, 8) or moment not in ("midi", "soir") or not nom:
-        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir, nom)"}
-
+    JSON attendu : {slots:[{jour, moment}, …] | jour:int + moment:str,
+    nom:str, ingredients:str} (ingredients = une ligne par ingrédient).
+    Plusieurs créneaux (case fusionnée) : une seule recette créée, un seul
+    enregistrement ; rien n'est écrit si un créneau manque."""
     try:
-        # Récupérer le planning et repérer le créneau cible AVANT de créer la
-        # recette (évite de créer une page Notion orpheline si le créneau
-        # n'existe pas).
-        slot = await _load_slot(planning_id, jour, moment)
-        if isinstance(slot, dict):
-            return slot
-        planning, planning_data, plats, target = slot
-
-        # Parser les ingrédients saisis (une ligne → {nom, quantite, unite}).
-        structured = [
-            i for i in (parse_ingredient_line(line) for line in ingredients_text.split("\n"))
-            if i and i["nom"]
-        ]
-
-        # Créer la VRAIE recette minimale réutilisable dans Notion.
-        result = await notion.create_recipe(nom=nom, repas="Plat")
-        page_id = result.get("id", "")
-        if not page_id:
-            return {"error": "Création de la recette impossible"}
-
-        # Écrire les ingrédients : Notion + cache local structuré (pour scaling,
-        # nutrition et reconstruction de la liste de courses).
-        if structured:
-            await notion.update_ingredients(page_id, _ingredients_to_text(structured))
-            await db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
-
-        # Placer la recette fraîchement créée dans le créneau : on construit le
-        # dict recette nous-mêmes (on a déjà son id/url via create_recipe) plutôt
-        # que de re-fetch tout le catalogue.
-        # Nouveau plat principal : les accompagnements sont réinitialisés.
-        _set_main(target, nom, {
-            "id": page_id,
-            "url": "",                        # pas d'URL source pour un repas libre
-            "notion_url": result.get("url", ""),
-            "repas": ["Plat"],
-            "tags": [],
-        })
-        target["libre"] = False  # vraie recette Notion créée → plus un repas libre
-
-        # Régénérer la liste de courses + persister EXACTEMENT comme /api/update-meal.
-        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
-
+        return await place_free_meal(planning_id, await request.json())
     except Exception as e:
         logger.exception("Erreur repas libre")
         return {"error": str(e)}
@@ -526,54 +482,19 @@ async def api_remove_side(planning_id: int, request: Request):
 @router.post("/api/brique/{planning_id}")
 async def api_brique(planning_id: int, request: Request):
     """Crée une « brique » (composant simple : steak, œuf, riz…) et la place
-    dans un créneau du planning, en plat OU en accompagnement.
+    dans un ou plusieurs créneaux du planning, en plat OU en accompagnement.
 
     Une brique = recette de Nature « Ingrédient » + une/des Base(s), dont
     l'ingrédient de courses est elle-même (son propre nom). Exclue de la
     génération auto mais réutilisable manuellement.
 
-    JSON attendu : {jour:int, moment:str, slot:"plat"|"accompagnement",
-    nom:str, base:list[str], quantite:str, unite:str}.
+    JSON attendu : {slots:[{jour, moment}, …] | jour:int + moment:str,
+    slot:"plat"|"accompagnement", nom:str, base:list[str], quantite:str,
+    unite:str}. Plusieurs créneaux : une seule brique créée, un seul
+    enregistrement ; rien n'est écrit si un créneau manque.
     """
-    data = await request.json()
-    jour = data.get("jour")
-    moment = data.get("moment")  # "midi" ou "soir"
-    slot = data.get("slot")      # "plat" ou "accompagnement"
-    nom = (data.get("nom") or "").strip()
-    base = data.get("base") or []
-    if isinstance(base, str):
-        base = [base]
-    base = [b for b in base if b]
-    quantite = (str(data.get("quantite") or "")).strip()
-    unite = (str(data.get("unite") or "")).strip()
-
-    if jour not in range(1, 8) or moment not in ("midi", "soir"):
-        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir)"}
-    if slot not in ("plat", "accompagnement") or not nom:
-        return {"error": "Paramètres invalides (slot plat/accompagnement, nom)"}
-
     try:
-        # Repérer le créneau cible AVANT de créer la recette (évite une page
-        # Notion orpheline si le créneau n'existe pas).
-        found = await _load_slot(planning_id, jour, moment)
-        if isinstance(found, dict):
-            return found
-        planning, planning_data, plats, target = found
-
-        # Créer la recette brique (Nature=Ingrédient + Base, sans repas forcé).
-        result = await notion.create_recipe(nom=nom, nature="Ingrédient", base=base)
-        page_id = result.get("id", "")
-        if not page_id:
-            return {"error": "Création de la brique impossible"}
-
-        # L'ingrédient de courses de la brique est elle-même.
-        structured = _brique_ingredients(nom, quantite, unite)
-        await notion.update_ingredients(page_id, _ingredients_to_text(structured))
-        await db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
-
-        _place_brique(target, slot, nom, page_id, result.get("url", ""), base)
-        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
-
+        return await place_brique(planning_id, await request.json())
     except Exception as e:
         logger.exception("Erreur brique")
         return {"error": str(e)}

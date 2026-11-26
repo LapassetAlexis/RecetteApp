@@ -37,6 +37,7 @@
     <input type="hidden" name="meals" id="meals-input">
     <input type="hidden" name="action" id="action-input" value="valider">
     <input type="hidden" name="draft_id" id="draft-id-input" value="{{ draft_id }}">
+    <input type="hidden" name="nb_jours" id="nb-jours-input">
     <small class="hint">
         👥 convives par repas (<strong>0 = absent</strong>, case grisée).
         🎨 sur les midis, le badge <strong>G</strong> regroupe (même couleur = même repas).
@@ -60,7 +61,7 @@
 
 {% block scripts %}
 {# Données serveur pour les scripts de la page (lues par Common.pageData()). #}
-<script type="application/json" id="page-data">{{ {"builder": builder, "saved": saved | default(false)} | tojson }}</script>
+<script type="application/json" id="page-data">{{ {"builder": builder, "saved": saved | default(false), "valide": valide | default(false), "nb_jours": nb_jours | default(0)} | tojson }}</script>
 <script src="/static/js/common.js?v={{ asset_version }}"></script>
 <script src="/static/js/builder.js?v={{ asset_version }}"></script>
 <script src="/static/js/builder-picker.js?v={{ asset_version }}"></script>

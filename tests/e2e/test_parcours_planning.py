@@ -1,6 +1,7 @@
 """Parcours de la page planning : case fusionnée (groupe de midis), modale
 « Changer » avec un nom de recette piégé (B17), accompagnement libre, et
-édition groupée en une requête (repas libre, brique : défauts connus)."""
+édition groupée en une requête (repas libre, brique : une seule recette
+créée pour les deux jours)."""
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -68,8 +69,6 @@ def _compter(page: Page, fragment: str) -> list:
     return vus
 
 
-@pytest.mark.xfail(strict=True, reason="Défaut connu : « Repas libre » sur une case fusionnée envoie une requête "
-                                       "par jour (app/static/js/planning-week.js:173-176), non atomique (B18)")
 def test_repas_libre_case_fusionnee_une_requete(page: Page, server):
     _planning_fusionne(page, server, "2026-11-11")
     vus = _compter(page, "/api/free-meal/")
@@ -83,8 +82,6 @@ def test_repas_libre_case_fusionnee_une_requete(page: Page, server):
     assert len(vus) == 1, f"{len(vus)} requêtes /api/free-meal pour une case fusionnée"
 
 
-@pytest.mark.xfail(strict=True, reason="Défaut connu : « Brique » sur une case fusionnée envoie une requête par "
-                                       "jour et crée une brique par jour (app/static/js/planning-week.js:193-196)")
 def test_brique_case_fusionnee_une_requete(page: Page, server):
     _planning_fusionne(page, server, "2026-11-12")
     vus = _compter(page, "/api/brique/")
