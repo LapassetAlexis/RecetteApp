@@ -58,7 +58,8 @@ def test_auth_login_ouvre_session_persistante(tmp_path):
         # session ouverte → route protégée accessible, sans re-login
         assert c.get("/historique").status_code == 200
         # déconnexion → de nouveau protégé
-        c.get("/logout")
+        assert c.get("/logout").status_code == 405   # GET refusé (M09)
+        c.post("/logout")
         assert c.get("/historique", follow_redirects=False).status_code == 303
 
 

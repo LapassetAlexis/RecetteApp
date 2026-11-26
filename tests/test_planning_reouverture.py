@@ -42,8 +42,9 @@ def _semaine_validee(client, monkeypatch):
 
 def test_planning_validé_rouvert_dans_le_constructeur(client, monkeypatch):
     pid, _, _ = _semaine_validee(client, monkeypatch)
-    # ?draft= refuse toujours une semaine validée…
-    assert _initial_builder(client.get(f"/?draft={pid}").text) == []
+    # ?draft= sur une semaine validée : redirigé vers ?planning= (M09)…
+    r = client.get(f"/?draft={pid}", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/?planning={pid}"
     # … ?planning= l'ouvre.
     html = client.get(f"/?planning={pid}").text
     builder = _initial_builder(html)

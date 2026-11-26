@@ -6,10 +6,11 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.config import BASE_OPTIONS, REPAS_OPTIONS
 from app.deps import db, notion, templates
+from app.http import ERREUR_NOTION, depuis_service, erreur, erreur_exception, externe, lire_json, page_erreur
 from app.services import store
 from app.services.creations import place_brique, place_free_meal
 from app.services.nutrition_week import _week_nutrition
@@ -75,7 +76,7 @@ async def construire(
     (un dernier jour entièrement absent reste dans la période). Sans ce champ
     (anciens clients) : dernier jour à convives."""
 
-    def _error(message: str):
+    def _error(message: str, status: int = 400):
         # On repasse la grille saisie (builder) + le draft_id pour ne pas perdre
         # la saisie de l'utilisateur en cas d'erreur.
         return templates.TemplateResponse(request, "index.html", {
@@ -85,7 +86,7 @@ async def construire(
             "draft_id": draft_id,
             "nb_jours": _periode_saisie(nb_jours),
             "saved": False,
-        })
+        }, status_code=status)
 
     debut = parse_week_start(week_start)
     if not debut:
@@ -128,7 +129,23 @@ async def construire(
 
     except Exception as e:
         logger.exception("Erreur lors de la construction du planning")
-        return _error(f"Erreur : {str(e)}")
+        return _error("Enregistrement impossible : réessaie dans un instant.", 502 if externe(e) else 500)
+
+
+def _repas_lisible(p) -> bool:
+    return (isinstance(p, dict) and type(p.get("jour")) is int and 1 <= p["jour"] <= 7
+            and p.get("moment") in ("midi", "soir") and isinstance(p.get("nom_recette"), str))
+
+
+def _data_lisible(raw) -> dict | None:
+    """`data_json` s'il a la forme attendue (`plats` : liste de repas {jour
+    1-7, moment midi|soir, nom_recette}), sinon None."""
+    try:
+        data = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    ok = isinstance(data, dict) and isinstance(data.setdefault("plats", []), list)
+    return data if ok and all(_repas_lisible(p) for p in data["plats"]) else None
 
 
 @router.get("/planning/{planning_id}", response_class=HTMLResponse)
@@ -138,11 +155,15 @@ async def voir_planning(request: Request, planning_id: int):
     if not planning:
         return RedirectResponse(url="/")
 
-    data = json.loads(planning["data_json"])
-    plats = data.get("plats", [])
+    data = _data_lisible(planning.get("data_json"))
+    if data is None:
+        logger.warning("Planning %s illisible (data_json mal formé) : page 422", planning_id)
+        return page_erreur(request, templates, "Ce planning est illisible : ses repas sont mal formés. "
+                           "Supprime-le depuis l'historique ou restaure une sauvegarde.", 422,
+                           titre="Planning illisible")
+    plats = data["plats"]
 
-    # Marque les repas dont la recette n'a pas d'ingrédients en cache
-    # (« recette pas terminée ») pour afficher un avertissement dans le planning.
+    # Repas sans ingrédients en cache (« recette pas terminée ») : avertissement.
     _mark_non_enrichis(plats, set(await db.get_all_enriched_ingredients()))
 
     # Libellés des 7 jours dérivés de la date du jour 1 (week_start).
@@ -177,7 +198,7 @@ async def dupliquer_planning(planning_id: int):
     dont le jour 1 est aujourd'hui. Permet de « refaire » une semaine appréciée."""
     src = await db.get_planning_with_recipes(planning_id)
     if not src:
-        return {"error": "Planning introuvable"}
+        return erreur("Planning introuvable", 404)
     new_data = copy_data(json.loads(src["data_json"]), src.get("nb_personnes") or 4)
     # La copie démarre aujourd'hui (jour 1), mêmes indices de jour que l'original.
     # Les brouillons multiples coexistent : on ne purge PAS les autres brouillons.
@@ -197,7 +218,7 @@ async def valider_planning(planning_id: int):
     """Valide un brouillon de planning : il rejoint l'historique."""
     planning = await db.get_planning_with_recipes(planning_id)
     if not planning:
-        return {"error": "Planning introuvable"}
+        return erreur("Planning introuvable", 404)
     await db.mark_planning_valid(planning_id)
     return {"success": True}
 
@@ -207,7 +228,7 @@ async def supprimer_planning(planning_id: int):
     """Supprime un planning (brouillon ou validé) et ses recettes liées."""
     planning = await db.get_planning_with_recipes(planning_id)
     if not planning:
-        return {"error": "Planning introuvable"}
+        return erreur("Planning introuvable", 404)
     await db.delete_planning(planning_id)
     return {"success": True}
 
@@ -218,7 +239,7 @@ async def api_planning_apercu(planning_id: int):
     par jour, le nom du repas midi/soir (plat + accompagnements résumés)."""
     planning = await db.get_planning_with_recipes(planning_id)
     if not planning:
-        return {"error": "Introuvable"}
+        return erreur("Planning introuvable", 404)
     try:
         plats = json.loads(planning["data_json"]).get("plats", [])
     except (json.JSONDecodeError, TypeError):
@@ -249,21 +270,13 @@ async def api_planning_meals(planning_id: int, request: Request):
     Réponse : {"success": true, "liste_courses": [...], "plats": [...]} ;
     erreurs : {"error": "..."} avec un statut 400 (corps invalide),
     404 (planning ou repas introuvable) ou 500."""
-    try:
-        body = await request.json()
-    except ValueError:
-        body = None
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "Corps JSON attendu"}, status_code=400)
+    body = await lire_json(request)
     slots = _parse_slots(body.get("slots"))
     action = body.get("action")
     nom = str(body.get("nom") or "").strip()
     remplace = str(body.get("remplace") or "").strip()
     if slots is None or action not in MEAL_ACTIONS or not nom:
-        return JSONResponse(
-            {"error": "Paramètres invalides (slots jour 1-7 / moment midi|soir, action, nom)"},
-            status_code=400,
-        )
+        return erreur("Paramètres invalides (slots jour 1-7 / moment midi|soir, action, nom)")
 
     try:
         # Lecture Notion hors verrou, puis relecture + mutation + écriture sous verrou.
@@ -273,31 +286,26 @@ async def api_planning_meals(planning_id: int, request: Request):
             lambda planning, data: apply_meals_batch(
                 planning, data, slots, action, nom, remplace, resolved),
         )
-        if res.get("error"):
-            return JSONResponse(res, status_code=404)
-        return res
+        return depuis_service(res, 404)
     except Exception as e:
         logger.exception("Erreur modification groupée des repas")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return erreur_exception(e)
 
 
 @router.get("/api/alternatives/{planning_id}")
 async def api_alternatives(planning_id: int):
     """Retourne les recettes disponibles non utilisées dans ce planning."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return erreur("Planning introuvable", 404)
+    used_names = {r["recipe_name"] for r in planning.get("recipes", [])}
     try:
-        planning = await db.get_planning_with_recipes(planning_id)
-        if not planning:
-            return {"error": "Planning introuvable"}
-
-        # Recettes déjà dans le planning
-        used_names = {r["recipe_name"] for r in planning.get("recipes", [])}
-
         # Toutes les recettes Notion (briques comprises), hors celles déjà prises.
         recettes = await notion.get_all_recipes()
-        return {"alternatives": _alternatives(recettes, used_names)}
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur récupération alternatives")
-        return {"error": str(e), "alternatives": []}
+        return erreur(ERREUR_NOTION, 502)
+    return {"alternatives": _alternatives(recettes, used_names)}
 
 
 @router.post("/api/free-meal/{planning_id}")
@@ -310,11 +318,12 @@ async def api_free_meal(planning_id: int, request: Request):
     nom:str, ingredients:str} (ingredients = une ligne par ingrédient).
     Plusieurs créneaux (case fusionnée) : une seule recette créée, un seul
     enregistrement ; rien n'est écrit si un créneau manque."""
+    body = await lire_json(request)
     try:
-        return await place_free_meal(planning_id, await request.json())
+        return depuis_service(await place_free_meal(planning_id, body))
     except Exception as e:
         logger.exception("Erreur repas libre")
-        return {"error": str(e)}
+        return erreur_exception(e)
 
 
 @router.post("/api/brique/{planning_id}")
@@ -331,8 +340,9 @@ async def api_brique(planning_id: int, request: Request):
     unite:str}. Plusieurs créneaux : une seule brique créée, un seul
     enregistrement ; rien n'est écrit si un créneau manque.
     """
+    body = await lire_json(request)
     try:
-        return await place_brique(planning_id, await request.json())
+        return depuis_service(await place_brique(planning_id, body))
     except Exception as e:
         logger.exception("Erreur brique")
-        return {"error": str(e)}
+        return erreur_exception(e)

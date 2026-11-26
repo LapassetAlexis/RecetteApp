@@ -31,7 +31,7 @@ ROUTES_ATTENDUES = {
     ("GET", "/health"),
     ("GET", "/historique"),
     ("GET", "/login"),
-    ("GET", "/logout"),
+    ("POST", "/logout"),
     ("GET", "/openapi.json"),
     ("GET", "/planning/{planning_id}"),
     ("GET", "/recette/{page_id}"),

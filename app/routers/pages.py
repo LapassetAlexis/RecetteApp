@@ -49,7 +49,12 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
     did = _parse_id(planning) or _parse_id(draft)
     if did:
         existing = await db.get_planning_with_recipes(did)
-        if existing and (_parse_id(planning) or not existing.get("valide", 0)):
+        if existing and existing.get("valide", 0) and not _parse_id(planning):
+            # `?draft=` sur une semaine validée (lien ancien, onglet resté
+            # ouvert) : on la rouvre par `?planning=` plutôt qu'un constructeur vide.
+            suite = "&saved=1" if saved else ""
+            return RedirectResponse(url=f"/?planning={did}{suite}", status_code=303)
+        if existing:
             try:
                 data = json.loads(existing["data_json"])
                 b = data.get("builder")

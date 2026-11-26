@@ -226,7 +226,7 @@ def test_construire_sans_repas(client, monkeypatch):
     cases = [_case(1, "midi", None, persons=2)]
     r = client.post("/construire", data={"week_start": "2026-01-05",
                                          "meals": json.dumps(cases)})
-    assert r.status_code == 200
+    assert r.status_code == 400
     assert "Aucun repas" in r.text
 
 
@@ -237,7 +237,7 @@ def test_construire_error_preserves_week(client, monkeypatch):
     cases = [_case(1, "midi", _recipe("X", id="x"), persons=2)]
     r = client.post("/construire", data={"week_start": "2026-02-09",
                                          "meals": json.dumps(cases)})
-    assert r.status_code == 200
+    assert r.status_code == 500
     assert "2026-02-09" in r.text        # la semaine saisie est repassée au formulaire
 
 

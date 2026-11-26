@@ -7,12 +7,16 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.deps import BASE_DIR, VERSION, db, llm, notion, templates
+from app.http import ERREUR_INTERNE, CorpsInvalide, erreur
 from app.routers import admin, auth, catalogue, courses, cuisine, pages, planning, recettes
 
 __all__ = ["BASE_DIR", "VERSION", "app", "db", "llm", "notion", "settings", "templates"]
@@ -49,7 +53,7 @@ if settings.auth_enabled:
             return await call_next(request)
         # API → 401 JSON ; pages → redirection vers le formulaire de login.
         if request.url.path.startswith("/api/"):
-            return Response("Authentification requise", status_code=401)
+            return erreur("Authentification requise", 401, "auth")
         nxt = request.url.path
         if request.url.query:
             nxt += "?" + request.url.query
@@ -68,6 +72,41 @@ app.add_middleware(
     same_site="lax",
     https_only=False,                    # derrière un proxy éventuellement en HTTP
 )
+
+
+
+# ── Erreurs : toujours un statut HTTP et un corps {"error": …} (D4) ──────
+
+@app.exception_handler(CorpsInvalide)
+async def _corps_invalide(request: Request, exc: CorpsInvalide):
+    """Corps refusé par `app.http.lire_json` (400 illisible, 413 trop gros)."""
+    return exc.reponse
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation(request: Request, exc: RequestValidationError):
+    """Paramètres de route, de requête ou de formulaire invalides : 400."""
+    return JSONResponse(
+        {"error": "Paramètres invalides", "detail": jsonable_encoder(exc.errors())},
+        status_code=400,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http(request: Request, exc: StarletteHTTPException):
+    """404 de route inconnue, 405 de méthode refusée… : même forme que les
+    autres erreurs (`detail` gardé pour les anciens lecteurs)."""
+    message = exc.detail if isinstance(exc.detail, str) else "Erreur"
+    return JSONResponse({"error": message, "detail": exc.detail},
+                        status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def _interne(request: Request, exc: Exception):
+    """Exception non prévue : message générique, détail dans les logs."""
+    logger.error("Erreur non gérée sur %s %s", request.method, request.url.path, exc_info=exc)
+    return erreur(ERREUR_INTERNE, 500)
+
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 

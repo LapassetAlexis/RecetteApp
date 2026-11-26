@@ -40,7 +40,7 @@ def test_construire_date_invalide_ne_cree_rien(client, monkeypatch, saisie):  # 
     cases = [_case(1, "midi", POULET, persons=2)]
     r = client.post("/construire", data={"week_start": saisie, "meals": json.dumps(cases)},
                     follow_redirects=False)
-    assert r.status_code == 200
+    assert r.status_code == 400
     assert "Date de début invalide" in r.text
     # Saisie conservée : la grille et la date tapée sont ré-affichées.
     assert f'value="{saisie}"' in r.text and "Poulet" in r.text

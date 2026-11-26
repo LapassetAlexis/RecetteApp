@@ -83,7 +83,7 @@ async def admin_import(
         try:
             added = await backup.import_all(deps.db, data, pending_mode)
         except backup.BackupError as e:
-            return await _render(request, 400, error=str(e))
+            return await _render(request, 400, error=f"Import refusé, rien n'a été modifié : {e}")
         logger.info("Import %s appliqué : %s", pending_mode, added)
         return await _render(request, done={"mode": pending_mode, **added})
 
