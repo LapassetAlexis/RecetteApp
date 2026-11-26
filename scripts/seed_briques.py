@@ -75,7 +75,7 @@ async def run(apply: bool) -> None:
 
     # Réutilise le cache local et le formatage Notion de l'app.
     from app.deps import db as app_db
-    from app.services.shopping import _ingredients_to_text
+    from app.services.shopping import ingredients_to_text
 
     created = 0
     for nom, base, qte, unite in to_create:
@@ -89,7 +89,7 @@ async def run(apply: bool) -> None:
             res = await notion.create_recipe(nom=nom, nature="Ingrédient", base=[base])
             page_id = res.get("id", "")
             if page_id:
-                await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+                await notion.update_ingredients(page_id, ingredients_to_text(structured))
                 await app_db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
             created += 1
         except Exception:

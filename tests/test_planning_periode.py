@@ -7,7 +7,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from app import main
-from app.services.planning import _nb_jours, _nb_jours_from_cases
+from app.services.planning import nb_jours_periode
+from app.services.planning_construire import nb_jours_from_cases
 from tests.test_brouillons_integrite import _catalogue, _data
 from tests.test_routes import _case, _construire, _recipe
 
@@ -84,14 +85,14 @@ def test_ancien_planning_sans_nb_jours_repli_dernier_plat(client, monkeypatch):
 
 
 def test_nb_jours_regles():
-    assert _nb_jours({}) == 7
-    assert _nb_jours({"plats": [{"jour": 3}]}) == 3
-    assert _nb_jours({"nb_jours": 2, "plats": [{"jour": 4}]}) == 4   # jamais sous un plat
-    assert _nb_jours({"nb_jours": 6, "plats": [{"jour": 2}]}) == 6
-    assert _nb_jours({"nb_jours": "x", "plats": [{"jour": "?"}]}) == 7
-    assert _nb_jours({"nb_jours": 12}) == 7
-    assert _nb_jours_from_cases([{"jour": 3, "persons": 2}, {"jour": 6, "persons": 0}]) == 3
-    assert _nb_jours_from_cases([]) == 0
+    assert nb_jours_periode({}) == 7
+    assert nb_jours_periode({"plats": [{"jour": 3}]}) == 3
+    assert nb_jours_periode({"nb_jours": 2, "plats": [{"jour": 4}]}) == 4   # jamais sous un plat
+    assert nb_jours_periode({"nb_jours": 6, "plats": [{"jour": 2}]}) == 6
+    assert nb_jours_periode({"nb_jours": "x", "plats": [{"jour": "?"}]}) == 7
+    assert nb_jours_periode({"nb_jours": 12}) == 7
+    assert nb_jours_from_cases([{"jour": 3, "persons": 2}, {"jour": 6, "persons": 0}]) == 3
+    assert nb_jours_from_cases([]) == 0
 
 
 def test_dupliquer_garde_la_periode(client, monkeypatch):

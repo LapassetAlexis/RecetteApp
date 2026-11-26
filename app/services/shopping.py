@@ -2,7 +2,7 @@
 l'échelle, fusion, rangement par rayon et enregistrement (génération).
 
 La liste partagée (clés, coches, articles manuels, placard, vue, partage) vit
-dans `shopping_list` ; ses noms restent importables d'ici (voir `compat`)."""
+dans `shopping_list`."""
 
 import inspect
 import json
@@ -10,7 +10,6 @@ import logging
 
 from app.deps import BASE_SERVINGS, db
 from app.services import store
-from app.services.compat import anciens_noms
 from app.services.planning import nb_jours_periode, per_day_list, plat_accompagnements
 from app.services.planning_builder import builder_from_plats
 from app.services.shopping_list import finalize_items, purge_orphans
@@ -201,6 +200,3 @@ def repas_libres(plats: list[dict], day_labels: list[dict] | None = None) -> lis
                 "quand": quand,
             })
     return out
-
-
-__getattr__ = anciens_noms(__name__)

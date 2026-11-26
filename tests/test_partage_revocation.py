@@ -9,7 +9,7 @@ import pytest
 
 import app.main as main
 from app.routers import courses as courses_router
-from app.services.shopping import SHARE_TOKEN_BYTES, share_action
+from app.services.shopping_list import SHARE_TOKEN_BYTES, share_action
 from tests.test_courses_partage import LAIT_2_LIGNES, data_of, make_client, make_planning, share
 
 APP = Path(main.__file__).parent

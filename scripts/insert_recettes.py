@@ -77,7 +77,7 @@ async def run(apply: bool, path: str | Path = DEFAULT_JSON) -> dict[str, int]:
 
     # Réutilise le cache local et le formatage Notion de l'app.
     from app.deps import db as app_db
-    from app.services.shopping import _ingredients_to_text
+    from app.services.shopping import ingredients_to_text
 
     existing = {r["nom"].strip().lower() for r in await notion.get_all_recipes()}
     to_create = [r for r in recipes if r["nom"].strip().lower() not in existing]
@@ -113,7 +113,7 @@ async def run(apply: bool, path: str | Path = DEFAULT_JSON) -> dict[str, int]:
                 counters["errors"] += 1
                 continue
             if structured:
-                await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+                await notion.update_ingredients(page_id, ingredients_to_text(structured))
                 await app_db.save_enriched(
                     page_id, nom, ingredients=json.dumps(structured, ensure_ascii=False),
                     base_servings=base_servings,

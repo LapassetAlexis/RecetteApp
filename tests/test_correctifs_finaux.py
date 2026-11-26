@@ -15,7 +15,7 @@ from starlette.testclient import TestClient
 
 from app import main
 from app.services.creations import slots_from_body
-from app.services.planning import _periode_saisie
+from app.services.planning_construire import periode_saisie
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
 from tests.test_routes import _case, _construire, _recipe
 
@@ -200,7 +200,7 @@ def test_periode_absente_ou_invalide_repli_sur_les_cases(client, monkeypatch):
 
 @pytest.mark.parametrize("brut, attendu", [("4", 4), (" 7 ", 7), ("0", 0), ("8", 0), ("", 0), (None, 0)])
 def test_periode_saisie(brut, attendu):
-    assert _periode_saisie(brut) == attendu
+    assert periode_saisie(brut) == attendu
 
 
 # ── Semaine validée rouverte : message adapté ─────────────────────────────

@@ -9,7 +9,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import app.main as main
-from app.services.shopping import apply_check, fmt_quantite, item_key, shopping_view
+from app.services.shopping_list import apply_check, fmt_quantite, item_key, shopping_view
 from tests.test_routes import _case, _construire, _recipe
 
 

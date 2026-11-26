@@ -1226,29 +1226,29 @@ def test_brique_creneau_introuvable(client, monkeypatch):
 
 def test_week_label_range():
     # Plage de jours réellement remplis (2026-07-13 = lundi).
-    assert planning_svc._week_label("2026-07-13", [{"jour": 2}, {"jour": 5}]) == "Mardi 14/07 → vendredi 17/07"
-    assert planning_svc._week_label("2026-07-13", [{"jour": 3}]) == "Mercredi 15/07"
-    assert planning_svc._week_label("2026-07-13", []) == "Semaine du 2026-07-13"
-    assert planning_svc._week_label("bad", [{"jour": 1}]) == "Semaine du bad"
+    assert planning_svc.week_label("2026-07-13", [{"jour": 2}, {"jour": 5}]) == "Mardi 14/07 → vendredi 17/07"
+    assert planning_svc.week_label("2026-07-13", [{"jour": 3}]) == "Mercredi 15/07"
+    assert planning_svc.week_label("2026-07-13", []) == "Semaine du 2026-07-13"
+    assert planning_svc.week_label("bad", [{"jour": 1}]) == "Semaine du bad"
 
 
 def test_week_label_non_monday():
     # week_start = date du JOUR 1 (mardi 14/07/2026), pas forcément un lundi.
     # Le nom du jour vient de la VRAIE date, pas de l'index.
-    assert planning_svc._week_label("2026-07-14", [{"jour": 1}]) == "Mardi 14/07"
-    assert planning_svc._week_label("2026-07-14", [{"jour": 1}, {"jour": 3}]) == "Mardi 14/07 → jeudi 16/07"
+    assert planning_svc.week_label("2026-07-14", [{"jour": 1}]) == "Mardi 14/07"
+    assert planning_svc.week_label("2026-07-14", [{"jour": 1}, {"jour": 3}]) == "Mardi 14/07 → jeudi 16/07"
 
 
 def test_day_labels():
     # jour 1..7 dérivés d'une date de départ arbitraire (mardi 14/07/2026).
-    dl = planning_svc._day_labels("2026-07-14")
+    dl = planning_svc.day_labels("2026-07-14")
     assert len(dl) == 7
     assert dl[0] == {"jour": 1, "court": "Mar", "long": "Mardi", "date": "14/07"}
     assert dl[3] == {"jour": 4, "court": "Ven", "long": "Vendredi", "date": "17/07"}
     # jour 7 = +6j = lundi 20/07.
     assert dl[6]["long"] == "Lundi" and dl[6]["date"] == "20/07"
     # Repli neutre si date invalide.
-    bad = planning_svc._day_labels("bad")
+    bad = planning_svc.day_labels("bad")
     assert bad[0] == {"jour": 1, "court": "J1", "long": "Jour 1", "date": ""}
 
 

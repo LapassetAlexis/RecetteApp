@@ -65,9 +65,6 @@ def load(raw) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-_load = load   # ancien nom (routers/courses.py) ; retiré par M11
-
-
 async def update_planning(planning_id: int, fn, recipes: bool = False, **columns):
     """Lit le planning, applique `fn(planning, data)` puis écrit, sous verrou.
 

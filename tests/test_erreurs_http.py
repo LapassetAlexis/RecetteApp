@@ -183,7 +183,7 @@ def test_exception_interne_500_sans_detail(client, planning, monkeypatch):  # no
     monkeypatch.setattr(courses, "apply_check", _boom)
     monkeypatch.setattr(courses.store, "update_planning", _aboom)
     monkeypatch.setattr(rplanning, "resolve_meal_action", _aboom)
-    monkeypatch.setattr(recettes, "_enrich_many", _aboom)
+    monkeypatch.setattr(recettes, "enrich_many", _aboom)
     for r in (
         client.post(f"/api/shopping-check/{pid}", json={"item": "lait", "checked": True}),
         client.post(f"/generate-shopping/{pid}"),

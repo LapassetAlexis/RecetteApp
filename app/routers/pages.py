@@ -9,7 +9,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.config import settings
 from app.deps import BASE_DIR, db, templates
-from app.services.planning import _attach_label, _builder_from_plats, _nb_jours
+from app.services.planning import attach_label, nb_jours_periode
+from app.services.planning_builder import builder_from_plats
 
 router = APIRouter()
 
@@ -60,7 +61,7 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
                 b = data.get("builder")
                 if not isinstance(b, list):
                     # Ancien planning sans grille : reconstruite depuis les plats.
-                    b = _builder_from_plats(
+                    b = builder_from_plats(
                         data.get("plats", []), data.get("off_meals"),
                         existing.get("nb_personnes") or 4,
                     )
@@ -71,7 +72,7 @@ async def index(request: Request, draft: str = "", planning: str = "", saved: st
                     valide = bool(existing.get("valide", 0))
                     # Période enregistrée (un dernier jour absent en fait partie).
                     if data.get("nb_jours"):
-                        nb_jours = _nb_jours(data)
+                        nb_jours = nb_jours_periode(data)
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -107,7 +108,7 @@ def _periode(planning: dict) -> tuple[date, date] | None:
         data = {}
     if not isinstance(data, dict):
         data = {}
-    return debut, debut + timedelta(days=_nb_jours(data) - 1)
+    return debut, debut + timedelta(days=nb_jours_periode(data) - 1)
 
 
 def planning_en_cours(plannings: list[dict], today: date) -> dict | None:
@@ -140,8 +141,8 @@ async def historique(request: Request, n: int = HISTORIQUE_PAGE):
     une page de 20). On en lit une de plus pour savoir s'il en reste."""
     n = max(HISTORIQUE_PAGE, min(n, 1000))
     lus = await db.list_plannings(limit=n + 1)
-    plannings = [_attach_label(p) for p in lus[:n]]
-    drafts = [_attach_label(p) for p in await db.list_drafts(limit=20)]
+    plannings = [attach_label(p) for p in lus[:n]]
+    drafts = [attach_label(p) for p in await db.list_drafts(limit=20)]
     return templates.TemplateResponse(
         request,
         "historique.html",

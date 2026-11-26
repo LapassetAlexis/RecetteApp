@@ -6,7 +6,7 @@ import json
 from datetime import date
 
 import app.main as main
-from app.services import recettes as recettes_svc
+from app.services import recette_planifier
 from tests.test_routes import _case, _construire, _recipe, client  # noqa: F401  (fixture réutilisée)
 
 CURRY = _recipe("Curry", id="curry", base=["Viande"])
@@ -149,5 +149,5 @@ def test_fiche_liste_les_brouillons(client, monkeypatch):  # noqa: F811
 
 
 def test_draft_choices_tolere_un_json_illisible():
-    (d,) = recettes_svc._draft_choices([{"id": 1, "week_start": "x", "data_json": "{"}])
+    (d,) = recette_planifier.draft_choices([{"id": 1, "week_start": "x", "data_json": "{"}])
     assert d["occupied"] == {} and d["days"][0]["label"] == "Jour 1"

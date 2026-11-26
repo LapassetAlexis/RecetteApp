@@ -275,7 +275,7 @@ def test_page_ajouter_vide(client):  # noqa: F811
     ({"count": 1, "last": "2020-01-05"}, "Cuisinée 1 fois · dernière fois le 05/01/2020"),
 ])
 def test_usage_label(usage, attendu):
-    assert recettes_svc._usage_label(usage) == attendu
+    assert recettes_svc.usage_label(usage) == attendu
 
 
 def test_fiche_affiche_usage_et_bouton_planning(client, monkeypatch):  # noqa: F811

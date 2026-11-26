@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 from app import main
 from app.deps import BASE_DIR
 from app.services import planning as planning_svc
+from app.services import planning_batch
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
 from tests.test_routes import _case, _construire, _recipe
 
@@ -197,7 +198,7 @@ def test_validation_du_corps(client, monkeypatch):
 
 
 def test_slots_dedoublonnes():
-    slots = planning_svc._parse_slots([{"jour": 1, "moment": "midi"}, {"jour": 1, "moment": "midi", "persons": "x"}])
+    slots = planning_batch.parse_slots([{"jour": 1, "moment": "midi"}, {"jour": 1, "moment": "midi", "persons": "x"}])
     assert slots == [{"jour": 1, "moment": "midi", "persons": 0}]
 
 

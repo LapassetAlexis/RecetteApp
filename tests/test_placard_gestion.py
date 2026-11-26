@@ -8,7 +8,7 @@ import pytest
 
 import app.main as main
 from app.categories import RAYON_ORDER
-from app.services.shopping import add_extra, get_placard, make_extra, set_extra_rayon, set_placard
+from app.services.shopping_list import add_extra, get_placard, make_extra, set_extra_rayon, set_placard
 from tests.test_courses_partage import data_of, make_client, make_planning, set_data, share
 
 

@@ -10,9 +10,9 @@ import pytest
 from app import main
 from app.deps import BASE_DIR
 from app.services import planning as planning_svc
+from app.services import planning_construire, store
 from app.services import shopping as shopping_svc
-from app.services import store
-from app.services.recettes import _planifier
+from app.services.recette_planifier import planifier
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
 from tests.test_routes import _case, _construire, _recipe, client  # noqa: F401  (fixture)
 
@@ -115,7 +115,7 @@ def test_construire_brouillon_supprime_entre_temps_en_cree_un_nouveau(client, mo
 
 def test_planning_from_builder_sans_repas(client, monkeypatch):  # noqa: F811
     _catalogue(monkeypatch, POULET)
-    assert asyncio.run(planning_svc.planning_from_builder("[]", "")) is None
+    assert asyncio.run(planning_construire.planning_from_builder("[]", "")) is None
 
 
 # ── Routes dépréciées et code mort retirés (décision D2) ───────────────
@@ -178,7 +178,7 @@ def test_dupliquer_et_apercu(client, monkeypatch):  # noqa: F811
 
 
 def test_copy_data_reconstruit_la_grille_des_anciens_plannings():
-    data = planning_svc.copy_data({"plats": [{"jour": 1, "moment": "midi", "nom_recette": "A"}],
+    data = planning_construire.copy_data({"plats": [{"jour": 1, "moment": "midi", "nom_recette": "A"}],
                                    "nb_jours": 2})
     assert len(data["builder"]) == 14 and data["nb_jours"] == 2
 
@@ -200,7 +200,7 @@ def test_planifier_nouveau_brouillon_supprime_si_l_ecriture_echoue(client, monke
         raise RuntimeError("disque plein")
     monkeypatch.setattr(store, "update_planning", _boom)
     with pytest.raises(RuntimeError):
-        asyncio.run(_planifier("c1", {"moment": "soir", "date": "2026-03-02"}))
+        asyncio.run(planifier("c1", {"moment": "soir", "date": "2026-03-02"}))
     assert _nb_plannings() == 0
 
 
@@ -208,8 +208,8 @@ def test_planifier_parametres_invalides_ne_cree_rien(client, monkeypatch):  # no
     _fiche(monkeypatch)
     for body in ({"moment": "goûter"}, {"moment": "soir", "date": "pas-une-date"},
                  {"moment": "soir", "planning_id": 1, "jour": 9}):
-        assert "error" in asyncio.run(_planifier("c1", body))
-    assert "error" in asyncio.run(_planifier("inconnue", {"moment": "soir"}))
+        assert "error" in asyncio.run(planifier("c1", body))
+    assert "error" in asyncio.run(planifier("inconnue", {"moment": "soir"}))
     assert _nb_plannings() == 0
 
 
@@ -218,17 +218,17 @@ def test_planifier_semaine_validee_refusee(client, monkeypatch):  # noqa: F811
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
     asyncio.run(main.db.mark_planning_valid(pid))
     avant = _planning(pid)["data_json"]
-    r = asyncio.run(_planifier("c1", {"planning_id": pid, "jour": 1, "moment": "soir"}))
+    r = asyncio.run(planifier("c1", {"planning_id": pid, "jour": 1, "moment": "soir"}))
     assert r == {"error": "Brouillon introuvable"}
     assert _planning(pid)["data_json"] == avant
-    assert asyncio.run(_planifier("c1", {"planning_id": 999, "jour": 1, "moment": "soir"})) \
+    assert asyncio.run(planifier("c1", {"planning_id": 999, "jour": 1, "moment": "soir"})) \
         == {"error": "Brouillon introuvable"}
 
 
 def test_planifier_remplace_avec_les_convives_demandes(client, monkeypatch):  # noqa: F811
     _fiche(monkeypatch)
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
-    r = asyncio.run(_planifier("c1", {"planning_id": pid, "jour": 1, "moment": "midi",
+    r = asyncio.run(planifier("c1", {"planning_id": pid, "jour": 1, "moment": "midi",
                                           "persons": 5}))
     assert r["success"] and r["draft"]["occupied"]["1:midi"] == "Curry"
     plat = _data(pid)["plats"][0]

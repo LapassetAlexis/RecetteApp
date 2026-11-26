@@ -3,7 +3,7 @@
 
 Le reste vit dans des modules dédiés : `recette_edition` (ajout, édition),
 `enrichissement` (par lot, flux SSE), `recette_planifier` (ajout au planning
-depuis la fiche). Les anciens noms restent importables d'ici (voir `compat`)."""
+depuis la fiche)."""
 
 import json
 import logging
@@ -20,7 +20,6 @@ from app.config import (
 )
 from app.deps import BASE_SERVINGS, db
 from app.nutrition import estimate_nutrition
-from app.services.compat import anciens_noms
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +169,3 @@ async def recipe_usage() -> dict[str, dict]:
     except Exception as e:
         logger.warning(f"Lecture de l'usage des recettes échouée: {e}")
         return {}
-
-
-__getattr__ = anciens_noms(__name__)

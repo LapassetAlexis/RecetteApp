@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 import app.main as main
-from app.services.shopping import get_placard, set_placard, shopping_view
+from app.services.shopping_list import get_placard, set_placard, shopping_view
 from tests.test_courses_partage import data_of, make_client, make_planning, share
 
 

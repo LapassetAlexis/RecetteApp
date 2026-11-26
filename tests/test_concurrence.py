@@ -12,8 +12,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from app import main
-from app.services import shopping as shopping_svc
-from app.services import store
+from app.services import shopping_list, store
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
 from tests.test_routes import _case, _construire, _recipe
 
@@ -202,8 +201,8 @@ def test_repas_libre_creneau_retire_pendant_la_creation(client, monkeypatch):
 
 def test_placard_ajouts_simultanes_tous_gardes(client):
     async def _go():
-        await asyncio.gather(*[shopping_svc.set_placard(f"article {i}", True) for i in range(8)])
-        return await shopping_svc.get_placard()
+        await asyncio.gather(*[shopping_list.set_placard(f"article {i}", True) for i in range(8)])
+        return await shopping_list.get_placard()
 
     assert len(asyncio.run(_go())) == 8
 

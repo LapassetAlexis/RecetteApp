@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import pytest
 
-from app.services.shopping import add_extra, make_extra, remove_extra, set_masque
+from app.services.shopping_list import add_extra, make_extra, remove_extra, set_masque
 from tests.test_courses_partage import data_of, make_client, make_planning, set_data, share
 from tests.test_routes import _case, _recipe
 

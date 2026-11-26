@@ -1,4 +1,4 @@
-"""M10 — découpage des services : anciens noms toujours importables, aucun
+"""M10/M11 — découpage des services : anciens noms retirés (M11), aucun
 import circulaire quel que soit le module chargé en premier, taille des
 fichiers, titre de la semaine aligné sur la période, repas libre
 « sel, poivre »."""
@@ -14,30 +14,34 @@ import pytest
 
 import app.main as main
 from app.services import planning, store
-from app.services.compat import table_anciens_noms
 from tests.test_routes import _case, _construire, _recipe, client  # noqa: F401  (fixture réutilisée)
 
 SERVICES = Path(__file__).resolve().parent.parent / "app" / "services"
 MODULES = sorted(f"app.services.{p.stem}" for p in SERVICES.glob("*.py") if p.stem != "__init__")
 
 
-@pytest.mark.parametrize("module, noms", sorted(table_anciens_noms().items()))
-def test_anciens_noms_resolus(module, noms):
-    mod = importlib.import_module(module)
+# M11 : les ré-exports des anciens noms (`compat`) sont retirés ; routeurs,
+# scripts et tests importent les noms publics depuis leur module actuel.
+ANCIENS = {
+    "planning": ["_builder_from_plats", "_week_label", "_nb_jours", "_alternatives", "copy_data",
+                 "planning_from_builder", "apply_meals_batch", "MEAL_ACTIONS", "GROUPES_MAX"],
+    "shopping": ["_collect_shopping", "_ingredients_to_text", "add_extra", "get_placard", "share_action"],
+    "recettes": ["_planifier", "_enrich_all_events", "_ajouter", "_usage_label"],
+    "store": ["_load"],
+}
+
+
+@pytest.mark.parametrize("module, noms", sorted(ANCIENS.items()))
+def test_anciens_noms_retires(module, noms):
+    mod = importlib.import_module(f"app.services.{module}")
     for nom in noms:
-        assert getattr(mod, nom) is not None, f"{module}.{nom}"
+        assert not hasattr(mod, nom), f"{module}.{nom}"
 
 
-def test_anciens_noms_de_la_liste_partagee_et_du_store():
-    from app.services import shopping, shopping_list
-    for nom in ("add_extra", "apply_check", "fmt_quantite", "get_placard", "item_key",
-                "load_shopping_view", "mutate_planning_data", "SHARE_TOKEN_BYTES", "share_action"):
-        assert getattr(shopping, nom) is getattr(shopping_list, nom)
-    assert store._load is store.load and store.load('["x"]') == {} and store.load('{"a": 1}') == {"a": 1}
-    with pytest.raises(AttributeError):
-        _ = planning.nom_inexistant
-    with pytest.raises(AttributeError):
-        _ = shopping.nom_inexistant
+def test_module_compat_supprime():
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.services.compat")
+    assert store.load('["x"]') == {} and store.load('{"a": 1}') == {"a": 1}
 
 
 @pytest.mark.parametrize("module", MODULES)
