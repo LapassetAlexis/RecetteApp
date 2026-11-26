@@ -60,12 +60,18 @@
         window.navStart();
         if (a.classList.contains('btn')) a.classList.add('loading');  // spinner sur le lien-bouton
     });
-    // Sur soumission : barre + bouton submit en loader (désactivé après l'envoi)
+    // Sur soumission : barre + bouton submit en loader (désactivé après l'envoi).
+    // Écouteur en phase de remontée : il passe après les gestionnaires du
+    // formulaire. Un formulaire traité en JS (preventDefault) ne quitte pas la
+    // page : ni barre ni spinner, sinon le bouton resterait bloqué.
     document.addEventListener('submit', (e) => {
+        if (e.defaultPrevented) return;
         window.navStart();
-        const btn = e.target.querySelector('button[type="submit"], button:not([type])');
+        const btn = (e.submitter && e.submitter.matches('button'))
+            ? e.submitter
+            : e.target.querySelector('button[type="submit"], button:not([type])');
         if (btn) { btn.classList.add('loading'); btn.disabled = true; }
-    }, true);
+    });
     window.addEventListener('pageshow', (e) => {
         // au retour arrière (bfcache), la page réapparaît : on coupe la barre
         const b = document.getElementById('nav-progress');
