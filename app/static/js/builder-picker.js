@@ -5,7 +5,7 @@
 // À charger après builder.js (utilise window.Builder).
 (function () {
     'use strict';
-    const { esc } = window.Common;
+    const { esc, modal } = window.Common;
     const { BASES, PICKER_PAGE, EXTRA_FILTERS, seasonOf, filterCatalogue, sortCatalogue,
             recencyLabel, noteValue } = window.Builder;
     const $ = id => document.getElementById(id);
@@ -20,7 +20,7 @@
     let pkExtra = new Set();   // ids d'EXTRA_FILTERS actifs
     let pkShown = PICKER_PAGE; // nombre de cartes affichées (« Afficher plus »)
     let onChange = null;   // rappel après un choix (re-rendu de la grille)
-    let opener = null;     // élément qui a ouvert la modale (focus rendu à la fermeture)
+    let handle = null;     // modale ouverte (Common.modal : piège Tab, Échap, focus rendu)
 
     const SEASON_ICONS = { Printemps: '🌱', 'Été': '☀️', Automne: '🍂', Hiver: '❄️' };
 
@@ -148,23 +148,24 @@
     }
 
     function open(mode, cell, cb) {
-        opener = document.activeElement;
         pkMode = mode; pkCell = cell; pkNature = ''; pkBase = ''; pkExtra = new Set();
         pkShown = PICKER_PAGE; onChange = cb || null;
         $('pk-title').textContent = mode === 'main' ? 'Choisir le repas principal' : 'Choisir un accompagnement';
         $('pk-search').value = '';
         buildFilters();
         renderPkList();
+        if (handle) return;
         $('pk').classList.add('open');
-        $('pk-search').focus();
+        // Le focus est rendu au déclencheur à la fermeture (s'il existe encore :
+        // après un choix, la grille est re-rendue).
+        handle = modal($('pk'), {
+            initialFocus: '#pk-search',
+            onClose: () => { handle = null; pkCell = null; $('pk').classList.remove('open'); },
+        });
     }
 
     function close() {
-        $('pk').classList.remove('open');
-        pkCell = null;
-        // Après un choix, la grille est re-rendue : l'ancien bouton n'existe plus.
-        if (opener && document.contains(opener)) opener.focus();
-        opener = null;
+        if (handle) handle.close();
     }
 
     const isOpen = () => $('pk').classList.contains('open');

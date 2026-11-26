@@ -81,7 +81,7 @@ def test_page_data_planning(client, monkeypatch):
     data = _page_data(html)
     assert data["pid"] == pid
     assert len(data["day_labels"]) == 7 and data["day_labels"][0]["court"]
-    assert data["courses_checked"] == []
+    assert "courses_checked" not in data       # sans lecteur côté JS (M05)
     # Aucune interpolation Jinja restante dans du JS inline.
     assert "const pid" not in html and "{{" not in html
 

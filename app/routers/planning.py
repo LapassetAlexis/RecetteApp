@@ -160,8 +160,6 @@ async def voir_planning(request: Request, planning_id: int):
             "week_nutrition": await _week_nutrition(plats, day_labels),
             "repas_libres": _repas_libres(plats, day_labels),
             "shop": await load_shopping_view(data),
-            # Encore lu par planning.html (#page-data), hors du périmètre de M02.
-            "courses_checked": data.get("courses_checked", []),
             "per_day": _per_day_list(planning, data),
             "off_meals": data.get("off_meals", []),
             # Période affichée : jours 1..nb_jours (les jours hors période sont masqués).

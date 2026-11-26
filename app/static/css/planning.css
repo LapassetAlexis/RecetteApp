@@ -13,3 +13,15 @@
 
 /* Barre d'actions sous le titre (validation / modification) */
 .week-toolbar { gap: 6px; flex-wrap: wrap; }
+
+/* Créneau vide de la période (ni plat ni « absent ») : bouton « Ajouter ». */
+.meal-empty { display: flex; flex-direction: column; align-items: stretch; justify-content: center;
+    gap: 6px; padding: 7px 8px; min-height: 146px; border: 1.5px dashed var(--bo);
+    border-radius: var(--r); background: transparent; }
+.meal-empty.midi { border-left: 3px solid var(--pr); }
+.meal-empty.soir { border-left: 3px solid var(--ac); }
+.meal-add { cursor: pointer; min-height: 44px; padding: 8px; border: none; border-radius: 8px;
+    background: var(--surface); color: var(--text); font: inherit; font-size: .85rem; font-weight: 600; }
+.meal-add:hover, .meal-add:focus-visible { background: var(--bg); }
+.week-list .meal-empty { min-height: 0; margin-bottom: 8px; }
+.week-list .meal-empty .meal-tag { font-size: .78rem; }
