@@ -51,7 +51,8 @@ def test_entete_planning_sans_saison(client, planning_id):
 def test_nom_recette_echappe_cote_serveur(client, planning_id):
     html = client.get(f"/planning/{planning_id}").text
     assert "<b>x</b>" not in html
-    assert "Salade &#34;César&#34; &lt;b&gt;x&lt;/b&gt;" in html or "Salade &quot;César&quot; &lt;b&gt;x&lt;/b&gt;" in html
+    assert ("Salade &#34;César&#34; &lt;b&gt;x&lt;/b&gt;" in html
+            or "Salade &quot;César&quot; &lt;b&gt;x&lt;/b&gt;" in html)
 
 
 def test_modale_planning_accessible(client, planning_id):

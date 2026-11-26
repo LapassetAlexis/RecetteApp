@@ -21,7 +21,7 @@ services:
       # App
       APP_TITLE: "Menu Planner Tristabeau"
       SECRET_KEY: "${SECRET_KEY:-}"
-      # Auth HTTP Basic optionnelle (laisser vide pour désactiver)
+      # Auth par session optionnelle, formulaire de login (laisser vide pour désactiver)
       AUTH_USER: "${AUTH_USER:-}"
       AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
     volumes:

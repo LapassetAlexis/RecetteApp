@@ -30,9 +30,8 @@ from typing import Any
 
 import httpx
 
-from app.config import BASE_OPTIONS, NATURE_OPTIONS
+from app.config import BASE_OPTIONS, NATURE_OPTIONS, settings
 from app.notion_client import BASE_URL, NOTION_VERSION
-from app.config import settings
 
 logger = logging.getLogger("migrate_taxo")
 

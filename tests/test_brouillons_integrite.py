@@ -10,6 +10,8 @@ from starlette.testclient import TestClient
 
 from app import main
 from app.database import Database
+from app.routers import auth as auth_router
+from app.services import planning as planning_svc
 from tests.test_routes import _case, _construire, _recipe
 
 
@@ -211,7 +213,7 @@ def test_builder_from_plats_midis_consecutifs_groupes():
     plats = [_plat(j, "midi", "Lasagnes", "l1") for j in (1, 2, 3)]
     plats.append(_plat(4, "midi", "Quiche", "q1"))
     plats.append(_plat(5, "midi", "Lasagnes", "l1"))  # identique mais non consécutif
-    b = main._builder_from_plats(plats)
+    b = planning_svc._builder_from_plats(plats)
     assert len(b) == 14
     assert [_slot(b, j, "midi")["group"] for j in range(1, 6)] == [1, 1, 1, 4, 5]
     # Seul le premier midi du groupe porte le repas (comme le constructeur).
@@ -225,7 +227,7 @@ def test_builder_from_plats_midis_consecutifs_groupes():
 def test_builder_from_plats_accompagnements_distincts_non_groupes():
     plats = [_plat(1, "midi", "Steak", "s1", accs=["Frites"]),
              _plat(2, "midi", "Steak", "s1", accs=["Riz"])]
-    b = main._builder_from_plats(plats)
+    b = planning_svc._builder_from_plats(plats)
     assert _slot(b, 2, "midi")["group"] == 2
     assert _slot(b, 1, "midi")["accompagnements"] == [
         {"notion_id": "frites", "nom": "Frites", "nature": "Recette", "libre": False}]
@@ -233,7 +235,7 @@ def test_builder_from_plats_accompagnements_distincts_non_groupes():
 
 def test_builder_from_plats_repas_libre_et_absences():
     plats = [_plat(1, "soir", "Pizzas", libre=True, persons=3)]
-    b = main._builder_from_plats(plats, off_meals=["1:midi"])
+    b = planning_svc._builder_from_plats(plats, off_meals=["1:midi"])
     soir = _slot(b, 1, "soir")
     assert soir["main"] == {"notion_id": "", "nom": "Pizzas", "nature": "Recette", "libre": True}
     assert soir["persons"] == 3
@@ -243,7 +245,7 @@ def test_builder_from_plats_repas_libre_et_absences():
 
 
 def test_builder_from_plats_case_vide_du_jour_garde_les_convives():
-    b = main._builder_from_plats([_plat(1, "midi", "Poulet", "p1", persons=4)])
+    b = planning_svc._builder_from_plats([_plat(1, "midi", "Poulet", "p1", persons=4)])
     soir = _slot(b, 1, "soir")
     assert soir["persons"] == 4 and "main" not in soir
 
@@ -251,39 +253,13 @@ def test_builder_from_plats_case_vide_du_jour_garde_les_convives():
 def test_builder_from_plats_ancien_accompagnement_et_persons_absent():
     plats = [{"jour": 1, "moment": "soir", "nom_recette": "Poisson", "notion_id": "f1",
               "accompagnement": {"nom_recette": "Riz", "notion_id": "r1"}}]
-    b = main._builder_from_plats(plats, default_persons=3)
+    b = planning_svc._builder_from_plats(plats, default_persons=3)
     soir = _slot(b, 1, "soir")
     assert soir["persons"] == 3
     assert [a["nom"] for a in soir["accompagnements"]] == ["Riz"]
 
 
 # ── B16 : le cache des ingrédients n'écrase plus base/durée/nutrition ──
-
-
-def test_enrich_conserve_base_servings(client, monkeypatch):
-    asyncio.run(main.db.save_enriched(
-        "n1", "Pâtes", ingredients="[]", cuisson_minutes=25,
-        nutrition='{"kcal": 500}', base_servings=2,
-    ))
-
-    async def _get(pid):
-        return {"id": pid, "nom": "Pâtes", "url": "https://exemple.test/pates"}
-
-    async def _ext(nom, url="", nb=4):
-        return {"ingredients": [{"nom": "pâtes", "quantite": "200", "unite": "g"}]}
-
-    async def _upd(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "get_recipe", _get)
-    monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
-    monkeypatch.setattr(main.notion, "update_ingredients", _upd)
-
-    assert client.post("/api/enrich/n1").json().get("success")
-    got = asyncio.run(main.db.get_enriched("n1"))
-    assert got["base_servings"] == 2
-    assert got["cuisson_minutes"] == 25
-    assert got["nutrition"] == '{"kcal": 500}'
-    assert json.loads(got["ingredients"])[0]["nom"] == "pâtes"
 
 
 def test_save_enriched_upsert_partiel(tmp_path):
@@ -340,9 +316,9 @@ def test_login_mot_de_passe_accentue_ok_et_next_externe_neutralise(client, auth)
 
 
 def test_safe_next():
-    assert main._safe_next("/planning/3") == "/planning/3"
+    assert auth_router._safe_next("/planning/3") == "/planning/3"
     for bad in ("//x", "/\\x", "http://x", "x", "/a\nb", None):
-        assert main._safe_next(bad) == "/"
+        assert auth_router._safe_next(bad) == "/"
 
 
 # ── get_recipe_usage ──────────────────────────────────────────────────

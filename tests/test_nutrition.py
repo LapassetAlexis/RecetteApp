@@ -1,6 +1,6 @@
 """Tests de l'estimation nutritionnelle."""
 
-from app.nutrition import estimate_nutrition, _to_grams, _match_food
+from app.nutrition import _match_food, _to_grams, estimate_nutrition
 
 
 def test_to_grams_units_and_pieces():

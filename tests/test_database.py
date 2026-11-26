@@ -106,9 +106,12 @@ def test_get_last_planning_empty(tmp_path):
 
 
 def test_all_enriched_ingredients(tmp_path):
-    import asyncio, json
+    import asyncio
+    import json
+
     from app.database import Database
-    db = Database(); db.path = str(tmp_path / "e.db")
+    db = Database()
+    db.path = str(tmp_path / "e.db")
 
     async def run():
         await db.init()

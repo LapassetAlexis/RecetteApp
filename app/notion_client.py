@@ -1,9 +1,11 @@
 """Client Notion API — lecture / écriture de la base de recettes."""
 
-import httpx
+import asyncio
 import logging
 import time
 from typing import Any
+
+import httpx
 
 from app.config import settings
 
@@ -26,6 +28,29 @@ class NotionClient:
         }
         self._cache: list[dict[str, Any]] | None = None
         self._cache_ts: float = 0.0
+        # Client HTTP partagé (connexions réutilisées), créé à la demande et
+        # fermé par `aclose()` à l'arrêt de l'app (lifespan).
+        self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        """Client HTTP partagé. Recréé s'il a été fermé ou s'il appartient à une
+        autre boucle d'événements (scripts et tests qui enchaînent les
+        `asyncio.run`) : un client httpx ne survit pas à sa boucle."""
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or self._client_loop is not loop:
+            self._client = httpx.AsyncClient()
+            self._client_loop = loop
+        return self._client
+
+    async def aclose(self) -> None:
+        """Ferme le client HTTP partagé (appelé à l'arrêt de l'application)."""
+        client, loop = self._client, self._client_loop
+        self._client, self._client_loop = None, None
+        # Un client né dans une autre boucle (déjà fermée) ne peut plus être
+        # fermé proprement : on l'abandonne.
+        if client is not None and not client.is_closed and loop is asyncio.get_running_loop():
+            await client.aclose()
 
     def invalidate_cache(self) -> None:
         """Force le prochain get_all_recipes à refetch (après une écriture)."""
@@ -45,32 +70,32 @@ class NotionClient:
 
     async def get_recipe(self, page_id: str) -> dict[str, Any] | None:
         """Récupère UNE recette par son id (1 appel, pas toute la base)."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{BASE_URL}/pages/{page_id}", headers=self._headers, timeout=30
-            )
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            recipe = self._parse_page(resp.json())
-            return recipe if recipe["nom"] else None
+        client = self._http()
+        resp = await client.get(
+            f"{BASE_URL}/pages/{page_id}", headers=self._headers, timeout=30
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        recipe = self._parse_page(resp.json())
+        return recipe if recipe["nom"] else None
 
     async def get_recipe_instructions(self, page_id: str) -> list[str]:
         """Récupère les étapes de cuisson depuis les blocks de la page."""
         steps: list[str] = []
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
-                headers=self._headers, timeout=30,
-            )
-            if resp.status_code >= 400:
-                return steps
-            for block in resp.json().get("results", []):
-                if block.get("type") == "numbered_list_item":
-                    rt = block["numbered_list_item"].get("rich_text", [])
-                    txt = "".join(t.get("plain_text", "") for t in rt).strip()
-                    if txt:
-                        steps.append(txt)
+        client = self._http()
+        resp = await client.get(
+            f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
+            headers=self._headers, timeout=30,
+        )
+        if resp.status_code >= 400:
+            return steps
+        for block in resp.json().get("results", []):
+            if block.get("type") == "numbered_list_item":
+                rt = block["numbered_list_item"].get("rich_text", [])
+                txt = "".join(t.get("plain_text", "") for t in rt).strip()
+                if txt:
+                    steps.append(txt)
         return steps
 
     async def _fetch_all_recipes(self) -> list[dict[str, Any]]:
@@ -78,29 +103,29 @@ class NotionClient:
         recipes: list[dict[str, Any]] = []
         start_cursor: str | None = None
 
-        async with httpx.AsyncClient() as client:
-            while True:
-                body: dict[str, Any] = {"page_size": 100}
-                if start_cursor:
-                    body["start_cursor"] = start_cursor
+        client = self._http()
+        while True:
+            body: dict[str, Any] = {"page_size": 100}
+            if start_cursor:
+                body["start_cursor"] = start_cursor
 
-                resp = await client.post(
-                    f"{BASE_URL}/databases/{self.database_id}/query",
-                    headers=self._headers,
-                    json=body,
-                    timeout=30,
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            resp = await client.post(
+                f"{BASE_URL}/databases/{self.database_id}/query",
+                headers=self._headers,
+                json=body,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-                for page in data.get("results", []):
-                    recipe = self._parse_page(page)
-                    if recipe["nom"]:  # ignorer les pages sans titre
-                        recipes.append(recipe)
+            for page in data.get("results", []):
+                recipe = self._parse_page(page)
+                if recipe["nom"]:  # ignorer les pages sans titre
+                    recipes.append(recipe)
 
-                if not data.get("has_more"):
-                    break
-                start_cursor = data.get("next_cursor")
+            if not data.get("has_more"):
+                break
+            start_cursor = data.get("next_cursor")
 
         return recipes
 
@@ -232,16 +257,16 @@ class NotionClient:
             "properties": properties,
         }
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{BASE_URL}/pages",
-                headers=self._headers,
-                json=body,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()  # la nouvelle recette doit apparaître
-            return resp.json()
+        client = self._http()
+        resp = await client.post(
+            f"{BASE_URL}/pages",
+            headers=self._headers,
+            json=body,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()  # la nouvelle recette doit apparaître
+        return resp.json()
 
     # ── Mise à jour avec ingrédients ─────────────────────────────
 
@@ -257,24 +282,24 @@ class NotionClient:
                 "rich_text": [{"text": {"content": ingredients_text[:2000]}}]
             }
         }
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"properties": properties, "icon": {"emoji": "🥗"}},
-                timeout=30,
-            )
-            if resp.status_code == 400:
-                # La propriété n'existe pas → écrire en blocks dans le corps
-                return await self._append_ingredients_blocks(page_id, ingredients_text)
-            resp.raise_for_status()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"properties": properties, "icon": {"emoji": "🥗"}},
+            timeout=30,
+        )
+        if resp.status_code == 400:
+            # La propriété n'existe pas → écrire en blocks dans le corps
+            return await self._append_ingredients_blocks(page_id, ingredients_text)
+        resp.raise_for_status()
+        return resp.json()
 
     async def _append_ingredients_blocks(
         self, page_id: str, ingredients_text: str
     ) -> dict[str, Any]:
         """Fallback : écrit les ingrédients en blocks dans le corps de la page."""
-        lines = [l.strip() for l in ingredients_text.split("\n") if l.strip()]
+        lines = [ln.strip() for ln in ingredients_text.split("\n") if ln.strip()]
         children = []
         for line in lines:
             text = line.lstrip("- ").strip()
@@ -295,52 +320,52 @@ class NotionClient:
             }}
         ] + children
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/blocks/{page_id}/children",
-                headers=self._headers,
-                json={"children": blocks},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/blocks/{page_id}/children",
+            headers=self._headers,
+            json={"children": blocks},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     async def ensure_ingredients_field(self) -> bool:
         """Vérifie/crée le champ Ingrédients + Moment dans la base Notion."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
+        client = self._http()
+        resp = await client.get(
+            f"{BASE_URL}/databases/{self.database_id}",
+            headers=self._headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        db = resp.json()
+        props = db.get("properties", {})
+        update_props = {}
+
+        if "Ingrédients" not in props:
+            update_props["Ingrédients"] = {"rich_text": {}}
+
+        if "Moment" not in props:
+            update_props["Moment"] = {
+                "select": {
+                    "options": [
+                        {"name": "Midi", "color": "orange"},
+                        {"name": "Soir", "color": "purple"},
+                        {"name": "Les deux", "color": "green"},
+                    ]
+                }
+            }
+
+        if update_props:
+            await client.patch(
                 f"{BASE_URL}/databases/{self.database_id}",
                 headers=self._headers,
+                json={"properties": update_props},
                 timeout=30,
             )
-            resp.raise_for_status()
-            db = resp.json()
-            props = db.get("properties", {})
-            update_props = {}
-
-            if "Ingrédients" not in props:
-                update_props["Ingrédients"] = {"rich_text": {}}
-
-            if "Moment" not in props:
-                update_props["Moment"] = {
-                    "select": {
-                        "options": [
-                            {"name": "Midi", "color": "orange"},
-                            {"name": "Soir", "color": "purple"},
-                            {"name": "Les deux", "color": "green"},
-                        ]
-                    }
-                }
-
-            if update_props:
-                await client.patch(
-                    f"{BASE_URL}/databases/{self.database_id}",
-                    headers=self._headers,
-                    json={"properties": update_props},
-                    timeout=30,
-                )
-                logger.info(f"✅ Champs créés dans Notion: {list(update_props.keys())}")
-            return True
+            logger.info(f"✅ Champs créés dans Notion: {list(update_props.keys())}")
+        return True
 
     # ── Mise à jour de l'image ───────────────────────────────────
 
@@ -350,20 +375,20 @@ class NotionClient:
         image_url: str,
     ) -> dict[str, Any]:
         """Définit l'image de couverture d'une page Notion."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={
-                    "cover": {
-                        "type": "external",
-                        "external": {"url": image_url}
-                    }
-                },
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={
+                "cover": {
+                    "type": "external",
+                    "external": {"url": image_url}
+                }
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     # ── Ajout d'instructions dans le corps ──────────────────────
 
@@ -373,7 +398,7 @@ class NotionClient:
         instructions_text: str,
     ) -> dict[str, Any]:
         """Ajoute les instructions comme blocks dans le corps de la page."""
-        lines = [l.strip() for l in instructions_text.split("\n") if l.strip()]
+        lines = [ln.strip() for ln in instructions_text.split("\n") if ln.strip()]
         if not lines:
             return {}
         children = []
@@ -395,88 +420,88 @@ class NotionClient:
             }}
         ] + children
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/blocks/{page_id}/children",
-                headers=self._headers,
-                json={"children": blocks},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/blocks/{page_id}/children",
+            headers=self._headers,
+            json={"children": blocks},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     async def rewrite_recipe_body(self, page_id: str, instructions_text: str) -> dict[str, Any]:
         """Nettoie le corps de la page (anciennes sections recette accumulées :
         Ingrédients / Préparation / Instructions, titres + listes/paragraphes)
         puis ré-écrit les instructions à jour. Évite les doublons et résidus."""
         keywords = ("ingrédient", "ingredient", "préparation", "preparation", "instruction")
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
-                headers=self._headers, timeout=30,
-            )
-            to_delete: list[str] = []
-            if resp.status_code < 400:
-                in_section = False
-                for b in resp.json().get("results", []):
-                    t = b.get("type", "")
-                    if t.startswith("heading_"):
-                        txt = "".join(
-                            x.get("plain_text", "") for x in b.get(t, {}).get("rich_text", [])
-                        ).lower()
-                        in_section = any(k in txt for k in keywords)
-                        if in_section:
-                            to_delete.append(b["id"])
-                    elif in_section and t in ("bulleted_list_item", "numbered_list_item", "paragraph"):
+        client = self._http()
+        resp = await client.get(
+            f"{BASE_URL}/blocks/{page_id}/children?page_size=100",
+            headers=self._headers, timeout=30,
+        )
+        to_delete: list[str] = []
+        if resp.status_code < 400:
+            in_section = False
+            for b in resp.json().get("results", []):
+                t = b.get("type", "")
+                if t.startswith("heading_"):
+                    txt = "".join(
+                        x.get("plain_text", "") for x in b.get(t, {}).get("rich_text", [])
+                    ).lower()
+                    in_section = any(k in txt for k in keywords)
+                    if in_section:
                         to_delete.append(b["id"])
-            for bid in to_delete:
-                await client.delete(f"{BASE_URL}/blocks/{bid}", headers=self._headers, timeout=30)
+                elif in_section and t in ("bulleted_list_item", "numbered_list_item", "paragraph"):
+                    to_delete.append(b["id"])
+        for bid in to_delete:
+            await client.delete(f"{BASE_URL}/blocks/{bid}", headers=self._headers, timeout=30)
         return await self.append_instructions(page_id, instructions_text)
 
     async def update_recipe_url(self, page_id: str, url: str) -> dict[str, Any]:
         """Met à jour l'URL source d'une recette existante."""
         if not url:
             return {}
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"properties": {"URL": {"url": url}}},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"properties": {"URL": {"url": url}}},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()
+        return resp.json()
 
     async def update_portions(self, page_id: str, n: int) -> dict[str, Any]:
         """Met à jour la base de portions (propriété number « Portions »)."""
         if not n or n <= 0:
             return {}
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"properties": {"Portions": {"number": n}}},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"properties": {"Portions": {"number": n}}},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()
+        return resp.json()
 
     async def update_recipe_title(self, page_id: str, nom: str) -> dict[str, Any]:
         """Met à jour le titre (Nom) d'une recette existante."""
         if not nom:
             return {}
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"properties": {"Nom": {"title": [{"text": {"content": nom}}]}}},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"properties": {"Nom": {"title": [{"text": {"content": nom}}]}}},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()
+        return resp.json()
 
     async def update_recipe_meta(
         self, page_id: str, repas: list[str] | str = "", tags: list[str] | None = None,
@@ -499,29 +524,29 @@ class NotionClient:
             properties["Nature"] = {"select": {"name": nature}}
         if not properties:
             return {}
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers, json={"properties": properties}, timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers, json={"properties": properties}, timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()
+        return resp.json()
 
 
     async def archive_recipe(self, page_id: str) -> dict[str, Any]:
         """Archive (= supprime) une recette dans Notion. Notion n'a pas de vraie
         suppression via l'API : on passe la page en `archived: true`."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"archived": True},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()  # la recette disparaît de la liste
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"archived": True},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()  # la recette disparaît de la liste
+        return resp.json()
 
     # ── Mise à jour de la note ──────────────────────────────────
 
@@ -536,26 +561,26 @@ class NotionClient:
                 "select": {"name": note} if note else None
             }
         }
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"properties": properties},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()  # note à jour dans la liste
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"properties": properties},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()  # note à jour dans la liste
+        return resp.json()
 
     async def update_status(self, page_id: str, etat: str) -> dict[str, Any]:
         """Met à jour l'état (propriété `status`) d'une recette."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.patch(
-                f"{BASE_URL}/pages/{page_id}",
-                headers=self._headers,
-                json={"properties": {"État": {"status": {"name": etat}}}},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            self.invalidate_cache()  # état à jour dans la liste
-            return resp.json()
+        client = self._http()
+        resp = await client.patch(
+            f"{BASE_URL}/pages/{page_id}",
+            headers=self._headers,
+            json={"properties": {"État": {"status": {"name": etat}}}},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        self.invalidate_cache()  # état à jour dans la liste
+        return resp.json()
