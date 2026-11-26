@@ -317,30 +317,6 @@ def test_construire_complet(client, monkeypatch):
     assert shop["br"]["quantite"] == "100"
 
 
-def test_update_meal_updates_without_duplicate(client, monkeypatch):
-    poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
-    async def _all():
-        return [poulet, soupe, _recipe("Curry", id="c1")]
-    async def _ext(nom, url="", nb=4):
-        return {"ingredients": [{"nom": "sel", "quantite": "1", "unite": "pincée"}]}
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
-
-    pid = _construire(client, [_case(1, "midi", poulet, persons=2),
-                               _case(1, "soir", soupe, persons=2)])
-
-    resp = client.post(f"/api/update-meal/{pid}",
-                       json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
-    assert resp.json().get("success")
-    # le repas est remplacé et AUCUN planning dupliqué n'est créé
-    import asyncio
-    asyncio.run(main.db.mark_planning_valid(pid))
-    plannings = asyncio.run(main.db.list_plannings(limit=10))
-    assert len(plannings) == 1
-    p = asyncio.run(main.db.get_planning_with_recipes(pid))
-    assert {r["recipe_name"] for r in p["recipes"]} == {"Curry", "Soupe"}
-
-
 def test_planning_draft_then_validate(client, monkeypatch):
     poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     async def _all():
@@ -856,85 +832,7 @@ def test_enrichir_demande_url_si_absente(client, monkeypatch):
     assert saved.get("url") == "https://example.com/recette"
 
 
-def test_update_meal_invalid_params(client):
-    # Validation : jour hors [1,7] ou moment invalide -> erreur sans toucher la base
-    bad = client.post("/api/update-meal/1", json={"jour": 999, "moment": "xyz", "nouvelle_recette": "X"}).json()
-    assert "error" in bad
-    bad2 = client.post("/api/update-meal/1", json={"jour": 1, "moment": "midi", "nouvelle_recette": ""}).json()
-    assert "error" in bad2
-
-
 # ── Accompagnements MULTIPLES ──────────────────────────────────────
-
-def _side_planning(client, monkeypatch):
-    """Planning à un repas (Poulet, midi jour 1) + catalogue de 2 légumes
-    (Haricots, Carottes), chacun avec ses ingrédients en cache."""
-    poulet = _recipe("Poulet", id="p1")
-    async def _all():
-        return [poulet,
-                _recipe("Haricots", id="h1", base=["Légume"]),
-                _recipe("Carottes", id="c1", base=["Légume"])]
-    _INGS = {
-        "p1": [{"nom": "poulet", "quantite": "200", "unite": "g"}],
-        "h1": [{"nom": "haricots", "quantite": "150", "unite": "g"}],
-        "c1": [{"nom": "carottes", "quantite": "100", "unite": "g"}],
-    }
-    async def _enriched(nid):
-        return {"ingredients": json.dumps(_INGS[nid])} if nid in _INGS else None
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.db, "get_enriched", _enriched)
-    return _construire(client, [_case(1, "midi", poulet, persons=4)])
-
-
-def test_add_side_appends_multiple(client, monkeypatch):
-    """add-side ajoute (APPEND) : deux accompagnements coexistent, doublon ignoré,
-    et leurs ingrédients figurent tous dans la liste de courses."""
-    pid = _side_planning(client, monkeypatch)
-    assert client.post(f"/api/add-side/{pid}",
-                       json={"jour": 1, "moment": "midi", "nom": "Haricots"}).json()["success"]
-    d = client.post(f"/api/add-side/{pid}",
-                    json={"jour": 1, "moment": "midi", "nom": "Carottes"}).json()
-    assert d["success"]
-    midi = next(p for p in d["plats"] if p["jour"] == 1 and p["moment"] == "midi")
-    assert [a["nom_recette"] for a in midi["accompagnements"]] == ["Haricots", "Carottes"]
-
-    # Doublon (même nom) : ignoré, toujours 2 accompagnements.
-    d3 = client.post(f"/api/add-side/{pid}",
-                     json={"jour": 1, "moment": "midi", "nom": "Haricots"}).json()
-    midi = next(p for p in d3["plats"] if p["jour"] == 1 and p["moment"] == "midi")
-    assert len(midi["accompagnements"]) == 2
-
-    # Les ingrédients des DEUX accompagnements sont dans les courses.
-    noms = {i["nom"].lower() for i in d3["liste_courses"]}
-    assert {"haricots", "carottes"} <= noms
-
-
-def test_remove_side_removes_the_right_one(client, monkeypatch):
-    """remove-side retire l'accompagnement ciblé (par nom), garde les autres,
-    et met à jour la liste de courses en conséquence."""
-    pid = _side_planning(client, monkeypatch)
-    client.post(f"/api/add-side/{pid}", json={"jour": 1, "moment": "midi", "nom": "Haricots"})
-    client.post(f"/api/add-side/{pid}", json={"jour": 1, "moment": "midi", "nom": "Carottes"})
-    d = client.post(f"/api/remove-side/{pid}",
-                    json={"jour": 1, "moment": "midi", "nom": "Haricots"}).json()
-    assert d["success"]
-    midi = next(p for p in d["plats"] if p["jour"] == 1 and p["moment"] == "midi")
-    assert [a["nom_recette"] for a in midi["accompagnements"]] == ["Carottes"]
-    noms = {i["nom"].lower() for i in d["liste_courses"]}
-    assert "carottes" in noms and "haricots" not in noms
-
-
-def test_update_meal_clears_sides(client, monkeypatch):
-    """Remplacer le plat principal réinitialise ses accompagnements."""
-    pid = _side_planning(client, monkeypatch)
-    client.post(f"/api/add-side/{pid}", json={"jour": 1, "moment": "midi", "nom": "Haricots"})
-    d = client.post(f"/api/update-meal/{pid}",
-                    json={"jour": 1, "moment": "midi", "nouvelle_recette": "Carottes"}).json()
-    assert d["success"]
-    midi = next(p for p in d["plats"] if p["jour"] == 1 and p["moment"] == "midi")
-    assert midi["nom_recette"] == "Carottes"
-    assert midi["accompagnements"] == []
-
 
 def test_legacy_accompagnement_read_as_list(client, monkeypatch):
     """Ancien planning stockant `accompagnement` (dict) : lu comme liste à 1

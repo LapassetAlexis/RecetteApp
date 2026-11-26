@@ -1,7 +1,7 @@
 """Liste de courses d'un planning : collecte des ingrédients en cache, mise à
 l'échelle, fusion, rangement par rayon et enregistrement."""
 
-import asyncio
+import inspect
 import json
 import logging
 import re
@@ -9,11 +9,11 @@ import zlib
 
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.deps import BASE_SERVINGS, db
+from app.services import store
 from app.services.planning import (
     _builder_from_plats,
-    _load_slot,
+    _nb_jours,
     _per_day_list,
-    _recipe_rows,
     plat_accompagnements,
 )
 from app.text_utils import (
@@ -104,15 +104,15 @@ async def _collect_shopping(
     return collected, non_enrichis
 
 
-async def _refresh_shopping_and_save(
-    planning: dict, planning_id: int, planning_data: dict, plats: list[dict],
-) -> dict:
-    """Régénère la liste de courses (ancrée sur le cache DB), la range dans le
-    planning, persiste et renvoie la réponse standard des endpoints planning.
+async def refresh_shopping(planning: dict, planning_data: dict) -> dict:
+    """Régénère, EN MÉMOIRE, la liste de courses (ancrée sur le cache DB) et la
+    grille du constructeur depuis `planning_data["plats"]`. Renvoie la réponse
+    standard des endpoints planning.
 
-    Mutualise la fin de /api/update-meal, /api/free-meal et /api/brique :
-    mêmes règles (pas d'extraction LLM à l'aveugle, mise à l'échelle par jour,
-    titre de recette par ingrédient, catégorisation par rayon)."""
+    Mêmes règles partout (/api/planning/{id}/meals, /api/free-meal,
+    /api/brique, ajout depuis une fiche) : pas d'extraction LLM à l'aveugle,
+    mise à l'échelle par repas, titre de recette par ingrédient, rayon."""
+    plats = planning_data.setdefault("plats", [])
     per_day = _per_day_list(planning, planning_data)
     collected, _ = await _collect_shopping(
         plats, per_day, planning.get("nb_personnes", 4),
@@ -121,42 +121,37 @@ async def _refresh_shopping_and_save(
     finalize_items(liste_courses)
     planning_data["liste_courses"] = liste_courses
     # La grille du constructeur suit les plats : un brouillon modifié depuis
-    # la page planning puis « Repris » garde les modifications.
+    # la page planning puis « Repris » garde les modifications, et les groupes
+    # de midis choisis dans le constructeur (ancienne grille) sont conservés.
     planning_data["builder"] = _builder_from_plats(
         plats, planning_data.get("off_meals"), planning.get("nb_personnes") or 4,
+        previous=planning_data.get("builder"), nb_jours=_nb_jours(planning_data),
     )
     # Coches et masques orphelins : on ne garde que ceux d'un article encore présent.
     purge_orphans(planning_data)
-
-    await db.update_planning(
-        planning_id=planning_id,
-        data_json=json.dumps(planning_data, ensure_ascii=False),
-        recipes=_recipe_rows(plats),
-    )
     return {"success": True, "liste_courses": liste_courses, "plats": plats}
 
 
-async def _mutate_sides(planning_id: int, jour, moment, mutate):
-    """Charge le planning, applique `mutate(cible)` sur la liste d'accompagnements
-    du repas ciblé, régénère la liste de courses et persiste. Renvoie la réponse
-    standard des endpoints planning (success/liste_courses/plats)."""
-    if jour not in range(1, 8) or moment not in ("midi", "soir"):
-        return {"error": "Paramètres invalides (jour 1-7, moment midi/soir)"}
-    try:
-        slot = await _load_slot(planning_id, jour, moment)
-        if isinstance(slot, dict):
-            return slot
-        planning, planning_data, plats, cible = slot
+async def _refresh_shopping_and_save(planning_id: int, mutate=None) -> dict:
+    """Modifie les repas d'un planning puis régénère et enregistre, sous verrou.
 
-        accs = plat_accompagnements(cible)
-        accs = await mutate(accs)
-        cible["accompagnements"] = accs
-        cible.pop("accompagnement", None)  # migre l'ancien champ singulier
+    `mutate(planning, data)` (synchrone ou asynchrone, sans appel à Notion)
+    modifie `data["plats"]` en place et renvoie un message d'erreur, ou None.
+    En cas d'erreur, rien n'est écrit. `data_json` et `planning_recipes` sont
+    écrits ensemble. Renvoie la réponse standard, ou {"error": …}."""
+    async def fn(planning: dict, data: dict):
+        if mutate is not None:
+            erreur = mutate(planning, data)
+            if inspect.isawaitable(erreur):
+                erreur = await erreur
+            if erreur:
+                return store.NoWrite({"error": erreur})
+        return await refresh_shopping(planning, data)
 
-        return await _refresh_shopping_and_save(planning, planning_id, planning_data, plats)
-    except Exception as e:
-        logger.exception("Erreur mutation accompagnements")
-        return {"error": str(e)}
+    data, res = await store.update_planning(planning_id, fn, recipes=True)
+    if data is None:
+        return {"error": "Planning introuvable"}
+    return res
 
 
 def _ingredients_to_text(ings: list[dict]) -> str:
@@ -192,7 +187,6 @@ def _ing_lines(items: list[dict]) -> str:
 EXTRA_PREFIX = "extra:"
 _EXTRA_MAX = 200            # garde-fou : nombre d'articles manuels par planning
 _TEXTE_MAX = 120            # longueur max d'une saisie rapide
-_locks: dict[tuple[int, int], asyncio.Lock] = {}
 
 
 def item_key(item: dict) -> str:
@@ -381,14 +375,16 @@ async def set_placard(nom: str, present: bool) -> None:
     nom = _normalize_form(nom)
     if not nom:
         return
-    prefs = await db.get_app_prefs()
-    placard = set(await get_placard())
-    if present:
-        placard.add(nom)
-    else:
-        placard.discard(nom)
-    prefs["placard"] = sorted(placard)
-    await db.save_app_prefs(prefs)
+    # Verrou des réglages : deux ajouts simultanés ne s'écrasent pas.
+    async with store.prefs_lock():
+        prefs = await db.get_app_prefs()
+        placard = set(await get_placard())
+        if present:
+            placard.add(nom)
+        else:
+            placard.discard(nom)
+        prefs["placard"] = sorted(placard)
+        await db.save_app_prefs(prefs)
 
 
 def _view_item(it: dict, checked: set[str], extra: bool) -> dict:
@@ -452,17 +448,12 @@ async def load_shopping_view(data: dict) -> dict:
 
 async def mutate_planning_data(planning_id: int, fn):
     """Lit le data_json d'un planning, applique `fn(data)` puis enregistre si `fn`
-    renvoie une valeur vraie. Verrou par planning : deux coches simultanées
-    (page publique + page planning) ne s'écrasent pas.
+    renvoie une valeur vraie, sous le verrou du planning (`store.update_planning`) :
+    deux coches simultanées (page publique + page planning) ne s'écrasent pas.
 
     Renvoie (data, résultat de fn), ou (None, None) si le planning n'existe pas."""
-    lock = _locks.setdefault((id(asyncio.get_running_loop()), planning_id), asyncio.Lock())
-    async with lock:
-        planning = await db.get_planning_with_recipes(planning_id)
-        if not planning:
-            return None, None
-        data = json.loads(planning["data_json"])
+    def _fn(_planning: dict, data: dict):
         res = fn(data)
-        if res:
-            await db.update_planning_data(planning_id, json.dumps(data, ensure_ascii=False))
-        return data, res
+        return res if res else store.NoWrite(res)
+
+    return await store.update_planning(planning_id, _fn)

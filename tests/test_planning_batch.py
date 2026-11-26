@@ -7,7 +7,6 @@ from starlette.testclient import TestClient
 
 from app import main
 from app.deps import BASE_DIR
-from app.routers import planning as planning_router
 from app.services import planning as planning_svc
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
 from tests.test_routes import _case, _construire, _recipe
@@ -207,11 +206,6 @@ def test_semaine_validee_reste_validee(client, monkeypatch):
     client.post(f"/planning/{pid}/valider")
     _post(client, pid, slots=SLOTS_3J, action="set_main", nom="Curry")
     assert _planning(pid)["valide"] == 1
-
-
-def test_anciens_endpoints_marques_deprecies():
-    for f in (planning_router.api_update_meal, planning_router.api_add_side, planning_router.api_remove_side):
-        assert "Déprécié" in f.__doc__
 
 
 def test_planning_week_js_utilise_l_endpoint_groupe():

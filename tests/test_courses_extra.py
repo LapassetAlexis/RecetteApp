@@ -86,7 +86,8 @@ def test_article_manuel_survit_a_un_changement_de_repas(client, monkeypatch):
     pid = make_planning(client, monkeypatch, {**RIZ, "Curry": [{"nom": "curry", "quantite": "1", "unite": "pot"}]})
     client.post(f"/api/courses/{pid}/extra", json={"texte": "café"})
     client.post(f"/api/shopping-check/{pid}", json={"item": "extra:cafe|", "checked": True})
-    client.post(f"/api/update-meal/{pid}", json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
+    client.post(f"/api/planning/{pid}/meals",
+                json={"slots": [{"jour": 1, "moment": "midi"}], "action": "set_main", "nom": "Curry"})
     data = data_of(pid)
     assert [e["key"] for e in data["courses_extra"]] == ["extra:cafe|"]
     assert data["courses_checked"] == ["extra:cafe|"]

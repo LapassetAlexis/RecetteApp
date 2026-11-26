@@ -19,10 +19,8 @@ from app.deps import BASE_SERVINGS, db, llm, notion
 from app.nutrition import estimate_nutrition
 from app.services.planning import (
     _attach_label,
-    _build_plat,
     _day_labels,
-    _per_day_list,
-    _set_main,
+    apply_meals_batch,
     plat_accompagnements,
 )
 from app.services.shopping import _ing_lines, _ingredients_to_text, _refresh_shopping_and_save
@@ -546,8 +544,12 @@ async def _planifier(page_id: str, body: dict) -> dict:
     """Place une recette dans un brouillon : `planning_id` + `jour` (1-7) +
     `moment`, ou (`planning_id` absent ou « new ») un nouveau brouillon d'un
     jour démarrant à `date` (AAAA-MM-JJ, défaut aujourd'hui). Le plat du
-    créneau est créé ou remplacé, puis la liste de courses et la grille du
-    constructeur sont régénérées (une seule écriture du planning).
+    créneau est créé ou remplacé (même règle que POST /api/planning/{id}/meals,
+    action set_main), puis la liste de courses et la grille du constructeur
+    sont régénérées : une seule écriture du planning, sous son verrou.
+
+    Le brouillon neuf n'est créé qu'une fois les paramètres et la recette
+    validés, et il est supprimé si l'écriture échoue.
 
     Retourne {success, planning_id, url} ou {error}."""
     moment = body.get("moment")
@@ -567,34 +569,29 @@ async def _planifier(page_id: str, body: dict) -> dict:
     if not recette:
         return {"error": "Recette introuvable"}
 
+    slot = {"jour": jour, "moment": moment, "persons": _positive(body.get("persons"), 0)}
     if nouveau:
         planning_id = await _new_draft(start.isoformat(), _positive(body.get("persons"), BASE_SERVINGS))
-    planning = await db.get_planning_with_recipes(planning_id)
-    if not planning or planning.get("valide"):
-        return {"error": "Brouillon introuvable"}
-    try:
-        data = json.loads(planning.get("data_json") or "{}")
-    except (json.JSONDecodeError, TypeError):
-        data = {}
-    plats = data.get("plats") or []
 
-    cible = next((p for p in plats if p.get("jour") == jour and p.get("moment") == moment), None)
-    if cible:
-        _set_main(cible, recette["nom"], recette)
-        cible["libre"] = False
-    else:
-        default = _per_day_list(planning, data)[jour - 1] or BASE_SERVINGS
-        item = {"nom": recette["nom"], "notion_id": recette["id"], "nature": recipe_nature(recette)}
-        plats.append(_build_plat(item, jour, moment, _positive(body.get("persons"), default),
-                                 {recette["id"]: recette}))
-        plats.sort(key=lambda p: (p.get("jour", 0), _MOMENT_ORDER.get(p.get("moment"), 2)))
-    data["plats"] = plats
-    # Le créneau n'est plus « absent » et la période couvre ce jour.
-    data["off_meals"] = [m for m in data.get("off_meals") or [] if m != f"{jour}:{moment}"]
-    if isinstance(data.get("nb_jours"), int) and data["nb_jours"] < jour:
-        data["nb_jours"] = jour
-    await _refresh_shopping_and_save(planning, planning_id, data, plats)
+    def mutate(planning: dict, data: dict) -> str | None:
+        if planning.get("valide"):
+            return "Brouillon introuvable"
+        return apply_meals_batch(planning, data, [slot], "set_main", recette["nom"],
+                                 resolved=recette)
+
+    try:
+        res = await _refresh_shopping_and_save(planning_id, mutate)
+    except Exception:
+        if nouveau:
+            await db.delete_planning(planning_id)
+        raise
+    if res.get("error"):
+        if nouveau:
+            await db.delete_planning(planning_id)
+        return {"error": "Brouillon introuvable" if res["error"] == "Planning introuvable"
+                else res["error"]}
+    planning = await db.get_planning_with_recipes(planning_id) or {}
     # Entrée à jour de la modale (créneaux occupés, nouveau brouillon).
     draft = _draft_choices([{"id": planning_id, "week_start": planning.get("week_start", ""),
-                             "data_json": json.dumps(data, ensure_ascii=False)}])[0]
+                             "data_json": planning.get("data_json") or "{}"}])[0]
     return {"success": True, "planning_id": planning_id, "url": f"/?draft={planning_id}", "draft": draft}
