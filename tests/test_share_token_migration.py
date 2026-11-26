@@ -12,11 +12,8 @@ from starlette.testclient import TestClient
 
 import app.main as main
 from app.database import Database
-from tests import test_routes
+from tests.aides import _case, _construire, _recipe
 from tests.test_auth import _reload_app
-from tests.test_routes import _case, _construire, _recipe
-
-client = test_routes.client  # fixture réutilisée
 
 # Schéma d'avant la migration (sans share_token).
 _ANCIEN_SCHEMA = """

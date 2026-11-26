@@ -4,29 +4,13 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-from starlette.testclient import TestClient
-
 from app import main
-from tests.test_routes import _case, _construire, _recipe
+from tests.aides import _case, _construire, _recipe
 
 APP_DIR = Path(main.__file__).resolve().parent
 TEMPLATES = APP_DIR / "templates"
 STATIC = APP_DIR / "static"
 ASSET_RE = re.compile(r'(?:src|href)="(/static/(?:js|css)/[^"?]+)')
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _template_assets() -> set[str]:
@@ -110,7 +94,10 @@ def test_fonctions_pures_du_constructeur_exposees():
     for fn in ("consolidateGroups", "midiEditorDay", "serialize", "rangeDays", "hydrateBuilder"):
         assert re.search(rf"function {fn}\(state|function {fn}\(", src), fn
     common = (STATIC / "js" / "common.js").read_text(encoding="utf-8")
-    assert "window.Common = {esc, copyText, postJson, pageData, qtyFr}" in common
+    # Une seule définition de l'API commune (plus d'ajout par Object.assign).
+    api = "esc, copyText, requestJson, postJson, modal, confirmModal, sessionExpired, pageData, qtyFr"
+    assert f"window.Common = {{{api}}};" in common
+    assert common.count("window.Common =") == 1 and "Object.assign(window.Common" not in common
 
 
 def test_page_publique_utilise_common(client, monkeypatch):

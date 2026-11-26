@@ -127,6 +127,10 @@
     {% endfor %}
     <p class="no-result" id="no-result" style="display:none;">Aucune recette ne correspond.</p>
 </div>
+
+{% with modal_id="enrich-modal", modal_titre="🔄 Enrichir toutes les recettes",
+        modal_message="Cela lance des appels au LLM et écrit dans Notion pour chaque recette sans ingrédients.",
+        modal_ok="Enrichir" %}{% include "partials/_modal_confirm.html" %}{% endwith %}
 {% endblock %}
 
 {% block scripts %}

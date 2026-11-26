@@ -6,25 +6,9 @@ import json
 import re
 from datetime import date, timedelta
 
-import pytest
-from starlette.testclient import TestClient
-
 from app import main
 from app.routers.pages import planning_en_cours
 from tests.test_auth import _client
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _p(pid, week_start, nb_jours=None, plats=()):
@@ -89,8 +73,8 @@ def test_semaine_sans_planning_renvoie_au_constructeur(client):
     assert r.status_code == 303 and r.headers["location"] == "/"
 
 
-def test_semaine_mene_au_planning_en_cours(client):
-    today = date.today()
+def test_semaine_mene_au_planning_en_cours(client, aujourdhui):
+    today = aujourdhui
     en_cours = _creer((today - timedelta(days=1)).isoformat(), 7)
     _creer((today + timedelta(days=14)).isoformat(), 7)  # plus récent, à venir
     _creer((today - timedelta(days=1)).isoformat(), 7, valide=False)  # brouillon ignoré
@@ -98,8 +82,8 @@ def test_semaine_mene_au_planning_en_cours(client):
     assert r.status_code == 303 and r.headers["location"] == f"/planning/{en_cours}"
 
 
-def test_semaine_repli_sur_le_plus_recent(client):
-    today = date.today()
+def test_semaine_repli_sur_le_plus_recent(client, aujourdhui):
+    today = aujourdhui
     _creer((today - timedelta(days=60)).isoformat(), 7)
     recent = _creer((today - timedelta(days=30)).isoformat(), 7)
     r = client.get("/semaine", follow_redirects=False)

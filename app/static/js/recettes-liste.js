@@ -81,30 +81,78 @@
         cards.forEach(c => grid.insertBefore(c, noResult));
     });
 
-    // ── Enrichissement de masse (SSE, progression en direct) ─────
-    // Flux d'événements, hors Common.requestJson (pas une réponse JSON).
+    // ── Enrichissement de masse (flux SSE, progression en direct) ─────
+    // POST lu en flux par fetch (ReadableStream) : l'action écrit dans Notion,
+    // elle ne doit pas pouvoir partir d'un simple lien ou d'un préchargement.
+    // Hors Common.requestJson : la réponse est un flux d'événements, pas du JSON.
     const btn = document.getElementById('btn-enrich');
     const st = document.getElementById('enrich-status');
-    btn?.addEventListener('click', () => {
-        if (!confirm('Enrichir toutes les recettes ? Cela lance des appels au LLM et écrit dans Notion pour chaque recette sans ingrédients.')) return;
-        btn.disabled = true;
-        st.textContent = '⏳ Démarrage...';
-        const es = new EventSource('/api/enrich-all/stream');
-        es.onmessage = (ev) => {
-            const d = JSON.parse(ev.data);
-            if (d.done === 0) { st.textContent = `⏳ 0/${d.total}...`; return; }
-            st.textContent = `⏳ ${d.done}/${d.total} — ${d.enriched} enrichies, ${d.skipped} ignorées, ${d.errors} err.`;
-        };
-        es.addEventListener('done', (ev) => {
-            const d = JSON.parse(ev.data);
+    const enrichModal = document.getElementById('enrich-modal');
+
+    function echec(message) {
+        st.textContent = '❌ ' + (message || 'Erreur (connexion interrompue)');
+        toastMsg("Erreur lors de l'enrichissement", 'error');
+    }
+
+    // Un bloc SSE (« event: x\ndata: {...} ») → true quand le flux est terminé.
+    function traiterBloc(bloc) {
+        let type = 'message', data = '';
+        bloc.split('\n').forEach(l => {
+            if (l.startsWith('event:')) type = l.slice(6).trim();
+            else if (l.startsWith('data:')) data += l.slice(5).trim();
+        });
+        if (!data) return false;
+        const d = JSON.parse(data);
+        if (type === 'done') {
             st.textContent = `✅ ${d.enriched}/${d.total} enrichies (${d.skipped} ignorées, ${d.errors} erreurs)`;
             toastMsg(`${d.enriched} recettes enrichies`, 'success');
-            es.close(); btn.disabled = false;
-        });
-        es.addEventListener('error', () => {
-            st.textContent = '❌ Erreur (connexion interrompue)';
-            toastMsg("Erreur lors de l'enrichissement", 'error');
-            es.close(); btn.disabled = false;
-        });
+            return true;
+        }
+        if (type === 'error') { echec(d.error); return true; }
+        st.textContent = d.done === 0 ? `⏳ 0/${d.total}...`
+            : `⏳ ${d.done}/${d.total} — ${d.enriched} enrichies, ${d.skipped} ignorées, ${d.errors} err.`;
+        return false;
+    }
+
+    async function lireFlux(r) {
+        const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buf = '';
+        for (;;) {
+            const {value, done} = await reader.read();
+            if (done) return false;
+            buf += value.replace(/\r\n/g, '\n');
+            let k;
+            while ((k = buf.indexOf('\n\n')) >= 0) {
+                const bloc = buf.slice(0, k);
+                buf = buf.slice(k + 2);
+                if (traiterBloc(bloc)) { reader.cancel().catch(() => {}); return true; }
+            }
+        }
+    }
+
+    async function enrichirTout() {
+        btn.disabled = true;
+        st.textContent = '⏳ Démarrage...';
+        try {
+            const r = await fetch('/api/enrich-all/stream', {method: 'POST', headers: {Accept: 'text/event-stream'}});
+            let path = '';
+            try { path = new URL(r.url, location.href).pathname; } catch (e) { path = ''; }
+            if (r.status === 401 || (r.redirected && path === '/login')) { window.Common.sessionExpired(); return; }
+            if (!r.ok || !r.body || !(r.headers.get('content-type') || '').includes('text/event-stream')) {
+                let d = {};
+                try { d = await r.json(); } catch (e) { d = {}; }
+                echec(d.error);
+            } else if (!(await lireFlux(r))) {
+                echec();
+            }
+        } catch (e) {
+            echec();
+        }
+        btn.disabled = false;
+    }
+
+    btn?.addEventListener('click', async () => {
+        if (!enrichModal || !(await window.Common.confirmModal(enrichModal))) return;
+        enrichirTout();
     });
 })();

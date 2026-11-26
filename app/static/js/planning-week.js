@@ -3,7 +3,7 @@
 // Données serveur lues dans #page-data : {pid, day_labels}.
 (function () {
     'use strict';
-    const {copyText, postJson, pageData, modal} = window.Common;
+    const {copyText, requestJson, postJson, pageData, modal} = window.Common;
     const DATA = pageData();
     const pid = DATA.pid;
     const $ = id => document.getElementById(id);
@@ -93,13 +93,31 @@
     }
 
     // ── Alternatives (modale) ──────────────────────────────────────────
+    // Message d'état de la liste (chargement, vide, erreur), en texte brut.
+    function altMessage(el, txt, erreur) {
+        const p = document.createElement('p');
+        p.className = erreur ? 'empty alt-erreur' : 'empty';
+        if (erreur) p.setAttribute('role', 'alert');
+        p.textContent = txt;
+        el.replaceChildren(p);
+    }
     async function loadAlternatives() {
         resetFree();
-        const r = await fetch(`/api/alternatives/${pid}`); const d = await r.json();
+        const el = $('alt-list');
+        let d;
+        try {
+            d = await requestJson(`/api/alternatives/${pid}`);
+        } catch (e) {
+            d = {error: 'Erreur réseau'};
+        }
+        // Notion indisponible (502) ou autre erreur : message dans la modale.
+        if (d.error) {
+            altMessage(el, `⚠️ ${d.error}`, true);
+            return;
+        }
         let alts = d.alternatives || [];
         // Accompagnement : recettes ET briques dont la Base contient Légume.
         if (sideMode) alts = alts.filter(a => (a.base || []).includes('Légume'));
-        const el = $('alt-list');
         if (!alts.length) { el.innerHTML = '<p class="empty">Aucune alternative.</p>'; return; }
         // Construction DOM (textContent) : un nom contenant « " < > » reste intact
         // et le bouton « Choisir » envoie le nom exact (pas d'injection HTML).

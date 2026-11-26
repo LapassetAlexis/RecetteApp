@@ -4,10 +4,8 @@ import asyncio
 import json
 import re
 
-import pytest
-from starlette.testclient import TestClient
-
 from app import main
+from tests.aides import _case, _construire, _recipe
 from tests.test_brouillons_integrite import (
     _catalogue,
     _data,
@@ -15,20 +13,6 @@ from tests.test_brouillons_integrite import (
     _initial_builder,
     _planning,
 )
-from tests.test_routes import _case, _construire, _recipe
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _semaine_validee(client, monkeypatch):

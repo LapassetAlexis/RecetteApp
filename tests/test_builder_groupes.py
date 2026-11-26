@@ -5,29 +5,18 @@ import json
 import re
 
 import pytest
-from starlette.testclient import TestClient
 
-from app import main
-from app.services.planning import GROUPES_MAX, _builder_from_plats
+from app.services.planning_builder import GROUPES_MAX, builder_from_plats
+from tests.aides import _case, _recipe
 from tests.test_brouillons_integrite import _catalogue, _data
-from tests.test_routes import _case, _recipe
 
 POULET, CURRY, SOUPE = _recipe("Poulet", id="p1"), _recipe("Curry", id="c1"), _recipe("Soupe", id="s1")
 QUICHE, RIZ = _recipe("Quiche", id="q1"), _recipe("Riz", id="r1")
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
+@pytest.fixture(autouse=True)
+def _catalogue_fixe(monkeypatch):
     _catalogue(monkeypatch, POULET, CURRY, SOUPE, QUICHE, RIZ)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _brouillon(client, cases, nb_jours="7") -> int:
@@ -104,7 +93,7 @@ def _plat(jour, nom, moment="midi", persons=2):
 
 def test_sans_grille_numerotation_compacte():
     plats = [_plat(1, "A"), _plat(2, "A"), _plat(3, "B"), _plat(5, "C"), _plat(7, "D")]
-    m = _midis(_builder_from_plats(plats))
+    m = _midis(builder_from_plats(plats))
     assert [m[j]["group"] for j in (1, 2, 3, 5, 7)] == [1, 1, 2, 3, 4]
 
 
@@ -113,7 +102,7 @@ def _verifie(repas: str) -> None:
     groupe ne mélange deux repas, et on ne dépasse GROUPES_MAX que si un groupe
     par repas distinct (+ un pour les midis vides) ne tient pas."""
     plats = [_plat(j, r) for j, r in enumerate(repas, start=1) if r != " "]
-    m = _midis(_builder_from_plats(plats, nb_jours=7))
+    m = _midis(builder_from_plats(plats, nb_jours=7))
     besoin = len(set(repas) - {" "}) + (" " in repas)
     if besoin <= GROUPES_MAX:
         assert max(c["group"] for c in m.values()) <= GROUPES_MAX, repas
@@ -137,11 +126,11 @@ def test_tous_les_plannings_de_sept_jours_restent_coherents():
 
 def test_ancienne_grille_aux_groupes_six_et_sept_renumerotee():
     plats = [_plat(j, n) for j, n in enumerate("ABCDEFF", start=1)]
-    previous = _builder_from_plats(plats)
+    previous = builder_from_plats(plats)
     for c in previous:     # grille produite par l'ancienne numérotation (group = jour)
         if c["moment"] == "midi":
             c["group"] = 6 if c["jour"] == 7 else c["jour"]
-    m = _midis(_builder_from_plats(plats, previous=previous))
+    m = _midis(builder_from_plats(plats, previous=previous))
     # F (jours 6 et 7) reste un seul groupe ; les autres gardent le leur.
     assert [m[j]["group"] for j in range(1, 6)] == [1, 2, 3, 4, 5]
     assert m[6]["group"] == m[7]["group"] == 6
@@ -152,7 +141,7 @@ def test_ancienne_grille_aux_groupes_six_et_sept_renumerotee():
 
 def test_creneau_vide_de_la_periode_garde_les_convives():
     plats = [_plat(1, "A", persons=3), _plat(3, "B", persons=5)]
-    b = _builder_from_plats(plats, off_meals=["2:soir"], default_persons=4, nb_jours=4)
+    b = builder_from_plats(plats, off_meals=["2:soir"], default_persons=4, nb_jours=4)
     by = {(c["jour"], c["moment"]): c for c in b}
     assert by[(1, "soir")]["persons"] == 3          # convives du jour
     assert by[(2, "midi")]["persons"] == 4          # jour vide : convives du planning
@@ -162,16 +151,16 @@ def test_creneau_vide_de_la_periode_garde_les_convives():
 
 
 def test_creneau_vide_garde_les_convives_de_l_ancienne_grille():
-    previous = _builder_from_plats([_plat(1, "A")], nb_jours=2)
+    previous = builder_from_plats([_plat(1, "A")], nb_jours=2)
     for c in previous:
         if (c["jour"], c["moment"]) == (2, "soir"):
             c["persons"] = 6
-    b = _builder_from_plats([_plat(1, "A")], previous=previous, nb_jours=2)
+    b = builder_from_plats([_plat(1, "A")], previous=previous, nb_jours=2)
     assert next(c for c in b if (c["jour"], c["moment"]) == (2, "soir"))["persons"] == 6
 
 
 def test_grille_precedente_illisible_ignoree():
     plats = [_plat(1, "A"), _plat(2, "B")]
     previous = ["x", {"jour": "?", "moment": "midi"}, {"jour": 1, "moment": "midi", "group": "g"}]
-    m = _midis(_builder_from_plats(plats, previous=previous))
+    m = _midis(builder_from_plats(plats, previous=previous))
     assert (m[1]["group"], m[2]["group"]) == (1, 2)

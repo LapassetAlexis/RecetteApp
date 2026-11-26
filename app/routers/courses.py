@@ -12,16 +12,14 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.deps import db, templates
 from app.http import ERREUR_INTERNE, erreur, lire_json
 from app.services import store
-from app.services.planning import _day_labels, _per_day_list, _repas_libres
-from app.services.shopping import (
-    _collect_shopping,
+from app.services.planning import day_labels, per_day_list
+from app.services.shopping import collect_shopping, finalize_items, purge_orphans, repas_libres
+from app.services.shopping_list import (
     add_extra,
     apply_check,
-    finalize_items,
     get_placard,
     load_shopping_view,
     mutate_planning_data,
-    purge_orphans,
     recipe_item_name,
     remove_extra,
     reset_checks,
@@ -104,8 +102,8 @@ async def generate_shopping(planning_id: int, request: Request):
         # mis à l'échelle selon le nb de personnes de chaque repas, puis fusion
         # déterministe (dédup + addition par nom+unité, union des recettes),
         # rayon et clé de chaque article.
-        collected, non_enrichis = await _collect_shopping(
-            plats, _per_day_list(planning, planning_data), planning["nb_personnes"],
+        collected, non_enrichis = await collect_shopping(
+            plats, per_day_list(planning, planning_data), planning["nb_personnes"],
         )
         liste_courses = finalize_items(merge_ingredients(collected))
         # NB : cette liste agrégée n'est PAS écrite dans Notion par recette.
@@ -206,8 +204,8 @@ async def courses_public(request: Request, token: str):
         "courses_public.html",
         {
             "shop": await load_shopping_view(data),
-            "repas_libres": _repas_libres(
-                data.get("plats", []), _day_labels(planning.get("week_start", "")),
+            "repas_libres": repas_libres(
+                data.get("plats", []), day_labels(planning.get("week_start", "")),
             ),
         },
     )
@@ -255,7 +253,7 @@ async def courses_etat(planning_id: int):
     planning = await db.get_planning_with_recipes(planning_id)
     if not planning:
         return _error("Planning introuvable", 404)
-    return await _etat(store._load(planning.get("data_json")))
+    return await _etat(store.load(planning.get("data_json")))
 
 
 # ── Articles manuels, masques et placard (page planning, authentifiée) ──
@@ -348,5 +346,5 @@ async def placard_retirer(nom: str, planning: int | None = None):
     if planning is not None:
         p = await db.get_planning_with_recipes(planning)
         if p:
-            res.update(await _liste_html(planning, store._load(p.get("data_json"))))
+            res.update(await _liste_html(planning, store.load(p.get("data_json"))))
     return res

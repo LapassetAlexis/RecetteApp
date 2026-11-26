@@ -6,26 +6,12 @@ import re
 from datetime import date, timedelta
 
 import pytest
-from starlette.testclient import TestClient
 
 from app import main
 from app.database import Database
 from app.routers import auth as auth_router
-from app.services import planning as planning_svc
-from tests.test_routes import _case, _construire, _recipe
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
+from app.services import planning_builder
+from tests.aides import _case, _construire, _recipe
 
 
 def _catalogue(monkeypatch, *recettes):
@@ -95,7 +81,7 @@ def test_update_planning_sans_date_garde_week_start(tmp_path):
 # ── B2 / B3 : « Refaire » produit un brouillon reprenable, daté d'aujourd'hui ──
 
 
-def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch):
+def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch, aujourdhui):
     poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     _catalogue(monkeypatch, poulet, soupe)
     pid = _construire(client, [_case(1, "midi", poulet, persons=2),
@@ -105,7 +91,7 @@ def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch):
 
     new_id = client.post(f"/planning/{pid}/dupliquer").json()["planning_id"]
     copie = _planning(new_id)
-    assert copie["week_start"] == date.today().isoformat()
+    assert copie["week_start"] == aujourdhui.isoformat()
     data = json.loads(copie["data_json"])
     assert data["builder"] and "off_meals" in data
 
@@ -116,7 +102,7 @@ def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch):
     midi1 = next(c for c in builder if c["jour"] == 1 and c["moment"] == "midi")
     assert midi1["main"]["nom"] == "Poulet"
     # Le jour 1 de la copie = aujourd'hui (titre de la page planning).
-    today = date.today()
+    today = aujourdhui
     assert f"{today.day:02d}/{today.month:02d}" in client.get(f"/planning/{new_id}").text
 
     # Reprendre puis enregistrer met à jour la copie, sans 3ᵉ planning.
@@ -214,7 +200,7 @@ def test_builder_from_plats_midis_consecutifs_groupes():
     plats = [_plat(j, "midi", "Lasagnes", "l1") for j in (1, 2, 3)]
     plats.append(_plat(4, "midi", "Quiche", "q1"))
     plats.append(_plat(5, "midi", "Lasagnes", "l1"))  # identique mais non consécutif
-    b = planning_svc._builder_from_plats(plats)
+    b = planning_builder.builder_from_plats(plats)
     assert len(b) == 14
     assert [_slot(b, j, "midi")["group"] for j in range(1, 6)] == [1, 1, 1, 2, 3]
     # Seul le premier midi du groupe porte le repas (comme le constructeur).
@@ -228,7 +214,7 @@ def test_builder_from_plats_midis_consecutifs_groupes():
 def test_builder_from_plats_accompagnements_distincts_non_groupes():
     plats = [_plat(1, "midi", "Steak", "s1", accs=["Frites"]),
              _plat(2, "midi", "Steak", "s1", accs=["Riz"])]
-    b = planning_svc._builder_from_plats(plats)
+    b = planning_builder.builder_from_plats(plats)
     assert _slot(b, 2, "midi")["group"] == 2
     assert _slot(b, 1, "midi")["accompagnements"] == [
         {"notion_id": "frites", "nom": "Frites", "nature": "Recette", "libre": False}]
@@ -236,7 +222,7 @@ def test_builder_from_plats_accompagnements_distincts_non_groupes():
 
 def test_builder_from_plats_repas_libre_et_absences():
     plats = [_plat(1, "soir", "Pizzas", libre=True, persons=3)]
-    b = planning_svc._builder_from_plats(plats, off_meals=["1:midi"])
+    b = planning_builder.builder_from_plats(plats, off_meals=["1:midi"])
     soir = _slot(b, 1, "soir")
     assert soir["main"] == {"notion_id": "", "nom": "Pizzas", "nature": "Recette", "libre": True}
     assert soir["persons"] == 3
@@ -246,7 +232,7 @@ def test_builder_from_plats_repas_libre_et_absences():
 
 
 def test_builder_from_plats_case_vide_du_jour_garde_les_convives():
-    b = planning_svc._builder_from_plats([_plat(1, "midi", "Poulet", "p1", persons=4)])
+    b = planning_builder.builder_from_plats([_plat(1, "midi", "Poulet", "p1", persons=4)])
     soir = _slot(b, 1, "soir")
     assert soir["persons"] == 4 and "main" not in soir
 
@@ -254,7 +240,7 @@ def test_builder_from_plats_case_vide_du_jour_garde_les_convives():
 def test_builder_from_plats_ancien_accompagnement_et_persons_absent():
     plats = [{"jour": 1, "moment": "soir", "nom_recette": "Poisson", "notion_id": "f1",
               "accompagnement": {"nom_recette": "Riz", "notion_id": "r1"}}]
-    b = planning_svc._builder_from_plats(plats, default_persons=3)
+    b = planning_builder.builder_from_plats(plats, default_persons=3)
     soir = _slot(b, 1, "soir")
     assert soir["persons"] == 3
     assert [a["nom"] for a in soir["accompagnements"]] == ["Riz"]

@@ -15,29 +15,27 @@ from app.services import store
 from app.services.creations import place_brique, place_free_meal
 from app.services.nutrition_week import _week_nutrition
 from app.services.planning import (
-    MEAL_ACTIONS,
-    _alternatives,
-    _day_labels,
-    _editable_planning,
-    _group_week,
-    _json_or_none,
-    _mark_non_enrichis,
-    _merge_existing_data,
-    _nb_jours,
-    _parse_slots,
-    _per_day_list,
-    _periode_saisie,
-    _recipe_rows,
-    _repas_libres,
-    _week_label,
     apercu_jours,
-    apply_meals_batch,
-    copy_data,
+    day_labels,
+    group_week,
+    mark_non_enrichis,
+    nb_jours_periode,
     parse_week_start,
-    planning_from_builder,
-    resolve_meal_action,
+    per_day_list,
+    recipe_rows,
+    week_label,
 )
-from app.services.shopping import _refresh_shopping_and_save, load_shopping_view
+from app.services.planning_batch import MEAL_ACTIONS, alternatives, apply_meals_batch, parse_slots, resolve_meal_action
+from app.services.planning_construire import (
+    copy_data,
+    editable_planning,
+    json_or_none,
+    merge_existing_data,
+    periode_saisie,
+    planning_from_builder,
+)
+from app.services.shopping import refresh_shopping_and_save, repas_libres
+from app.services.shopping_list import load_shopping_view
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -82,9 +80,9 @@ async def construire(
         return templates.TemplateResponse(request, "index.html", {
             "error": message,
             "week_start": week_start,
-            "builder": _json_or_none(meals) or [],
+            "builder": json_or_none(meals) or [],
             "draft_id": draft_id,
-            "nb_jours": _periode_saisie(nb_jours),
+            "nb_jours": periode_saisie(nb_jours),
             "saved": False,
         }, status_code=status)
 
@@ -99,11 +97,11 @@ async def construire(
 
         # Mise à jour d'un planning existant (draft_id valide) plutôt que
         # création d'un nouveau : les autres clés de data_json sont gardées.
-        existing = await _editable_planning(draft_id)
+        existing = await editable_planning(draft_id)
         planning_id = 0
         if existing:
             def merge(planning: dict, old: dict) -> None:
-                merged = _merge_existing_data(planning, data)
+                merged = merge_existing_data(planning, data)
                 old.clear()
                 old.update(merged)
 
@@ -117,7 +115,7 @@ async def construire(
             planning_id = await db.save_planning(
                 week_start=debut, saison="", nb_personnes=nb_personnes,
                 ingredients_force="", data_json=json.dumps(data, ensure_ascii=False),
-                recipes=_recipe_rows(data["plats"]),
+                recipes=recipe_rows(data["plats"]),
             )
 
         if action == "brouillon":
@@ -164,27 +162,30 @@ async def voir_planning(request: Request, planning_id: int):
     plats = data["plats"]
 
     # Repas sans ingrédients en cache (« recette pas terminée ») : avertissement.
-    _mark_non_enrichis(plats, set(await db.get_all_enriched_ingredients()))
+    mark_non_enrichis(plats, set(await db.get_all_enriched_ingredients()))
 
     # Libellés des 7 jours dérivés de la date du jour 1 (week_start).
-    day_labels = _day_labels(planning.get("week_start", ""))
+    jours = day_labels(planning.get("week_start", ""))
+    # Période affichée : jours 1..nb_jours (les jours hors période sont masqués).
+    nb_jours = nb_jours_periode(data)
 
     return templates.TemplateResponse(
         request,
         "planning.html",
         {
             "planning": planning,
-            "titre": _week_label(planning.get("week_start", ""), plats),
+            # Titre aligné sur la grille : jusqu'à la fin de la période, même
+            # si son dernier jour n'a pas de repas.
+            "titre": week_label(planning.get("week_start", ""), plats, nb_jours),
             "plats": plats,
-            "day_labels": day_labels,
-            "week_rows": _group_week(plats),
-            "week_nutrition": await _week_nutrition(plats, day_labels),
-            "repas_libres": _repas_libres(plats, day_labels),
+            "day_labels": jours,
+            "week_rows": group_week(plats),
+            "week_nutrition": await _week_nutrition(plats, jours),
+            "repas_libres": repas_libres(plats, jours),
             "shop": await load_shopping_view(data),
-            "per_day": _per_day_list(planning, data),
+            "per_day": per_day_list(planning, data),
             "off_meals": data.get("off_meals", []),
-            # Période affichée : jours 1..nb_jours (les jours hors période sont masqués).
-            "nb_jours": _nb_jours(data),
+            "nb_jours": nb_jours,
             "valide": bool(planning.get("valide", 0)),
             "repas_options": REPAS_OPTIONS,
             "base_options": BASE_OPTIONS,
@@ -208,7 +209,7 @@ async def dupliquer_planning(planning_id: int):
         nb_personnes=src.get("nb_personnes", 4),
         ingredients_force=src.get("ingredients_force", ""),
         data_json=json.dumps(new_data, ensure_ascii=False),
-        recipes=_recipe_rows(new_data["plats"]),
+        recipes=recipe_rows(new_data["plats"]),
     )
     return {"success": True, "planning_id": new_id}
 
@@ -271,7 +272,7 @@ async def api_planning_meals(planning_id: int, request: Request):
     erreurs : {"error": "..."} avec un statut 400 (corps invalide),
     404 (planning ou repas introuvable) ou 500."""
     body = await lire_json(request)
-    slots = _parse_slots(body.get("slots"))
+    slots = parse_slots(body.get("slots"))
     action = body.get("action")
     nom = str(body.get("nom") or "").strip()
     remplace = str(body.get("remplace") or "").strip()
@@ -281,7 +282,7 @@ async def api_planning_meals(planning_id: int, request: Request):
     try:
         # Lecture Notion hors verrou, puis relecture + mutation + écriture sous verrou.
         resolved = await resolve_meal_action(action, nom)
-        res = await _refresh_shopping_and_save(
+        res = await refresh_shopping_and_save(
             planning_id,
             lambda planning, data: apply_meals_batch(
                 planning, data, slots, action, nom, remplace, resolved),
@@ -305,7 +306,7 @@ async def api_alternatives(planning_id: int):
     except Exception:
         logger.exception("Erreur récupération alternatives")
         return erreur(ERREUR_NOTION, 502)
-    return {"alternatives": _alternatives(recettes, used_names)}
+    return {"alternatives": alternatives(recettes, used_names)}
 
 
 @router.post("/api/free-meal/{planning_id}")

@@ -8,10 +8,12 @@
 
     // Recharge le formulaire pré-rempli depuis la source (les champs actuels
     // sont remplacés, rien n'est écrit avant « Valider »).
-    document.getElementById('btn-extract')?.addEventListener('click', () => {
+    // Confirmation par modale (Common.confirmModal), pas par confirm().
+    const extractModal = document.getElementById('extract-modal');
+    document.getElementById('btn-extract')?.addEventListener('click', async () => {
         const u = document.getElementById('source_url').value.trim();
         if (!u) { window.toast?.("Entre une URL d'abord", 'error'); return; }
-        if (!confirm('Ré-extraire depuis la source ? Cela remplace les champs ci-dessous.')) return;
+        if (!extractModal || !(await window.Common.confirmModal(extractModal))) return;
         window.navStart?.();
         window.location.href = `/recette/${encodeURIComponent(recetteId)}/enrichir?refetch=1&url=` + encodeURIComponent(u);
     });

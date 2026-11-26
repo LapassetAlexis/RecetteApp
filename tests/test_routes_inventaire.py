@@ -12,7 +12,7 @@ ROUTES_ATTENDUES = {
     ("GET", "/ajouter"),
     ("GET", "/api/alternatives/{planning_id}"),
     ("GET", "/api/catalogue"),
-    ("GET", "/api/enrich-all/stream"),
+    ("POST", "/api/enrich-all/stream"),
     ("GET", "/api/planning/{planning_id}/apercu"),
     ("POST", "/api/planning/{planning_id}/meals"),
     ("GET", "/courses/{token}"),
@@ -72,6 +72,7 @@ ROUTES_ATTENDUES = {
 ROUTES_SUPPRIMEES = {
     ("POST", "/api/enrich/{page_id}"),
     ("POST", "/api/enrich-all"),
+    ("GET", "/api/enrich-all/stream"),   # M11 : POST + fetch en flux
     ("POST", "/api/update-side/{planning_id}"),
 }
 

@@ -4,8 +4,9 @@ du constructeur (picker, menu « ⋯ »)."""
 import json
 import re
 from datetime import date, timedelta
+from urllib.parse import quote
 
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Browser, Page, expect
 
 from tests.e2e.fake_notion import RECETTES
 
@@ -100,3 +101,30 @@ def pas_de_defilement_horizontal(page: Page) -> None:
         return {scroll: document.documentElement.scrollWidth, vw};
     }""")
     assert larges["scroll"] <= larges["vw"], f"défilement horizontal : {larges}"
+
+
+# ── Contexte dédié et connexion (serveur avec auth) ──────────────────────
+
+def contexte(browser: Browser, largeur: int):
+    """Contexte neuf (390 px = mobile tactile), service worker bloqué ; renvoie
+    (contexte, page, erreurs JS ou console hors refus HTTP attendus)."""
+    mobile = largeur < 500
+    ctx = browser.new_context(viewport={"width": largeur, "height": 844 if mobile else 900},
+                              is_mobile=mobile, has_touch=mobile, locale="fr-FR",
+                              service_workers="block")
+    page = ctx.new_page()
+    erreurs: list[str] = []
+    page.on("pageerror", lambda e: erreurs.append(f"pageerror: {e}"))
+    # Les refus attendus (401 / 429 du formulaire) sont des réponses, pas des erreurs JS.
+    page.on("console", lambda m: erreurs.append(f"console: {m.text}")
+            if m.type == "error" and "Failed to load resource" not in m.text else None)
+    return ctx, page, erreurs
+
+
+def connexion(page: Page, server: str, mot_de_passe="secret", chemin="/historique"):
+    """Ouvre `chemin`, suit la redirection vers /login et se connecte (chef)."""
+    page.goto(server + chemin)
+    expect(page).to_have_url(server + "/login?next=" + quote(chemin, safe=""))
+    page.fill('input[name="username"]', "chef")
+    page.fill('input[name="password"]', mot_de_passe)
+    page.locator('button[type="submit"]').click()

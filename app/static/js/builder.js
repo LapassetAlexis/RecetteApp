@@ -12,7 +12,9 @@
     const JOURS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
     const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
     // Une couleur distincte par groupe possible (7 midis au plus = 7 groupes).
-    const GROUP_COLORS = ['#e67e22', '#27ae60', '#8e44ad', '#2980b9', '#c0392b', '#d63384', '#6d4c41'];
+    // Fond des pastilles « G1… » en texte blanc : chaque teinte atteint 4,5:1
+    // (tests/test_jetons_contraste.py).
+    const GROUP_COLORS = ['#b25e14', '#1e864a', '#8e44ad', '#277ab1', '#c0392b', '#d52f81', '#6d4c41'];
     const DEFAULT_PERS = [2, 2, 2, 2, 2, 4, 4];
     const DEFAULT_GROUPS = [1, 1, 2, 2, 2, 3, 4];
     const BASES = ['Viande', 'Poisson', 'Œuf', 'Légume', 'Féculent', 'Végé'];

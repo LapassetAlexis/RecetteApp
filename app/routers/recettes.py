@@ -18,24 +18,18 @@ from app.http import (
     erreur_exception,
     lire_json,
 )
+from app.services.enrichissement import enrich_all_events, enrich_many, planning_recipes
+from app.services.recette_edition import ajouter, analysis_response, enrichir_context, enrichir_enregistrer
+from app.services.recette_planifier import draft_choices_safe, planifier
 from app.services.recettes import (
-    _ajouter,
-    _analysis_response,
-    _attach_usage,
-    _cached_ingredients,
-    _detail_base_servings,
-    _detail_nutrition,
-    _draft_choices_safe,
-    _enrich_all_events,
-    _enrich_many,
-    _enrichir_context,
-    _enrichir_enregistrer,
-    _form_options,
-    _planifier,
-    _planning_recipes,
-    _recipe_stats,
-    _recipe_usage,
-    _usage_label,
+    attach_usage,
+    cached_ingredients,
+    detail_base_servings,
+    detail_nutrition,
+    form_options,
+    recipe_stats,
+    recipe_usage,
+    usage_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,8 +54,8 @@ async def liste_recettes(request: Request):
         ings_by_id, duree_by_id = {}, {}
 
     # Stats pour les filtres (type / base / état / tag) + usage (tri, badge)
-    stats = _recipe_stats(recettes, ings_by_id, duree_by_id)
-    _attach_usage(recettes, await _recipe_usage())
+    stats = recipe_stats(recettes, ings_by_id, duree_by_id)
+    attach_usage(recettes, await recipe_usage())
 
     return templates.TemplateResponse(
         request,
@@ -86,11 +80,11 @@ async def detail_recette(request: Request, page_id: str):
 
         # Ingrédients structurés depuis le cache local
         cached = await db.get_enriched(page_id)
-        ingredients = _cached_ingredients(cached)
+        ingredients = cached_ingredients(cached)
 
         # Base de portions de CETTE recette : priorité au cache, repli sur la
         # valeur Notion (Portions) lue par _parse_page, défaut 4.
-        base_servings = _detail_base_servings(cached, recette)
+        base_servings = detail_base_servings(cached, recette)
 
         # Instructions depuis les blocks Notion (best-effort)
         try:
@@ -100,7 +94,7 @@ async def detail_recette(request: Request, page_id: str):
             instructions = []
 
         duree = cached.get("cuisson_minutes") if cached else 0
-        usage = (await _recipe_usage()).get(page_id)
+        usage = (await recipe_usage()).get(page_id)
         return templates.TemplateResponse(
             request,
             "recette_detail.html",
@@ -109,10 +103,10 @@ async def detail_recette(request: Request, page_id: str):
                 "ingredients": ingredients,
                 "base_servings": base_servings,
                 "instructions": instructions,
-                "nutrition": _detail_nutrition(cached, ingredients, base_servings),
+                "nutrition": detail_nutrition(cached, ingredients, base_servings),
                 "duree": duree or 0,
-                "usage_label": _usage_label(usage),
-                "drafts": await _draft_choices_safe(),
+                "usage_label": usage_label(usage),
+                "drafts": await draft_choices_safe(),
             },
         )
     except Exception:
@@ -129,7 +123,7 @@ async def enrichir_page(request: Request, page_id: str, url: str = "", refetch: 
     recette = await notion.get_recipe(page_id)
     if not recette:
         return HTMLResponse("Recette non trouvée", status_code=404)
-    ctx = await _enrichir_context(recette, page_id, url=url, refetch=bool(refetch))
+    ctx = await enrichir_context(recette, page_id, url=url, refetch=bool(refetch))
     return templates.TemplateResponse(request, "enrichir.html", ctx)
 
 
@@ -157,7 +151,7 @@ async def enrichir_submit(
     recette = await notion.get_recipe(page_id)
     if not recette:
         return RedirectResponse(url="/recettes", status_code=303)
-    erreur = await _enrichir_enregistrer(page_id, recette, {
+    erreur = await enrichir_enregistrer(page_id, recette, {
         "nom": nom, "repas": repas, "tags": tags, "base": base, "nature": nature,
         "moment": moment, "etat": etat, "ingredients_text": ingredients_text, "steps": steps,
         "image_url": image_url, "nutrition_json": nutrition_json, "duree_minutes": duree_minutes,
@@ -177,7 +171,7 @@ async def api_planifier(page_id: str, request: Request):
     Le plat du créneau est créé ou remplacé, la liste de courses régénérée."""
     body = await lire_json(request)
     try:
-        return depuis_service(await _planifier(page_id, body))
+        return depuis_service(await planifier(page_id, body))
     except Exception as e:
         logger.exception("Erreur ajout au planning")
         return erreur_exception(e)
@@ -206,7 +200,7 @@ async def ajouter_page(request: Request):
     return templates.TemplateResponse(
         request,
         "ajouter.html",
-        {**_form_options(), "success": None, "error": None, "form": None},
+        {**form_options(), "success": None, "error": None, "form": None},
     )
 
 
@@ -227,7 +221,7 @@ async def ajouter_recette(
 ):
     """Ajoute une recette depuis une URL ou manuellement. En cas d'erreur, le
     formulaire est ré-affiché à l'étape 2 avec toutes les valeurs saisies."""
-    ctx = await _ajouter({
+    ctx = await ajouter({
         "url": url, "nom": nom, "repas": repas, "tags": tags, "base": base, "nature": nature,
         "moment": moment, "base_servings": base_servings, "ingredients_manual": ingredients_manual,
         "steps": steps, "image_url": image_url,
@@ -272,7 +266,7 @@ async def api_analyze_url(request: Request):
         # image — depuis la page elle-même (JSON-LD si dispo, sinon LLM).
         # Plus de second appel "à l'aveugle" qui hallucinait les ingrédients.
         info = await llm.extract_recipe_from_url(url)
-        return _analysis_response(info, info.get("image_url", ""), info.get("source", ""))
+        return analysis_response(info, info.get("image_url", ""), info.get("source", ""))
 
     except Exception:
         logger.exception("Erreur analyse URL")
@@ -288,7 +282,7 @@ async def api_analyze_text(request: Request):
         return erreur("Texte manquant")
     try:
         info = await llm.extract_recipe_from_text(text)
-        return _analysis_response(info, "", info.get("source", "llm-text"))
+        return analysis_response(info, "", info.get("source", "llm-text"))
 
     except Exception:
         logger.exception("Erreur analyse texte")
@@ -304,8 +298,8 @@ async def api_enrich_week(planning_id: int):
         return erreur("Planning introuvable", 404)
     try:
         plats = json.loads(planning["data_json"]).get("plats", [])
-        recettes = _planning_recipes(plats)
-        counts = await _enrich_many(recettes)
+        recettes = planning_recipes(plats)
+        counts = await enrich_many(recettes)
         return {"success": True, "total": len(recettes), **counts}
     except Exception as e:
         logger.exception("Erreur enrichissement semaine")
@@ -313,22 +307,21 @@ async def api_enrich_week(planning_id: int):
 
 
 async def _events_sans_detail():
-    """Événements de `_enrich_all_events`, l'événement `error` ramené à un
+    """Événements de `enrich_all_events`, l'événement `error` ramené à un
     message générique (le détail de l'exception est déjà dans les logs)."""
-    async for ev in _enrich_all_events():
+    async for ev in enrich_all_events():
         if ev.startswith("event: error"):
             ev = f"event: error\ndata: {json.dumps({'error': ERREUR_INTERNE}, ensure_ascii=False)}\n\n"
         yield ev
 
 
-@router.get("/api/enrich-all/stream")
+@router.post("/api/enrich-all/stream")
 async def api_enrich_all_stream(request: Request):
     """Enrichit toutes les recettes en streamant la progression (SSE lu par
-    `EventSource` dans `js/recettes-liste.js`).
+    `fetch` en flux dans `js/recettes-liste.js`).
 
-    L'action écrit dans Notion : une navigation ou un préchargement de page
-    (`Accept: text/html`) est refusé (405), seul un client de flux la lance.
-    Le passage en POST + `fetch` reste à faire (voir le rapport du lot M09)."""
+    L'action écrit dans Notion : POST seulement, et un formulaire HTML
+    (`Accept: text/html`) est refusé (405) ; seul un client de flux la lance."""
     if "text/html" in request.headers.get("accept", ""):
         return erreur("Action à lancer depuis la page Recettes.", 405)
     return StreamingResponse(_events_sans_detail(), media_type="text/event-stream", headers={

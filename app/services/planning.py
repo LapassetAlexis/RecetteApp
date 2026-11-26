@@ -5,14 +5,12 @@ Le reste du planning vit dans des modules dédiés :
 - `planning_builder` : grille du constructeur reconstruite depuis les plats ;
 - `planning_construire` : planning construit depuis le constructeur, copie ;
 - `planning_batch` : édition groupée des repas, briques, recettes proposées ;
-- `shopping` : rappel des repas libres dans la liste de courses.
-Les anciens noms restent importables d'ici (voir `compat`)."""
+- `shopping` : rappel des repas libres dans la liste de courses."""
 
 import json
 from datetime import date, timedelta
 
 from app.config import recipe_base, recipe_nature, recipe_types
-from app.services.compat import anciens_noms
 from app.text_utils import clean_recipe_title
 
 
@@ -345,6 +343,3 @@ def apercu_jours(plats: list[dict], week_start: str) -> list[dict]:
                 "soir": _meal_label(soir) if soir else "",
             })
     return jours
-
-
-__getattr__ = anciens_noms(__name__)
