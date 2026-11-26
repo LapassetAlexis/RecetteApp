@@ -86,6 +86,7 @@ _UNIT_PATTERNS: list[tuple[str, str]] = [
     ("l", r"litres?|l"),
     ("pincée", r"pincees?"),
     ("gousse", r"gousses?"),
+    ("branche", r"branches?"),
     ("tranche", r"tranches?"),
     ("feuille", r"feuilles?"),
     ("sachet", r"sachets?"),
@@ -93,6 +94,7 @@ _UNIT_PATTERNS: list[tuple[str, str]] = [
     ("pièce", r"pieces?"),
     ("verre", r"verres?"),
     ("brin", r"brins?"),
+    ("tige", r"tiges?"),
     ("botte", r"bottes?"),
     ("bouquet", r"bouquets?"),
     ("poignée", r"poignees?"),
@@ -142,16 +144,20 @@ def _fold_word(w: str) -> str:
     return "".join(c for c in w if unicodedata.category(c) != "Mn")
 
 
-def _clean_ingredient_name(nom: str) -> str:
+def _clean_ingredient_name(nom: str, keep_parens: bool = False) -> str:
     """Nettoie un libellé d'ingrédient pour l'affichage ET le regroupement :
     retire parenthèses/commentaires, article de tête, « al dente » et les mots
-    de préparation. Ne vide jamais le nom (repli sur l'original si besoin)."""
+    de préparation. Ne vide jamais le nom (repli sur l'original si besoin).
+
+    `keep_parens` garde le contenu des parenthèses (« Papier toilette (x6) »)."""
     s = (nom or "").strip()
     if not s:
         return s
     original = s
-    s = re.sub(r"\([^)]*\)", " ", s)          # « Mozzarella (ou feta) » → « Mozzarella »
-    s = s.replace("...", " ").replace("(", " ").replace(")", " ")
+    if not keep_parens:
+        s = re.sub(r"\([^)]*\)", " ", s)      # « Mozzarella (ou feta) » → « Mozzarella »
+        s = s.replace("(", " ").replace(")", " ")
+    s = s.replace("...", " ")
     s = re.sub(r"\bal dente\b", " ", s, flags=re.IGNORECASE)
     s = re.sub(r"\s+", " ", s).strip(" ,.;:")
     s = _ARTICLE_RE.sub("", s)                # « Un poireaux » → « poireaux »
@@ -205,7 +211,7 @@ def _split_leading_qty(s: str) -> tuple[str, str]:
     return "", s
 
 
-def parse_ingredient_line(line: str) -> dict | None:
+def parse_ingredient_line(line: str, keep_parens: bool = False) -> dict | None:
     """Transforme une ligne en {nom, quantite, unite} NORMALISÉ (en amont).
 
     Extrait la quantité de tête, reconnaît l'unité (dictionnaire canonique,
@@ -218,6 +224,10 @@ def parse_ingredient_line(line: str) -> dict | None:
     "4 œufs"                           -> {nom:"œufs", quantite:"4", unite:""}
     "Sel, poivre"                      -> {nom:"Sel, poivre", quantite:"", unite:""}
     "farine : 200 g" (legacy)          -> {nom:"farine", quantite:"200", unite:"g"}
+    "2 branches de thym"               -> {nom:"thym", quantite:"2", unite:"branche"}
+
+    `keep_parens=True` garde le contenu des parenthèses dans le nom (articles
+    manuels : « Papier toilette (x6) »).
     """
     s = line.strip().lstrip("-•*–").strip()
     if not s:
@@ -235,7 +245,32 @@ def parse_ingredient_line(line: str) -> dict | None:
     if not qty or not rest:
         qty, rest = "", s
     unite, nom = _match_unit(rest)
-    return {"nom": _clean_ingredient_name(nom), "quantite": qty, "unite": unite}
+    return {"nom": _clean_ingredient_name(nom, keep_parens), "quantite": qty, "unite": unite}
+
+
+# Condiments connus : une ligne sans quantité faite uniquement de ceux-ci
+# (« sel, poivre », « sel et poivre ») donne un ingrédient par condiment.
+_KNOWN_CONDIMENTS = {
+    "sel", "sel fin", "gros sel", "fleur de sel", "poivre", "poivre noir",
+    "poivre blanc", "poivre du moulin", "poivre moulu",
+}
+
+
+def parse_ingredient_lines(line: str, keep_parens: bool = False) -> list[dict]:
+    """Comme `parse_ingredient_line`, mais renvoie une liste : une ligne
+    « sel, poivre » ou « sel et poivre » sans quantité, faite uniquement de
+    condiments connus, donne un ingrédient par condiment. Les autres lignes à
+    virgule (« farine, tamisée », « huile, sel ») restent entières."""
+    parsed = parse_ingredient_line(line, keep_parens)
+    if not parsed:
+        return []
+    if parsed["quantite"] or parsed["unite"]:
+        return [parsed]
+    parts = [p.strip(" .") for p in _CONDIMENT_SPLIT_RE.split(parsed["nom"])]
+    parts = [p for p in parts if p]
+    if len(parts) >= 2 and all(_fold_word(p) in _KNOWN_CONDIMENTS for p in parts):
+        return [{"nom": p, "quantite": "", "unite": ""} for p in parts]
+    return [parsed]
 
 
 # Séparateurs de listes de condiments (« sel, poivre », « sel et poivre »).
@@ -265,14 +300,22 @@ def normalize_cached_ingredient(ing: dict) -> list[dict]:
 
     Reconstruit la ligne « qty unite nom » puis la re-parse (corrige les unités
     qui avaient fui dans le nom), puis éclate si ni quantité ni unité."""
-    line = " ".join(p for p in (
-        str(ing.get("quantite", "") or "").strip(),
-        (ing.get("unite", "") or "").strip(),
-        (ing.get("nom", "") or "").strip(),
-    ) if p)
-    parsed = parse_ingredient_line(line)
+    qty = str(ing.get("quantite", "") or "").strip()
+    unite = (ing.get("unite", "") or "").strip()
+    nom = (ing.get("nom", "") or "").strip()
+    parsed = parse_ingredient_line(" ".join(p for p in (qty, nom) if p))
     if not parsed or not parsed["nom"]:
         return []
+    if unite:
+        # L'unité est déjà à part : on ne la recolle pas dans la ligne (une
+        # unité absente du dictionnaire finirait sinon dans le nom :
+        # « 2 branche thym » → « branche thym »). On la canonise seulement.
+        canon, _ = _match_unit(unite + " x")
+        if not qty and parsed["quantite"]:
+            # Sans quantité, un nombre en tête du nom appartient au nom.
+            parsed = {"nom": _clean_ingredient_name(nom), "quantite": "", "unite": ""}
+        parsed["unite"] = canon or parsed["unite"] or unite
+        return [parsed]
     if not parsed["quantite"] and not parsed["unite"]:
         parts = _split_condiments(parsed["nom"])
         if len(parts) > 1:

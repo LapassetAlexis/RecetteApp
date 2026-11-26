@@ -53,6 +53,11 @@ _RAYON_KEYWORDS: dict[str, list[str]] = {
         "boulgour", "couscous", "sauce soja", "curry", "cumin", "paprika", "olive",
         "cornichon", "cube", "levure", "maizena", "polenta", "pesto", "tapenade",
         "sauce tomate", "passata", "chapelure", "gnocchi", "nouille",
+        # Expressions plus longues que le mot-clé d'un autre rayon (« lait »,
+        # « creme », « volaille », « veau ») : le mot-clé le plus long gagne.
+        "lait de coco", "creme de coco", "concentre de tomate",
+        "bouillon de volaille", "bouillon de poulet", "bouillon de boeuf",
+        "bouillon de legumes", "fond de volaille", "fond de veau",
     ],
     "Épicerie sucrée": [
         "sucre", "chocolat", "vanille", "miel", "confiture", "caramel", "compote",
@@ -65,8 +70,7 @@ _RAYON_KEYWORDS: dict[str, list[str]] = {
     ],
     "Surgelés": ["surgele", "glace", "epinard surgele", "poisson pane"],
     "Boissons": [
-        "eau", "jus", "vin", "biere", "soda", "cafe", "the", "lait de coco",
-        "boisson", "cidre",
+        "eau", "jus", "vin", "biere", "soda", "cafe", "the", "boisson", "cidre",
     ],
 }
 
