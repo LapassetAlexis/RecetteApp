@@ -33,9 +33,10 @@ def _catalogue(monkeypatch, *recettes):
 
 
 def _initial_builder(html: str) -> list:
-    m = re.search(r"const INITIAL_BUILDER = (.*);", html)
-    assert m, "INITIAL_BUILDER absent de la page"
-    return json.loads(m.group(1))
+    # Grille du constructeur : bloc JSON #page-data (L08).
+    m = re.search(r'<script type="application/json" id="page-data">(.*?)</script>', html, re.DOTALL)
+    assert m, "page-data absent de la page"
+    return json.loads(m.group(1))["builder"]
 
 
 def _draft_id(html: str) -> str:

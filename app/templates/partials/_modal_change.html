@@ -1,0 +1,49 @@
+<!-- Barre action groupée -->
+<div class="bulk" id="bulk" style="display:none">
+    <span id="bulk-nb">0</span>
+    <button class="btn btn-sm" id="bulk-go">↻ Changer</button>
+    <button class="btn btn-sm btn-ghost" id="bulk-clr" title="Annuler la sélection" aria-label="Annuler la sélection">✕</button>
+</div>
+
+<!-- Modal -->
+<div id="modal" class="modal" style="display:none">
+    <div class="modal-bg"></div>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-top">
+            <h3 id="modal-title">↻ Changer</h3>
+            <button class="modal-x" id="modal-close" title="Fermer" aria-label="Fermer">✕</button>
+        </div>
+        <div class="modal-body">
+            <p id="modal-ctx" class="modal-ctx"></p>
+            <input type="text" id="flt" placeholder="Filtrer..." class="inp" aria-label="Filtrer les recettes">
+            <div id="alt-list"></div>
+            <div id="free-meal" style="display:none">
+                <button type="button" class="btn btn-ghost btn-sm" id="free-toggle">➕ Repas libre</button>
+                <div id="free-form" style="display:none;margin-top:.6rem">
+                    <input type="text" id="free-nom" placeholder="Nom du repas (ex. Steak + haricots verts)" class="inp">
+                    <textarea id="free-ings" placeholder="Un ingrédient par ligne&#10;200 g de haricots verts&#10;2 steaks" class="inp" rows="4" style="margin-top:.4rem"></textarea>
+                    <button type="button" class="btn btn-sm btn-primary" id="free-go" style="margin-top:.4rem">Créer et placer</button>
+                </div>
+            </div>
+            <div id="brique-box" style="display:none">
+                <button type="button" class="btn btn-ghost btn-sm" id="brique-toggle">➕ Nouvelle brique</button>
+                <div id="brique-form" style="display:none;margin-top:.6rem">
+                    <input type="text" id="brique-nom" placeholder="Nom (ex. Riz, Steak, Brocolis)" class="inp">
+                    <div class="tag-group-chips" style="margin-top:.4rem">
+                        {% for opt in base_options %}
+                        <label class="tgl"><input type="checkbox" class="brique-base" value="{{ opt }}"><span>{{ opt }}</span></label>
+                        {% endfor %}
+                    </div>
+                    <div style="display:flex;gap:.4rem;margin-top:.4rem">
+                        <input type="text" id="brique-qte" placeholder="Qté (option.)" class="inp" style="flex:1">
+                        <input type="text" id="brique-unite" placeholder="Unité (option.)" class="inp" style="flex:1">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary" id="brique-go" style="margin-top:.4rem">Créer et placer</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm" id="modal-cancel">Annuler</button>
+        </div>
+    </div>
+</div>

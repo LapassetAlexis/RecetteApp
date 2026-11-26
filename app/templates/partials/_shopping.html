@@ -1,0 +1,55 @@
+<!-- Liste de courses -->
+<div class="card">
+    <div class="shop-h">
+        <h2>🛒 Liste de courses</h2>
+        <div class="shop-tools">
+            <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
+            {% if liste_courses or repas_libres %}
+            <button class="btn btn-ghost btn-sm" id="btn-copy" title="Copier la liste">📋 Copier</button>
+            {% endif %}
+            {% if liste_courses %}
+            <button class="btn btn-ghost btn-sm" id="btn-share" title="Lien de partage public (lecture seule)">🔗 Partager la liste</button>
+            <button class="btn btn-ghost btn-sm" id="btn-print" title="Imprimer la liste" aria-label="Imprimer la liste">🖨️</button>
+            <button class="btn btn-ghost btn-sm" id="btn-regen" title="Régénérer la liste" aria-label="Régénérer la liste">↻</button>
+            {% endif %}
+        </div>
+    </div>
+    {% if repas_libres %}
+    <div class="shop-libre" title="Repas libres : pas d'ingrédients en base, à acheter à la main.">
+        <strong>📝 Repas libres — pense à acheter les ingrédients :</strong>
+        <ul>
+            {% for r in repas_libres %}
+            <li>{{ r.nom }}{% if r.quand %} <span class="shop-libre-when">({{ r.quand }})</span>{% endif %}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% if liste_courses %}
+    <div id="shop-g">
+        {% for grp in courses_par_rayon %}
+        <div class="shop-rayon" data-rayon="{{ grp.rayon }}">
+            <h3 class="rayon-h">{{ grp.rayon }} <span class="rayon-n">{{ grp['items']|length }}</span></h3>
+            <div class="shop-grid">
+                {% for item in grp['items'] %}
+                <label class="shop-i" data-item="{{ item.nom|lower }}">
+                    <input type="checkbox" class="shop-c"> <span>{{ item.nom|capitalize }}</span>
+                    {% if item.quantite %}<small>{{ item.quantite }} {{ item.unite }}</small>{% endif %}
+                    {% if item.recettes %}
+                    <button type="button" class="shop-src" title="{{ item.recettes | join(' · ') }}" aria-label="Voir les recettes liées">🍽</button>
+                    <span class="shop-srcs">🍽 {{ item.recettes | join(' · ') }}</span>
+                    {% endif %}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card" style="text-align:center;padding:30px;">
+        <p style="font-size:1.2rem;margin-bottom:10px;">🛒 Aucun ingrédient pour l'instant</p>
+        <p style="color:var(--t2);margin-bottom:16px;">Génère la liste de courses à partir des repas de la semaine.</p>
+        <button class="btn btn-primary btn-lg" id="btn-shop">🛒 Générer la liste de courses</button>
+        <p id="shop-status" class="loading-tip" style="margin-top:10px;"></p>
+    </div>
+    {% endif %}
+</div>

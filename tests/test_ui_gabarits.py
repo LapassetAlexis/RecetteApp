@@ -14,6 +14,12 @@ STYLE = APP_DIR / "static" / "style.css"
 TEMPLATES = APP_DIR / "templates"
 
 
+def _with_scripts(client, html: str) -> str:
+    """HTML de la page + contenu des scripts locaux qu'elle charge (JS sorti en fichiers, L08)."""
+    srcs = re.findall(r'<script src="(/static/js/[^"?]+)', html)
+    return html + "".join(client.get(s).text for s in srcs)
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     dbpath = str(tmp_path / "t.db")
@@ -55,7 +61,7 @@ def test_nom_recette_echappe_cote_serveur(client, planning_id):
 
 
 def test_modale_planning_accessible(client, planning_id):
-    html = client.get(f"/planning/{planning_id}").text
+    html = _with_scripts(client, client.get(f"/planning/{planning_id}").text)
     assert 'role="dialog"' in html and 'aria-modal="true"' in html
     assert 'aria-labelledby="modal-title"' in html and 'id="modal-title"' in html
     assert "Escape" in html
@@ -86,7 +92,7 @@ def test_historique_vide(client):
 
 
 def test_constructeur_modale_et_navigation(client):
-    html = client.get("/").text
+    html = _with_scripts(client, client.get("/").text)
     assert 'role="dialog"' in html and 'aria-labelledby="pk-title"' in html
     assert "Escape" in html
     assert re.search(r"(?<![\w.])alert\('", html) is None

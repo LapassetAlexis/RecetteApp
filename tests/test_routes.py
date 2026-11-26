@@ -402,10 +402,10 @@ def test_reouvrir_brouillon_injecte_builder(client, monkeypatch):
     html = client.get(f"/?draft={pid}").text
     assert "Poulet" in html                       # le nom du plat est dans le builder
     assert f'value="{pid}"' in html               # draft_id pré-rempli
-    assert "INITIAL_BUILDER = []" not in html      # builder hydraté (non vide)
+    assert '"builder": []' not in html            # builder hydraté (non vide, #page-data)
     # brouillon inconnu / validé : grille vierge
     html2 = client.get("/?draft=99999").text
-    assert "INITIAL_BUILDER = []" in html2
+    assert '"builder": []' in html2
 
 
 def test_maj_brouillon_ne_cree_pas_de_planning(client, monkeypatch):
