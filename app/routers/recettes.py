@@ -315,14 +315,13 @@ async def _events_sans_detail():
         yield ev
 
 
-@router.get("/api/enrich-all/stream")
+@router.post("/api/enrich-all/stream")
 async def api_enrich_all_stream(request: Request):
     """Enrichit toutes les recettes en streamant la progression (SSE lu par
-    `EventSource` dans `js/recettes-liste.js`).
+    `fetch` en flux dans `js/recettes-liste.js`).
 
-    L'action écrit dans Notion : une navigation ou un préchargement de page
-    (`Accept: text/html`) est refusé (405), seul un client de flux la lance.
-    Le passage en POST + `fetch` reste à faire (voir le rapport du lot M09)."""
+    L'action écrit dans Notion : POST seulement, et un formulaire HTML
+    (`Accept: text/html`) est refusé (405) ; seul un client de flux la lance."""
     if "text/html" in request.headers.get("accept", ""):
         return erreur("Action à lancer depuis la page Recettes.", 405)
     return StreamingResponse(_events_sans_detail(), media_type="text/event-stream", headers={

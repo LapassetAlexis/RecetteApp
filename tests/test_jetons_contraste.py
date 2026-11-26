@@ -111,3 +111,30 @@ def test_une_seule_regle_de_bouton_secondaire():
     assert any(".btn-ghost" in sel for sel in regles)
     for sel in regles:  # pas de règle propre au vert
         assert ".btn-ghost" in sel or ".loading" in sel, sel
+
+
+# ── Pastilles de groupe du constructeur (texte blanc sur la couleur du groupe) ──
+
+STATIC = STYLE.parent
+
+
+def _palette_groupes() -> list[str]:
+    js = (STATIC / "js" / "builder.js").read_text(encoding="utf-8")
+    bloc = re.search(r"const GROUP_COLORS = \[([^\]]*)\]", js).group(1)
+    return re.findall(r"'(#[0-9a-fA-F]{6})'", bloc)
+
+
+def test_pastille_de_groupe_en_texte_blanc():
+    css = (STATIC / "css" / "builder.css").read_text(encoding="utf-8")
+    corps = re.search(r"\.b-group\s*\{([^}]*)\}", css).group(1)
+    assert re.search(r"(?<![-\w])color\s*:\s*#fff\b", corps)
+
+
+def test_palette_des_groupes_complete_et_distincte():
+    palette = _palette_groupes()
+    assert len(palette) == 7 and len({c.lower() for c in palette}) == 7
+
+
+@pytest.mark.parametrize("couleur", _palette_groupes())
+def test_palette_des_groupes_au_moins_4_5_sous_texte_blanc(couleur):
+    assert contraste("#fff", couleur) >= SEUIL, f"G sur {couleur} : {contraste('#fff', couleur):.2f}:1"

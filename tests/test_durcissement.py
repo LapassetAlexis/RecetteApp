@@ -94,10 +94,10 @@ def test_flux_enrichissement_refuse_une_navigation(client, monkeypatch):
         appels.append(1)
         return []
     monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    r = client.get("/api/enrich-all/stream", headers={"Accept": "text/html,application/xhtml+xml"})
+    r = client.post("/api/enrich-all/stream", headers={"Accept": "text/html,application/xhtml+xml"})
     assert r.status_code == 405 and r.json()["error"]
     assert appels == []
-    r = client.get("/api/enrich-all/stream", headers={"Accept": "text/event-stream"})
+    r = client.post("/api/enrich-all/stream", headers={"Accept": "text/event-stream"})
     assert r.status_code == 200 and "event: done" in r.text
 
 
@@ -105,7 +105,7 @@ def test_flux_enrichissement_erreur_sans_detail(client, monkeypatch):
     async def _ko():
         raise RuntimeError("jeton Notion secret")
     monkeypatch.setattr(main.notion, "get_all_recipes", _ko)
-    body = client.get("/api/enrich-all/stream").text
+    body = client.post("/api/enrich-all/stream").text
     assert "event: error" in body and "secret" not in body
 
 

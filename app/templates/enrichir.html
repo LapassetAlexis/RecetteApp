@@ -148,6 +148,10 @@
         <p>Écriture dans Notion en cours.</p>
     </div>
 </div>
+
+{% with modal_id="extract-modal", modal_titre="🔄 Ré-extraire depuis la source",
+        modal_message="Les champs ci-dessous seront remplacés par ceux de la source (rien n'est enregistré avant « Valider »).",
+        modal_ok="Ré-extraire" %}{% include "partials/_modal_confirm.html" %}{% endwith %}
 {% endblock %}
 
 {% block scripts %}

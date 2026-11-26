@@ -1,0 +1,18 @@
+{# Modale de confirmation (remplace confirm()), ouverte par Common.confirmModal.
+   Variables : modal_id, modal_titre, modal_message, modal_ok. #}
+<div id="{{ modal_id }}" class="modal" style="display:none">
+    <div class="modal-bg" data-cancel></div>
+    <div class="modal-box" role="alertdialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title" aria-describedby="{{ modal_id }}-msg">
+        <div class="modal-top">
+            <h3 id="{{ modal_id }}-title">{{ modal_titre }}</h3>
+            <button class="modal-x" type="button" data-cancel aria-label="Fermer" title="Fermer">✕</button>
+        </div>
+        <div class="modal-body">
+            <p id="{{ modal_id }}-msg">{{ modal_message }}</p>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn btn-ghost btn-sm" data-cancel>Annuler</button>
+            <button type="button" class="btn btn-primary btn-sm" data-ok>{{ modal_ok }}</button>
+        </div>
+    </div>
+</div>

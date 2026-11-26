@@ -3,7 +3,7 @@
 (function () {
     'use strict';
     // Chargé deux fois (gabarit de base et page) : la première copie reste.
-    if (window.Common && window.Common.requestJson) return;
+    if (window.Common) return;
 
     // Échappe un texte pour l'insérer dans du HTML.
     function esc(s) {
@@ -115,6 +115,29 @@
         return {close};
     }
 
+    // Confirmation par modale (remplace `confirm()`). `el` : une `.modal` qui
+    // contient un bouton [data-ok] et des éléments [data-cancel] (Annuler, ✕,
+    // fond). Promesse résolue à true (confirmé) ou false (annulé, Échap).
+    function confirmModal(el) {
+        return new Promise(resolve => {
+            let ok = false;
+            const okBtn = el.querySelector('[data-ok]');
+            const cancels = el.querySelectorAll('[data-cancel]');
+            const onOk = () => { ok = true; handle.close(); };
+            const onCancel = () => handle.close();
+            const handle = modal(el, {
+                initialFocus: '.modal-foot [data-cancel]',
+                onClose: () => {
+                    okBtn.removeEventListener('click', onOk);
+                    cancels.forEach(c => c.removeEventListener('click', onCancel));
+                    resolve(ok);
+                },
+            });
+            okBtn.addEventListener('click', onOk);
+            cancels.forEach(c => c.addEventListener('click', onCancel));
+        });
+    }
+
     // Quantité affichée avec la virgule décimale française : un nombre est
     // arrondi à 2 décimales (1.5 → « 1,5 »), un texte garde sa forme mais son
     // point décimal devient une virgule. Même règle que `fmt_quantite` (serveur).
@@ -133,8 +156,5 @@
         return _data;
     }
 
-    window.Common = {esc, copyText, postJson, pageData, qtyFr};
-    // Ajouts du socle front (M01), sur une ligne à part : la ligne ci-dessus
-    // est vérifiée telle quelle par tests/test_static_js.py.
-    Object.assign(window.Common, {requestJson, modal});
+    window.Common = {esc, copyText, requestJson, postJson, modal, confirmModal, sessionExpired, pageData, qtyFr};
 })();

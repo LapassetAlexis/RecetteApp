@@ -94,7 +94,10 @@ def test_fonctions_pures_du_constructeur_exposees():
     for fn in ("consolidateGroups", "midiEditorDay", "serialize", "rangeDays", "hydrateBuilder"):
         assert re.search(rf"function {fn}\(state|function {fn}\(", src), fn
     common = (STATIC / "js" / "common.js").read_text(encoding="utf-8")
-    assert "window.Common = {esc, copyText, postJson, pageData, qtyFr}" in common
+    # Une seule définition de l'API commune (plus d'ajout par Object.assign).
+    api = "esc, copyText, requestJson, postJson, modal, confirmModal, sessionExpired, pageData, qtyFr"
+    assert f"window.Common = {{{api}}};" in common
+    assert common.count("window.Common =") == 1 and "Object.assign(window.Common" not in common
 
 
 def test_page_publique_utilise_common(client, monkeypatch):

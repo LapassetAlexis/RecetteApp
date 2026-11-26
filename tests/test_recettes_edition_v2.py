@@ -68,7 +68,10 @@ def test_nouveaux_fichiers_servis_et_sans_fetch_direct(client):
     for name in NOUVEAUX_JS:
         r = client.get(f"/static/js/{name}")
         assert r.status_code == 200 and r.text.strip(), name
-        assert "fetch(" not in r.text, name               # tout passe par Common.requestJson
+        # Tout passe par Common.requestJson, sauf le flux d'enrichissement
+        # (POST lu en flux, recettes-liste.js) qui n'est pas une réponse JSON.
+        flux = r.text.count("fetch('/api/enrich-all/stream', {method: 'POST'") if name == "recettes-liste.js" else 0
+        assert r.text.count("fetch(") == flux, name
     assert "Common.modal" in (JS / "historique.js").read_text(encoding="utf-8")
     assert "Common.modal" in (JS / "recette-fiche.js").read_text(encoding="utf-8")
     assert "Common.modal" in (JS / "recette-planifier.js").read_text(encoding="utf-8")
@@ -79,7 +82,7 @@ def test_nouveaux_fichiers_servis_et_sans_fetch_direct(client):
 
 def test_common_js_idempotent():
     src = (JS / "common.js").read_text(encoding="utf-8")
-    assert "if (window.Common && window.Common.requestJson) return;" in src
+    assert "if (window.Common) return;" in src
 
 
 NODE_DOUBLE = r"""

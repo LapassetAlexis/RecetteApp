@@ -364,7 +364,7 @@ def test_enrich_all_stream(client, monkeypatch):
     monkeypatch.setattr(main.db, "save_enriched", _save)
     monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
     monkeypatch.setattr(main.notion, "update_ingredients", _upd)
-    r = client.get("/api/enrich-all/stream")
+    r = client.post("/api/enrich-all/stream")
     assert r.status_code == 200
     assert "text/event-stream" in r.headers["content-type"]
     body = r.text
