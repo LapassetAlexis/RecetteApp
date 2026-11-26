@@ -1,11 +1,13 @@
 """L09 — articles ajoutés à la main et articles masqués (« Je l'ai déjà »)."""
 
+import json
 from urllib.parse import quote
 
 import pytest
 
 from app.services.shopping import add_extra, make_extra, remove_extra, set_masque
 from tests.test_courses_partage import data_of, make_client, make_planning, set_data, share
+from tests.test_routes import _case, _recipe
 
 
 @pytest.fixture
@@ -138,6 +140,24 @@ def test_masquer_erreurs(client, monkeypatch):
     pid = make_planning(client, monkeypatch, RIZ)
     assert client.post(f"/api/courses/{pid}/masquer", json={"key": "inconnu|"}).status_code == 404
     assert client.post("/api/courses/9999/masquer", json={"key": "riz|masse"}).status_code == 404
+
+
+def test_coches_survivent_a_la_resoumission_du_constructeur(client, monkeypatch):
+    """/construire sur un planning existant (draft_id) : articles manuels et leurs
+    coches conservés, coche par clé d'un article de recette encore présent aussi."""
+    pid = make_planning(client, monkeypatch, RIZ)
+    client.post(f"/api/courses/{pid}/extra", json={"texte": "café"})
+    for key in ("extra:cafe|", "riz|masse"):
+        client.post(f"/api/shopping-check/{pid}", json={"item": key, "checked": True})
+    poulet = _recipe("Poulet", id="r0")
+    r = client.post("/construire", data={
+        "week_start": "2026-01-05", "draft_id": str(pid),
+        "meals": json.dumps([_case(1, "midi", poulet, persons=4)]),
+    }, follow_redirects=False)
+    assert r.headers["location"].endswith(f"/planning/{pid}")
+    data = data_of(pid)
+    assert [e["key"] for e in data["courses_extra"]] == ["extra:cafe|"]
+    assert data["courses_checked"] == ["extra:cafe|", "riz|masse"]
 
 
 def test_masque_survit_a_la_regeneration(client, monkeypatch):
