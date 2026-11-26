@@ -30,10 +30,8 @@ jobs:
         run: pytest --cov=app --cov-report=term-missing --cov-fail-under=65
 
   e2e:
-    # Parcours navigateur (Playwright, Chromium) : non bloquant pendant la
-    # période de rodage, à rendre bloquant ensuite (retirer continue-on-error).
+    # Parcours navigateur (Playwright, Chromium) : bloquant (décision D7).
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

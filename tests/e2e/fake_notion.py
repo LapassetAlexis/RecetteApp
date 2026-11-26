@@ -70,6 +70,12 @@ INGREDIENTS = {
     "t1": [{"nom": "pommes", "quantite": "6", "unite": ""}],
 }
 
+# Étapes avec durées (minuteurs du mode cuisine) ; les autres recettes ont
+# trois étapes sans durée.
+INSTRUCTIONS = {
+    "c1": ["Faire revenir les oignons 1 min.", "Ajouter les lentilles et laisser mijoter 20 min.", "Servir chaud."],
+}
+
 
 class FakeNotion:
     """Sous-ensemble du `NotionClient` utilisé par l'application."""
@@ -88,6 +94,8 @@ class FakeNotion:
         return dict(r) if r else None
 
     async def get_recipe_instructions(self, page_id):
+        if page_id in INSTRUCTIONS:
+            return list(INSTRUCTIONS[page_id])
         return ["Préparer les ingrédients.", "Cuire.", "Servir chaud."]
 
     async def create_recipe(self, nom="", repas=None, nature="Recette", base=None, **kw):
