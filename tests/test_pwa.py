@@ -96,7 +96,7 @@ def test_offline_fallback_is_chained():
     src = _sw_source()
     assert "caches.match('/') ||" not in src
     assert "hit || caches.match(OFFLINE_URL)" in src
-    assert "const CACHE = 'menu-planner-v3'" in src
+    assert "const CACHE = 'menu-planner-v4'" in src  # incrémenté par L15
     # Ni erreurs ni redirections en cache.
     assert "!res.redirected" in src
-    assert src.count("if (cacheable(res))") == 2
+    assert src.count("if (cacheable(res))") == 4  # + état des coches et cache à la demande (L15)
