@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{{ recette.nom | clean_title }} — Mode cuisine</title>
+    <meta name="theme-color" content="#ffffff">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👨‍🍳</text></svg>">
+    <link rel="stylesheet" href="/static/css/cuisine.css?v={{ asset_version }}">
+</head>
+<body class="ck">
+    <div class="ck-head">
+    <header class="ck-top">
+        <a class="ck-close" href="/recette/{{ recette.id }}" aria-label="Quitter le mode cuisine" title="Quitter le mode cuisine">✕</a>
+        <div class="ck-title">
+            <h1>{{ recette.nom | clean_title }}</h1>
+            <p class="ck-sub">👤 {{ portions }} {{ 'personne' if portions == 1 else 'personnes' }}</p>
+        </div>
+    </header>
+    <div class="ck-timers" id="ck-timers" aria-live="polite" hidden></div>
+
+    <div class="ck-tabs" role="tablist" aria-label="Volets">
+        <button type="button" role="tab" class="ck-tab" id="tab-ings" aria-controls="pane-ings" aria-selected="false">🥦 Ingrédients{% if ingredients %} <span class="ck-count" id="ings-count">{{ ingredients|length }}</span>{% endif %}</button>
+        <button type="button" role="tab" class="ck-tab" id="tab-steps" aria-controls="pane-steps" aria-selected="true">👨‍🍳 Étapes</button>
+    </div>
+    </div>
+
+    <main class="ck-main">
+        <section class="ck-pane ck-ings" id="pane-ings" role="tabpanel" aria-labelledby="tab-ings">
+            <h2 class="ck-h2">🥦 Ingrédients</h2>
+            {% if ingredients %}
+            <ul class="ck-ing-list">
+                {% for i in ingredients %}
+                <li>
+                    <label class="ck-ing">
+                        <input type="checkbox" data-i="{{ loop.index0 }}">
+                        <span class="ck-ing-q">{{ i.quantite }}{% if i.quantite and i.unite %} {% endif %}{{ i.unite }}</span>
+                        <span class="ck-ing-n">{{ i.nom }}</span>
+                    </label>
+                </li>
+                {% endfor %}
+            </ul>
+            <button type="button" class="ck-go" id="ck-go">C'est prêt, aux étapes →</button>
+            {% else %}
+            <p class="ck-empty">Aucun ingrédient enregistré pour cette recette.</p>
+            {% endif %}
+        </section>
+
+        <section class="ck-pane ck-steps-pane" id="pane-steps" role="tabpanel" aria-labelledby="tab-steps">
+            {% if instructions %}
+            <div class="ck-progress" aria-hidden="true"><div class="ck-progress-bar" id="ck-bar"></div></div>
+            <p class="ck-pos" id="ck-pos" aria-live="polite">Étape 1 / {{ instructions|length }}</p>
+            <ol class="ck-steps" id="ck-steps">
+                {% for step in instructions %}<li class="ck-step" data-i="{{ loop.index0 }}">{{ step }}</li>{% endfor %}
+            </ol>
+            {% else %}
+            <p class="ck-empty">Aucune étape enregistrée pour cette recette.
+                <a href="/recette/{{ recette.id }}/enrichir">Ajouter les étapes</a></p>
+            {% endif %}
+        </section>
+    </main>
+
+    {% if instructions %}
+    <nav class="ck-nav" aria-label="Navigation entre les étapes">
+        <button type="button" class="ck-btn ck-prev" id="ck-prev">← Précédent</button>
+        <button type="button" class="ck-btn ck-next" id="ck-next">Suivant →</button>
+    </nav>
+    {% endif %}
+
+    <script type="application/json" id="page-data">{{ {"recette_id": recette.id, "portions": portions, "retour": "/recette/" ~ recette.id} | tojson }}</script>
+    <script src="/static/js/common.js?v={{ asset_version }}"></script>
+    <script src="/static/js/cuisine.js?v={{ asset_version }}"></script>
+</body>
+</html>

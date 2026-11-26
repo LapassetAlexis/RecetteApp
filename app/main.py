@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.deps import BASE_DIR, VERSION, db, llm, notion, templates
-from app.routers import admin, auth, catalogue, courses, pages, planning, recettes
+from app.routers import admin, auth, catalogue, courses, cuisine, pages, planning, recettes
 
 __all__ = ["BASE_DIR", "VERSION", "app", "db", "llm", "notion", "settings", "templates"]
 
@@ -72,5 +72,5 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 for _router in (pages.router, planning.router, courses.router, recettes.router,
-                catalogue.router, auth.router, admin.router):
+                catalogue.router, auth.router, admin.router, cuisine.router):
     app.include_router(_router)

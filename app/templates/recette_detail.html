@@ -24,6 +24,7 @@
         <p class="detail-usage">🍳 {{ usage_label or "Jamais planifiée dans une semaine validée" }}</p>
         <div class="detail-links">
             <button type="button" class="btn btn-primary btn-sm" id="btn-planifier">📅 Ajouter au planning</button>
+            {% if instructions or ingredients %}<a href="/recette/{{ recette.id }}/cuisine?portions={{ base_servings }}" class="btn btn-ghost btn-sm" id="btn-cuisine">👨‍🍳 Mode cuisine</a>{% endif %}
             {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
             {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
             <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">✏️ Modifier</a>
@@ -195,6 +196,8 @@ function render() {
     });
     const srvN = document.getElementById('srv-n');
     if (srvN) srvN.textContent = servings;  // absent sans ingrédients
+    const ck = document.getElementById('btn-cuisine');
+    if (ck) ck.href = `/recette/{{ recette.id }}/cuisine?portions=${servings}`;
     const raw = document.getElementById('cook-raw');
     if (raw) raw.textContent = cookLines.join('\n');
 }
