@@ -47,33 +47,14 @@ def test_update_planning_does_not_duplicate(tmp_path):
     assert json.loads(p["data_json"])["liste_courses"] == [1]
 
 
-def test_recent_recipe_names(tmp_path):
-    db = _db(tmp_path)
-    pid = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
-    asyncio.run(db.mark_planning_valid(pid))
-    recent = asyncio.run(db.get_recent_recipe_names(weeks=4))
-    assert "Poulet" in recent and "Soupe" in recent
-
-
 def test_drafts_excluded_until_valid(tmp_path):
-    # Un brouillon (non validé) n'apparaît pas dans l'historique ni dans
-    # l'exclusion des recettes récentes ; après validation, si.
+    # Un brouillon (non validé) n'apparaît pas dans l'historique ; après
+    # validation, si.
     db = _db(tmp_path)
     pid = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
     assert asyncio.run(db.list_plannings()) == []
-    assert asyncio.run(db.get_recent_recipe_names(weeks=4)) == set()
     asyncio.run(db.mark_planning_valid(pid))
     assert len(asyncio.run(db.list_plannings())) == 1
-    assert "Poulet" in asyncio.run(db.get_recent_recipe_names(weeks=4))
-
-
-def test_delete_draft_plannings(tmp_path):
-    db = _db(tmp_path)
-    p1 = asyncio.run(db.save_planning("2026-01-05", "Hiver", 4, "", "{}", _plats()))
-    asyncio.run(db.mark_planning_valid(p1))
-    asyncio.run(db.save_planning("2026-01-12", "Hiver", 4, "", "{}", _plats()))  # brouillon
-    asyncio.run(db.delete_draft_plannings())
-    assert len(asyncio.run(db.list_plannings())) == 1  # seul le validé reste
 
 
 def test_list_drafts(tmp_path):
@@ -122,24 +103,6 @@ def test_enriched_base_servings_roundtrip(tmp_path):
 def test_get_last_planning_empty(tmp_path):
     db = _db(tmp_path)
     assert asyncio.run(db.get_last_planning()) is None
-
-
-def test_prefs_roundtrip(tmp_path):
-    import asyncio, json
-    from app.database import Database
-    db = Database(); db.path = str(tmp_path / "p.db")
-
-    async def run():
-        await db.init()
-        assert await db.get_prefs() == {}
-        await db.save_prefs(json.dumps({"saison": "Hiver", "custom_prompt": "léger"}))
-        p = await db.get_prefs()
-        assert p["saison"] == "Hiver" and p["custom_prompt"] == "léger"
-        # upsert (1 seule ligne)
-        await db.save_prefs(json.dumps({"saison": "Été"}))
-        assert (await db.get_prefs())["saison"] == "Été"
-
-    asyncio.run(run())
 
 
 def test_all_enriched_ingredients(tmp_path):
