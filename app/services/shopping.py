@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import re
+import secrets
 import zlib
 
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
@@ -302,10 +303,13 @@ def reset_checks(data: dict) -> None:
 
 
 def make_extra(texte: str) -> dict | None:
-    """Article manuel depuis une saisie rapide (« 2 l lait », « café »)."""
+    """Article manuel depuis une saisie rapide (« 2 l lait », « café »).
+
+    Les parenthèses sont gardées (« Papier toilette (x6) »). Un nom sans
+    aucune lettre (« 2 », « 3,5 ») est refusé : None."""
     texte = str(texte or "").strip()[:_TEXTE_MAX]
-    parsed = parse_ingredient_line(texte) if texte else None
-    if not parsed or not parsed.get("nom", "").strip():
+    parsed = parse_ingredient_line(texte, keep_parens=True) if texte else None
+    if not parsed or not any(c.isalpha() for c in parsed.get("nom", "")):
         return None
     it = {
         "nom": parsed["nom"].strip(),
@@ -346,6 +350,19 @@ def remove_extra(data: dict, key: str) -> bool:
     return True
 
 
+def set_extra_rayon(data: dict, key: str, rayon: str) -> bool:
+    """Range un article manuel dans le rayon choisi (un des RAYON_ORDER)."""
+    if rayon not in RAYON_ORDER:
+        return False
+    extras = _extras(data)
+    item = next((e for e in extras if e.get("key") == key), None)
+    if item is None:
+        return False
+    item["rayon"] = rayon
+    data["courses_extra"] = extras
+    return True
+
+
 def set_masque(data: dict, key: str, masque: bool) -> bool:
     """Masque (« Je l'ai déjà ») ou restaure un article issu d'une recette."""
     if key not in {_key_of(it) for it in _recipe_items(data)}:
@@ -370,21 +387,25 @@ async def get_placard() -> list[str]:
     return sorted({_normalize_form(str(p)) for p in placard if str(p).strip()})
 
 
-async def set_placard(nom: str, present: bool) -> None:
-    """Ajoute ou retire un nom du placard, sans toucher aux autres réglages."""
+async def set_placard(nom: str, present: bool) -> bool:
+    """Ajoute ou retire un nom du placard, sans toucher aux autres réglages.
+    Renvoie True si le placard a changé."""
     nom = _normalize_form(nom)
     if not nom:
-        return
+        return False
     # Verrou des réglages : deux ajouts simultanés ne s'écrasent pas.
     async with store.prefs_lock():
         prefs = await db.get_app_prefs()
         placard = set(await get_placard())
+        if (nom in placard) == present:
+            return False
         if present:
             placard.add(nom)
         else:
             placard.discard(nom)
         prefs["placard"] = sorted(placard)
         await db.save_app_prefs(prefs)
+        return True
 
 
 def _view_item(it: dict, checked: set[str], extra: bool) -> dict:
@@ -438,7 +459,32 @@ def shopping_view(data: dict, placard: list[str] | None = None) -> dict:
         "nb_total": len(visibles),
         "nb_restants": len(visibles) - len(pris),
         "version": zlib.crc32(empreinte.encode("utf-8")),
+        # Page planning : lien de partage actif, taille du placard, rayons
+        # proposés pour un article manuel.
+        "partage": bool(data.get("share_token")),
+        "nb_placard": len(placard or []),
+        "rayons": RAYON_ORDER,
     }
+
+
+# ── Partage public : jeton révocable (D8) ───────────────────────────────
+
+SHARE_TOKEN_BYTES = 16      # nouveaux liens ; les anciens (8 octets) restent valides
+
+
+def share_action(data: dict, action: str = "") -> str | None:
+    """Applique une action de partage à `data` (modifié en place) et renvoie le
+    jeton actif, ou None s'il n'y en a plus.
+
+    - "" : jeton existant, sinon nouveau ;
+    - "revoquer" : plus de jeton (le lien répond 404) ;
+    - "regenerer" : nouveau jeton (l'ancien lien répond 404)."""
+    if action == "revoquer":
+        data.pop("share_token", None)
+        return None
+    if action == "regenerer" or not data.get("share_token"):
+        data["share_token"] = secrets.token_urlsafe(SHARE_TOKEN_BYTES)
+    return data["share_token"]
 
 
 async def load_shopping_view(data: dict) -> dict:

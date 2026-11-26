@@ -16,7 +16,7 @@ def _bloc(debut: str, fin: str) -> str:
 
 
 def test_nom_de_cache_incremente():
-    assert "const CACHE = 'menu-planner-v5'" in SW
+    assert "const CACHE = 'menu-planner-v6'" in SW
 
 
 def test_borne_de_pages():

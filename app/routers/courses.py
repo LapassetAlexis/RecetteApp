@@ -3,7 +3,8 @@ placard et partage public (le jeton donne le droit de cocher, rien d'autre)."""
 
 import json
 import logging
-import secrets
+import time
+from collections import deque
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,14 +17,17 @@ from app.services.shopping import (
     add_extra,
     apply_check,
     finalize_items,
+    get_placard,
     load_shopping_view,
     mutate_planning_data,
     purge_orphans,
     recipe_item_name,
     remove_extra,
     reset_checks,
+    set_extra_rayon,
     set_masque,
     set_placard,
+    share_action,
 )
 from app.text_utils import merge_ingredients
 
@@ -51,7 +55,42 @@ async def _liste_html(planning_id: int, data: dict) -> dict:
     html = templates.get_template("partials/_shopping_list.html").render(
         shop=shop, planning={"id": planning_id},
     )
-    return {"success": True, "html": html, "nb": shop["nb_total"]}
+    return {"success": True, "html": html, "nb": shop["nb_total"],
+            "nb_placard": shop["nb_placard"]}
+
+
+async def _etat(data: dict) -> dict:
+    """État des coches : clés cochées et empreinte des lignes visibles."""
+    shop = await load_shopping_view(data)
+    return {"checked": shop["checked"], "version": shop["version"]}
+
+
+def _revoque() -> JSONResponse:
+    """Jeton inconnu ou révoqué : 404 que la page publique reconnaît."""
+    return JSONResponse({"error": "Ce lien n'est plus valide", "code": "revoque"}, status_code=404)
+
+
+# Limite simple des coches publiques, en mémoire (un seul processus uvicorn).
+CHECK_LIMIT = 120           # requêtes par fenêtre et par jeton
+CHECK_WINDOW = 60.0         # secondes
+_check_hits: dict[str, deque] = {}
+
+
+def _check_autorise(token: str, now: float | None = None) -> bool:
+    """Fenêtre glissante : True si `token` a fait moins de CHECK_LIMIT coches
+    dans les CHECK_WINDOW dernières secondes (et compte celle-ci)."""
+    now = time.monotonic() if now is None else now
+    hits = _check_hits.setdefault(token, deque())
+    while hits and now - hits[0] >= CHECK_WINDOW:
+        hits.popleft()
+    if len(hits) >= CHECK_LIMIT:
+        return False
+    hits.append(now)
+    # Jetons inactifs retirés : la table ne grossit pas sans fin.
+    if len(_check_hits) > 1000:
+        for t in [t for t, h in _check_hits.items() if not h or now - h[-1] >= CHECK_WINDOW]:
+            _check_hits.pop(t, None)
+    return True
 
 
 @router.post("/generate-shopping/{planning_id}")
@@ -123,23 +162,28 @@ async def shopping_check(planning_id: int, request: Request):
 
 
 @router.post("/planning/{planning_id}/partager")
-async def partager_liste(planning_id: int):
-    """Génère (une fois) un token de partage public et renvoie l'URL relative."""
+async def partager_liste(planning_id: int, request: Request):
+    """Lien de partage public de la liste (D8 : révocable).
+
+    Corps facultatif {"action": "revoquer" | "regenerer"}. Sans action : le
+    lien existant, sinon un nouveau. Renvoie {"url": "/courses/<jeton>"}, ou
+    {"url": null} après révocation."""
+    action = str((await _body(request)).get("action") or "")
+    if action not in ("", "revoquer", "regenerer"):
+        return _error("Action inconnue", 400)
 
     def fn(_planning: dict, planning_data: dict):
-        token = planning_data.get("share_token")
-        if token:
-            return store.NoWrite(token)
-        planning_data["share_token"] = secrets.token_urlsafe(8)
-        return planning_data["share_token"]
+        avant = planning_data.get("share_token")
+        token = share_action(planning_data, action)
+        return token if token != avant else store.NoWrite(token)
 
     try:
         data, token = await store.update_planning(planning_id, fn)
         if data is None:
             return {"error": "Planning introuvable"}
-        return {"url": f"/courses/{token}"}
+        return {"url": f"/courses/{token}" if token else None}
     except Exception as e:
-        logger.exception("Erreur génération lien de partage")
+        logger.exception("Erreur lien de partage")
         return {"error": str(e)}
 
 
@@ -152,7 +196,11 @@ async def courses_public(request: Request, token: str):
     (exempté de l'authentification), qui ne permet que de cocher."""
     planning = await db.get_planning_by_share_token(token)
     if not planning:
-        return HTMLResponse("Liste introuvable", status_code=404)
+        # Lien révoqué ou inconnu : la page vide sa file hors-ligne et le
+        # service worker oublie ce lien (courses-public.js, sw.js).
+        return templates.TemplateResponse(
+            request, "courses_public.html", {"revoque": True}, status_code=404,
+        )
 
     data = json.loads(planning["data_json"])
     return templates.TemplateResponse(
@@ -174,18 +222,21 @@ async def courses_public_etat(token: str):
     `version` change quand les lignes de la liste changent : la page se recharge."""
     planning = await db.get_planning_by_share_token(token)
     if not planning:
-        return _error("Liste introuvable", 404)
-    shop = await load_shopping_view(json.loads(planning["data_json"]))
-    return {"checked": shop["checked"], "version": shop["version"]}
+        return _revoque()
+    return await _etat(json.loads(planning["data_json"]))
 
 
 @router.post("/courses/{token}/check")
 async def courses_public_check(token: str, request: Request):
     """Coche / décoche depuis le lien public. Même corps que /api/shopping-check,
-    mais seule une clé d'article existante est acceptée."""
+    mais seule une clé d'article existante est acceptée. Au plus
+    CHECK_LIMIT requêtes par minute et par jeton (429 au-delà)."""
+    if not _check_autorise(token):
+        return JSONResponse({"error": "Trop de requêtes, réessaie dans un instant",
+                             "code": "limite"}, status_code=429)
     planning = await db.get_planning_by_share_token(token)
     if not planning:
-        return _error("Liste introuvable", 404)
+        return _revoque()
     body = await _body(request)
     item = str(body.get("item", ""))
     checked = bool(body.get("checked"))
@@ -193,10 +244,20 @@ async def courses_public_check(token: str, request: Request):
         planning["id"], lambda d: apply_check(d, item, checked, strict=True),
     )
     if data is None:
-        return _error("Liste introuvable", 404)
+        return _revoque()
     if not ok:
-        return _error("Article inconnu", 400)
+        return JSONResponse({"error": "Article inconnu", "code": "inconnu"}, status_code=400)
     return {"success": True}
+
+
+@router.get("/api/courses/{planning_id}/etat")
+async def courses_etat(planning_id: int):
+    """État des coches pour le rafraîchissement de la page planning : même
+    réponse que /courses/{token}/etat."""
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return _error("Planning introuvable", 404)
+    return await _etat(store._load(planning.get("data_json")))
 
 
 # ── Articles manuels, masques et placard (page planning, authentifiée) ──
@@ -209,7 +270,7 @@ async def courses_extra_add(planning_id: int, request: Request):
     if data is None:
         return _error("Planning introuvable", 404)
     if item is None:
-        return _error("Article vide ou liste pleine", 400)
+        return _error("Article refusé : nom vide ou sans lettre, ou liste pleine", 400)
     return {**await _liste_html(planning_id, data), "item": item}
 
 
@@ -255,3 +316,39 @@ async def courses_placard(planning_id: int, request: Request):
         return _error("Article inconnu", 404)
     await set_placard(nom, present)
     return await _liste_html(planning_id, data)
+
+
+@router.post("/api/courses/{planning_id}/extra/{key}/rayon")
+async def courses_extra_rayon(planning_id: int, key: str, request: Request):
+    """Range un article manuel dans un autre rayon : {"rayon": "Boissons"}."""
+    rayon = str((await _body(request)).get("rayon", ""))
+    data, ok = await mutate_planning_data(
+        planning_id, lambda d: set_extra_rayon(d, key, rayon),
+    )
+    if data is None:
+        return _error("Planning introuvable", 404)
+    if not ok:
+        return _error("Article ou rayon inconnu", 400)
+    return await _liste_html(planning_id, data)
+
+
+# ── Placard du foyer : écran de gestion ─────────────────────────────────
+
+@router.get("/api/placard")
+async def placard_liste():
+    """Contenu du placard (« Toujours à la maison »), trié par nom."""
+    return {"placard": await get_placard()}
+
+
+@router.delete("/api/placard/{nom}")
+async def placard_retirer(nom: str, planning: int | None = None):
+    """Retire un article du placard. Avec `?planning=<id>`, renvoie aussi la
+    liste de ce planning re-rendue (l'article y redevient visible)."""
+    if not await set_placard(nom, False):
+        return _error("Article absent du placard", 404)
+    res = {"success": True, "placard": await get_placard()}
+    if planning is not None:
+        p = await db.get_planning_with_recipes(planning)
+        if p:
+            res.update(await _liste_html(planning, store._load(p.get("data_json"))))
+    return res

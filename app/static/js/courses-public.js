@@ -4,7 +4,12 @@
 // Utilisable hors ligne : les coches passent par une file d'attente
 // (localStorage) rejouée au retour du réseau ; avec un service worker (HTTPS
 // ou localhost), la page se recharge aussi sans réseau.
-// Données serveur lues dans #page-data : {version}.
+// Lien révoqué (404 sur la page, l'état ou une coche) : file vidée, message
+// « Ce lien n'est plus valide », lien retiré du cache du service worker.
+// Les requêtes passent par fetch et non Common.requestJson : il faut le
+// statut HTTP (5xx et 429 : on garde la file ; 400 : article disparu ; 404 :
+// lien révoqué) et l'en-tête X-SW-Cache ; et la page n'a pas de session.
+// Données serveur lues dans #page-data : {version} ou {revoque: true}.
 (function () {
     'use strict';
     const {copyText, pageData} = window.Common;
@@ -90,6 +95,24 @@
     const SKEY = `courses-etat:${BASE}`;   // dernier état connu du serveur
     let memQueue = {};
     let flushing = false;
+    let revoque = false;
+
+    // Lien révoqué (404 sur la page, l'état ou une coche) : file et dernier
+    // état oubliés, message affiché, et le service worker retire ce lien de
+    // son cache (il ne doit plus s'ouvrir hors ligne).
+    function revoked() {
+        revoque = true;
+        memQueue = {};
+        lsDel(QKEY);
+        lsDel(SKEY);
+        setOffline(false);
+        status('');
+        if ($('pub-liste')) $('pub-liste').hidden = true;
+        if ($('pub-revoque')) $('pub-revoque').hidden = false;
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({type: 'forget-page', path: BASE});
+        }
+    }
 
     function readQueue() {
         const q = lsGet(QKEY);
@@ -145,8 +168,12 @@
                 }
                 // 5xx (serveur indisponible) : on garde la file pour plus tard.
                 if (r.status >= 500) { setOffline(true); return; }
+                // 404 : lien révoqué → tout est oublié.
+                if (r.status === 404) { revoked(); return; }
+                // 429 : trop de coches d'affilée → la file repartira plus tard.
+                if (r.status === 429) return;
                 // 400 : article disparu (liste modifiée) → abandonné, page
-                // rechargée ensuite. 404 : lien révoqué → abandonné.
+                // rechargée ensuite.
                 if (r.status === 400) reload = true;
                 if (r.ok) snapshotSet(item, checked);
                 const cur = readQueue();
@@ -177,12 +204,14 @@
     // → rechargement. Les articles encore en file gardent leur état local.
     // Renvoie true si l'état a été appliqué depuis le réseau.
     async function poll(force) {
+        if (revoque) return false;
         if (!force && document.visibilityState !== 'visible') return false;
         if (navigator.onLine === false) { setOffline(true); return false; }
         if (queued()) await flush();
         let d, fromCache;
         try {
             const r = await fetch(`${BASE}/etat`, {cache: 'no-store'});
+            if (r.status === 404) { revoked(); return false; }
             if (!r.ok) return false;
             // Réponse servie par le service worker faute de réseau.
             fromCache = r.headers.get('X-SW-Cache') === '1';
@@ -277,6 +306,8 @@
         e.preventDefault();
         b.closest('.shop-i')?.classList.toggle('src-open');
     });
+    // Lien révoqué dès l'ouverture (page 404) : on oublie, rien d'autre.
+    if (pageData().revoque) { revoked(); return; }
     document.addEventListener('change', onChange);
     $('pub-copy')?.addEventListener('click', copyList);
     setInterval(() => poll(false), REFRESH_MS);

@@ -18,11 +18,13 @@
 //    d'elle-même et de ses CSS/JS : lors de la toute première visite, elle
 //    n'est pas encore contrôlée par le service worker. Seules ces URL-là
 //    (statiques, liste publique, état) sont acceptées.
+//  - lien de partage révoqué : un 404 sur la liste ou son état (ou le
+//    message 'forget-page' de la page) retire ce lien du cache.
 //  - le reste (API POST, Notion, LLM) : réseau direct, jamais caché.
 // Seules les réponses 200 « normales » sont mises en cache : ni erreurs,
 // ni redirections (ex. renvoi vers /login quand l'auth est active).
 
-const CACHE = 'menu-planner-v5';
+const CACHE = 'menu-planner-v6';
 const OFFLINE_URL = '/static/offline.html';
 const MAX_PAGES = 20;
 // Inclut les CSS/JS de la liste de courses publique (demandés avec ?v=… :
@@ -73,6 +75,15 @@ function putPage(cache, pathname, res) {
   });
 }
 
+// Lien de partage révoqué (404) : la liste et son état quittent le cache,
+// elle ne s'ouvre plus hors ligne.
+function forgetPage(pathname) {
+  const page = pathname.replace(/\/etat$/, '').replace(/\/$/, '');
+  return caches.open(CACHE).then((c) => Promise.all([
+    c.delete(page), c.delete(page + '/'), c.delete(page + '/etat'),
+  ]));
+}
+
 // Range une réponse selon le type d'URL ; ignore toute autre URL.
 function store(cache, req, res) {
   const url = toUrl(req);
@@ -101,6 +112,11 @@ self.addEventListener('activate', (event) => {
 // versions et la borne des pages ne se croisent pas.
 self.addEventListener('message', (event) => {
   const data = event.data || {};
+  if (data.type === 'forget-page' && typeof data.path === 'string'
+      && (PAGE_RE.test(data.path) || ETAT_RE.test(data.path))) {
+    event.waitUntil(forgetPage(data.path));
+    return;
+  }
   if (data.type !== 'cache-urls' || !Array.isArray(data.urls)) return;
   const urls = data.urls.filter((u) => {
     try { return new URL(u, self.location.origin).origin === self.location.origin; } catch (e) { return false; }
@@ -151,6 +167,8 @@ self.addEventListener('fetch', (event) => {
         if (cacheable(res)) {
           const copy = res.clone();
           event.waitUntil(caches.open(CACHE).then((c) => putPage(c, url.pathname, copy)));
+        } else if (res.status === 404) {
+          event.waitUntil(forgetPage(url.pathname));
         }
         return res;
       }).catch(() =>
@@ -175,6 +193,8 @@ self.addEventListener('fetch', (event) => {
         if (cacheable(res)) {
           const copy = res.clone();
           event.waitUntil(caches.open(CACHE).then((c) => putPage(c, url.pathname, copy)));
+        } else if (res.status === 404) {
+          event.waitUntil(forgetPage(url.pathname));
         }
         return res;
       }).catch(() =>

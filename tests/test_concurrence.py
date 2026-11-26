@@ -36,6 +36,9 @@ def client(tmp_path, monkeypatch):
     async def _noop(*a, **k):
         return True
     monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
+    # M06 : les coches publiques sont limitées à 120 par minute et par jeton ;
+    # le scénario de charge en envoie 280 d'affilée.
+    monkeypatch.setattr("app.routers.courses.CHECK_LIMIT", 10**6)
     with TestClient(main.app) as c:
         yield c
 
