@@ -1,0 +1,35 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # Starlette : ancienne signature TemplateResponse(name, {"request": ...}).
+    # À retirer quand les routes passeront à TemplateResponse(request, name) (L07).
+    "ignore:The `name` is not the first parameter anymore:DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "B008",  # Depends()/Form()/Query() en valeur par défaut : idiome FastAPI
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Dette existante, tolérée en attendant le nettoyage du découpage de main.py (L07).
+# Retirer une entrée dès que le fichier est propre.
+"app/cooklang.py" = ["F401", "F841"]
+"app/database.py" = ["E501", "F401", "I001"]
+"app/main.py" = ["E501", "E741", "I001"]
+"app/notion_client.py" = ["E741", "I001"]
+"app/text_utils.py" = ["E741"]
+"scripts/insert_recettes.py" = ["I001"]
+"scripts/migrate_taxo.py" = ["I001"]
+"scripts/seed_briques.py" = ["I001"]
+# Tests : données de test longues, imports groupés à la main.
+"tests/**" = ["E401", "E501", "E702", "E741", "I001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests"]

@@ -2,7 +2,6 @@
 
 import asyncio
 import html
-import httpx
 import ipaddress
 import json
 import logging
@@ -10,10 +9,12 @@ import random
 import re
 import socket
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+from urllib.parse import urljoin, urlparse
 
+import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
-from urllib.parse import urlparse
 
 from app.config import (
     BASE_OPTIONS,
@@ -64,7 +65,7 @@ class RecipeExtraction(BaseModel):
     @classmethod
     def _coerce_ing_list(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            return [l.strip() for l in v.split("\n") if l.strip()]
+            return [line.strip() for line in v.split("\n") if line.strip()]
         if isinstance(v, list):
             return [str(x).strip() for x in v if str(x).strip()]
         return []
@@ -128,6 +129,7 @@ class ClassifyResponse(BaseModel):
 # Garde anti-SSRF : on ne fetch que du http(s) public, jamais une IP interne.
 _MAX_FETCH_BYTES = 5 * 1024 * 1024  # 5 Mo : refus des réponses trop grosses
 _FETCH_TIMEOUT = 8.0
+_MAX_REDIRECTS = 3
 
 
 async def _is_public_http_url(url: str) -> bool:
@@ -151,30 +153,43 @@ async def _is_public_http_url(url: str) -> bool:
     return True
 
 
-async def _safe_fetch_html(url: str) -> str:
+async def _safe_fetch_html(url: str, timeout: float = _FETCH_TIMEOUT) -> str:
     """Télécharge le HTML d'une URL publique, avec cap de taille et timeout.
-    Retourne "" si l'URL est interne/illégitime ou en cas d'erreur."""
-    if not await _is_public_http_url(url):
-        logger.warning(f"URL rejetée (non publique / schéma invalide) : {url}")
-        return ""
+    Retourne "" si l'URL est interne/illégitime ou en cas d'erreur.
+
+    Les redirections sont suivies à la main (au plus `_MAX_REDIRECTS`) : chaque
+    cible est revalidée par `_is_public_http_url`, pour qu'une page publique ne
+    puisse pas rebondir vers une adresse interne (SSRF par redirection)."""
+    current = url
     try:
-        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT, follow_redirects=True) as client:
-            async with client.stream("GET", url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }) as resp:
-                resp.raise_for_status()
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in resp.aiter_bytes():
-                    total += len(chunk)
-                    if total > _MAX_FETCH_BYTES:
-                        logger.warning(f"Réponse trop grosse (> {_MAX_FETCH_BYTES} o), tronquée : {url}")
-                        break
-                    chunks.append(chunk)
-                return b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            for _ in range(_MAX_REDIRECTS + 1):
+                if not await _is_public_http_url(current):
+                    logger.warning(f"URL rejetée (non publique / schéma invalide) : {current}")
+                    return ""
+                async with client.stream("GET", current, headers={"User-Agent": _UA}) as resp:
+                    if resp.is_redirect:
+                        location = resp.headers.get("location", "")
+                        if not location:
+                            return ""
+                        current = urljoin(str(resp.url), location)
+                        continue
+                    resp.raise_for_status()
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > _MAX_FETCH_BYTES:
+                            logger.warning(f"Réponse trop grosse (> {_MAX_FETCH_BYTES} o), tronquée : {url}")
+                            break
+                        chunks.append(chunk)
+                    return b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+            logger.warning(f"Trop de redirections (> {_MAX_REDIRECTS}) : {url}")
+            return ""
     except Exception as e:
         logger.warning(f"Impossible de récupérer la page {url}: {e}")
         return ""
+
 
 SYSTEM_PROMPT_INGREDIENTS = """Tu es un assistant culinaire. Pour une recette donnée (nom + éventuellement URL), liste les ingrédients nécessaires.
 
@@ -188,7 +203,7 @@ RÈGLES :
 Répond UNIQUEMENT avec ce JSON :
 {"ingredients": [{"nom": "...", "quantite": "...", "unite": "..."}]}
 
-Pas de texte avant ou après le JSON."""
+Pas de texte avant ou après le JSON."""  # noqa: E501
 
 
 def _clean_text(s: str) -> str:
@@ -246,7 +261,10 @@ def _flatten_instructions(val: Any) -> list[str]:
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
-_ING_HINT = re.compile(r"^\s*[\d½¼¾]|(\b(?:g|kg|mg|ml|cl|dl|l|cuill|pinc|gousse|tranche|sachet|càs|càc|c\.)\b)", re.IGNORECASE)
+_ING_HINT = re.compile(
+    r"^\s*[\d½¼¾]|(\b(?:g|kg|mg|ml|cl|dl|l|cuill|pinc|gousse|tranche|sachet|càs|càc|c\.)\b)",
+    re.IGNORECASE,
+)
 
 
 _PREP_MARKERS = ("préparation", "preparation", "instruction", "étape", "etape", "réalisation", "realisation")
@@ -260,11 +278,11 @@ def _join_fragments(lines: list[str]) -> list[str]:
     une ponctuation forte (. ! ? … :) → une étape = une vraie phrase."""
     out: list[str] = []
     buf = ""
-    for l in lines:
-        l = l.strip()
-        if not l:
+    for raw in lines:
+        line = raw.strip()
+        if not line:
             continue
-        buf = f"{buf}, {l}" if buf else l
+        buf = f"{buf}, {line}" if buf else line
         if re.search(r"[.!?…:]$", buf):
             out.append(buf)
             buf = ""
@@ -282,24 +300,24 @@ def _split_blob(blob: str) -> tuple[list[str], list[str]]:
     (ex. platetrecette : tout fourré dans recipeIngredient)."""
     if not blob:
         return [], []
-    lines = [l.strip(" -•\t\xa0") for l in re.split(r"[\n\r]+", blob.replace("\t", "\n"))]
+    lines = [line.strip(" -•\t\xa0") for line in re.split(r"[\n\r]+", blob.replace("\t", "\n"))]
     ings: list[str] = []
     instrs: list[str] = []
     mode = None
-    for l in lines:
-        low = l.lower()
-        if "ingr" in low and "dient" in low and len(l) < 60:
+    for line in lines:
+        low = line.lower()
+        if "ingr" in low and "dient" in low and len(line) < 60:
             mode = "ing"
             continue
-        if any(k in low for k in _PREP_MARKERS) and len(l) < 40:
+        if any(k in low for k in _PREP_MARKERS) and len(line) < 40:
             mode = "instr"
             continue
-        if not l:
+        if not line:
             continue
-        if mode == "ing" and len(l) <= 120:
-            ings.append(l)
+        if mode == "ing" and len(line) <= 120:
+            ings.append(line)
         elif mode == "instr":
-            instrs.append(l)
+            instrs.append(line)
     return ings, _join_fragments(instrs)
 
 
@@ -325,7 +343,8 @@ def _scrape_ingredient_list(html_text: str) -> list[str]:
         lm = re.search(r"<ul[^>]*>(.*?)</ul>", window, re.S | re.I)
         if not lm:
             continue
-        items = [c for c in (_clean_text(x) for x in re.findall(r"<li[^>]*>(.*?)</li>", lm.group(1), re.S | re.I)) if c and len(c) <= 120]
+        raw_items = re.findall(r"<li[^>]*>(.*?)</li>", lm.group(1), re.S | re.I)
+        items = [c for c in (_clean_text(x) for x in raw_items) if c and len(c) <= 120]
         if len(items) < 2:
             continue
         score = sum(1 for c in items if _ING_HINT.search(c))
@@ -642,7 +661,7 @@ class LLMClient:
             self._model = settings.gemini_model
             self._url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{self._model}:generateContent?key={self._api_key}"
+                f"{self._model}:generateContent"
             )
         elif self.provider == "groq":
             self._api_key = settings.groq_api_key
@@ -842,7 +861,8 @@ class LLMClient:
             "generationConfig": gen_config,
         }
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(self._url, json=payload)
+            # Clé en en-tête : elle ne doit jamais apparaître dans une URL (logs, traces d'erreur).
+            resp = await client.post(self._url, json=payload, headers={"x-goog-api-key": self._api_key})
             resp.raise_for_status()
             data = resp.json()
             usage = data.get("usageMetadata", {})
@@ -867,15 +887,15 @@ class LLMClient:
         context = ""
         if url:
             try:
-                async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
-                    resp = await client.get(url, headers={"User-Agent": _UA})
-                if resp.status_code < 400:
-                    ld = _extract_jsonld_recipe(resp.text)
+                # Fetch durci (anti-SSRF, redirections revalidées) : "" si refusé ou en erreur.
+                page = await _safe_fetch_html(url, timeout=12)
+                if page:
+                    ld = _extract_jsonld_recipe(page)
                     if ld and ld.get("ingredients"):
                         context = ("Ingrédients EXACTS de la page (structure-les fidèlement, "
                                    "sans rien inventer ni ajouter) :\n" + "\n".join(ld["ingredients"]))
                     else:
-                        txt = _visible_text(resp.text)[:3000]
+                        txt = _visible_text(page)[:3000]
                         if txt:
                             context = "Contenu de la page :\n" + txt
             except Exception as e:
@@ -1104,7 +1124,7 @@ Extrais sans rien inventer ni reformuler :
 - instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
 
 Réponds UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "base": ["..."], "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+{{"nom": "...", "type_repas": "...", "base": ["..."], "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""  # noqa: E501
 
         try:
             r: RecipeExtraction = await self._complete(
@@ -1138,7 +1158,10 @@ Réponds UNIQUEMENT ce JSON :
         Recopie sans inventer — utile quand il n'y a pas d'URL source."""
         raw_text = (text or "").strip()[:6000]
         if not raw_text:
-            return {"nom": "", "type_repas": "", "tags": [], "base": [], "ingredients": [], "instructions": "", "source": "llm-text"}
+            return {
+                "nom": "", "type_repas": "", "tags": [], "base": [], "ingredients": [],
+                "instructions": "", "source": "llm-text",
+            }
 
         user_prompt = f"""Texte d'une recette (collé par l'utilisateur) :
 
@@ -1153,7 +1176,7 @@ Structure-le sans rien inventer ni reformuler :
 - instructions : étapes de cuisson recopiées textuellement, séparées par des retours à la ligne
 
 Réponds UNIQUEMENT ce JSON :
-{{"nom": "...", "type_repas": "...", "base": ["..."], "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""
+{{"nom": "...", "type_repas": "...", "base": ["..."], "tags": ["..."], "ingredients": ["..."], "instructions": "..."}}"""  # noqa: E501
 
         try:
             r: RecipeExtraction = await self._complete(
