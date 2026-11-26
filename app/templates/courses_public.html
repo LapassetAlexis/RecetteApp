@@ -5,11 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Liste de courses — Menu Planner</title>
     <meta name="theme-color" content="#e67e22">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Liste de courses">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
     <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
     <link rel="stylesheet" href="/static/css/courses.css?v={{ asset_version }}">
+    {# Bandeau hors-ligne : informatif (orange), pas une erreur. courses.css est hors du lot L15. #}
+    <style>.pub-offline { background:#fff3e0; color:#8a4b08; }</style>
 </head>
 <body>
     {% macro ligne(item) -%}
@@ -32,6 +35,7 @@
             <button type="button" class="pub-copy" id="pub-copy">📋 Copier</button>
             {% endif %}
         </div>
+        <p class="pub-status pub-offline" id="pub-offline" role="status" hidden>📶 Hors ligne — tes coches seront envoyées au retour du réseau.</p>
         <p class="pub-status" id="pub-status" role="status" hidden></p>
 
         {% if repas_libres %}
