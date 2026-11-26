@@ -19,7 +19,7 @@ import json
 from contextlib import asynccontextmanager
 
 from app.deps import db
-from app.services.planning import _recipe_rows
+from app.services.planning import recipe_rows
 
 # Clé : (boucle asyncio, identifiant). Un asyncio.Lock est lié à la boucle où
 # il a servi la première fois ; les tests ouvrent une boucle par appel.
@@ -55,12 +55,17 @@ class NoWrite:
         self.value = value
 
 
-def _load(raw) -> dict:
+def load(raw) -> dict:
+    """`data_json` lu de façon tolérante : {} s'il est vide, illisible ou pas
+    un objet."""
     try:
         data = json.loads(raw or "{}")
     except (json.JSONDecodeError, TypeError):
         data = {}
     return data if isinstance(data, dict) else {}
+
+
+_load = load   # ancien nom (routers/courses.py) ; retiré par M11
 
 
 async def update_planning(planning_id: int, fn, recipes: bool = False, **columns):
@@ -78,7 +83,7 @@ async def update_planning(planning_id: int, fn, recipes: bool = False, **columns
         planning = await db.get_planning_with_recipes(planning_id)
         if not planning:
             return None, None
-        data = _load(planning.get("data_json"))
+        data = load(planning.get("data_json"))
         res = fn(planning, data)
         if inspect.isawaitable(res):
             res = await res
@@ -88,7 +93,7 @@ async def update_planning(planning_id: int, fn, recipes: bool = False, **columns
         if recipes or columns:
             await db.update_planning(
                 planning_id=planning_id, data_json=data_json,
-                recipes=_recipe_rows(data.get("plats") or []), **columns,
+                recipes=recipe_rows(data.get("plats") or []), **columns,
             )
         else:
             await db.update_planning_data(planning_id, data_json)
