@@ -13,14 +13,10 @@ import json
 import logging
 
 from app.deps import db, notion
-from app.services.planning import (
-    _brique_ingredients,
-    _parse_slots,
-    _place_brique,
-    _set_main,
-)
-from app.services.shopping import _ingredients_to_text, _refresh_shopping_and_save
-from app.text_utils import parse_ingredient_line
+from app.services.planning import set_main
+from app.services.planning_batch import brique_ingredients, parse_slots, place_brique_repas
+from app.services.shopping import ingredients_to_text, refresh_shopping_and_save
+from app.text_utils import parse_ingredient_lines
 
 logger = logging.getLogger(__name__)
 _MANQUANT = "Repas non trouvé dans le planning"
@@ -30,7 +26,7 @@ def slots_from_body(body: dict) -> list[tuple[int, str]] | None:
     """Créneaux visés : `slots` [{jour, moment}, …] (plusieurs jours d'une case
     fusionnée) ou, pour la compatibilité, `jour` + `moment`. None si invalide."""
     if "slots" in body:
-        parsed = _parse_slots(body.get("slots"))
+        parsed = parse_slots(body.get("slots"))
         return None if parsed is None else [(s["jour"], s["moment"]) for s in parsed]
     jour, moment = body.get("jour"), body.get("moment")
     if isinstance(jour, bool) or jour not in range(1, 8) or moment not in ("midi", "soir"):
@@ -82,7 +78,7 @@ async def _create_and_place(planning_id: int, slots, create, place) -> dict:
         return None
 
     try:
-        res = await _refresh_shopping_and_save(planning_id, mutate)
+        res = await refresh_shopping_and_save(planning_id, mutate)
     except Exception:
         await _archive(page_id)
         raise
@@ -102,16 +98,15 @@ async def _archive(page_id: str) -> None:
 
 async def place_free_meal(planning_id: int, body: dict) -> dict:
     """Crée une recette minimale « repas libre » (nom + ingrédients, une ligne
-    par ingrédient) et la place comme plat dans le(s) créneau(x)."""
+    par ingrédient ; « sel, poivre » en donne deux) et la place comme plat dans
+    le(s) créneau(x)."""
     slots = slots_from_body(body)
     nom = (body.get("nom") or "").strip()
     if not slots or not nom:
         return {"error": "Paramètres invalides (jour 1-7, moment midi/soir, nom)"}
     ingredients_text = body.get("ingredients") or ""
-    structured = [
-        i for i in (parse_ingredient_line(line) for line in ingredients_text.split("\n"))
-        if i and i["nom"]
-    ]
+    structured = [i for line in ingredients_text.split("\n")
+                  for i in parse_ingredient_lines(line) if i.get("nom")]
 
     async def create():
         result = await notion.create_recipe(nom=nom, repas="Plat")
@@ -121,15 +116,15 @@ async def place_free_meal(planning_id: int, body: dict) -> dict:
         # Ingrédients : Notion + cache local structuré (mise à l'échelle,
         # nutrition, liste de courses).
         if structured:
-            await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+            await notion.update_ingredients(page_id, ingredients_to_text(structured))
             await db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
         return page_id, result.get("url", "")
 
     def place(cible, page_id, url):
         # Nouveau plat principal : accompagnements réinitialisés ; vraie recette
         # Notion créée → plus un « repas libre ».
-        _set_main(cible, nom, {"id": page_id, "url": "", "notion_url": url,
-                               "repas": ["Plat"], "tags": []})
+        set_main(cible, nom, {"id": page_id, "url": "", "notion_url": url,
+                              "repas": ["Plat"], "tags": []})
         cible["libre"] = False
 
     return await _create_and_place(planning_id, slots, create, place)
@@ -157,12 +152,12 @@ async def place_brique(planning_id: int, body: dict) -> dict:
         page_id = result.get("id", "")
         if not page_id:
             return "Création de la brique impossible"
-        structured = _brique_ingredients(nom, quantite, unite)
-        await notion.update_ingredients(page_id, _ingredients_to_text(structured))
+        structured = brique_ingredients(nom, quantite, unite)
+        await notion.update_ingredients(page_id, ingredients_to_text(structured))
         await db.save_enriched(page_id, nom, ingredients=json.dumps(structured))
         return page_id, result.get("url", "")
 
     def place(cible, page_id, url):
-        _place_brique(cible, slot, nom, page_id, url, base)
+        place_brique_repas(cible, slot, nom, page_id, url, base)
 
     return await _create_and_place(planning_id, slots, create, place)
