@@ -31,7 +31,7 @@
             <span class="pub-count">{{ nb_restants }} / {{ nb_total }} restant{{ 's' if nb_restants > 1 else '' }}</span>
             {% endif %}
             {% if courses_par_rayon or repas_libres %}
-            <button type="button" class="pub-copy" id="pub-copy" onclick="copyList()">📋 Copier</button>
+            <button type="button" class="pub-copy" id="pub-copy">📋 Copier</button>
             {% endif %}
         </div>
 
@@ -73,6 +73,7 @@
         </div>
         {% endif %}
     </main>
+    <script src="/static/js/common.js?v={{ asset_version }}"></script>
     <script>
     // 🍽 « recettes liées » : au doigt, aucun survol possible → un tap déplie la
     // liste des recettes sous l'ingrédient.
@@ -101,29 +102,14 @@
             });
             lines.push('');
         });
-        const txt = lines.join('\n').trim();
+        // Copie robuste (repli execCommand hors contexte sécurisé) : common.js.
         const btn = document.getElementById('pub-copy');
-        const done = () => { btn.textContent = '✓ Copié'; setTimeout(() => btn.textContent = '📋 Copier', 1500); };
-        const fail = () => { btn.textContent = '✗ Échec'; setTimeout(() => btn.textContent = '📋 Copier', 1500); };
-        // Repli execCommand : hors contexte sécurisé (http via IP locale sur
-        // mobile), navigator.clipboard est ABSENT → l'appel jetterait une
-        // exception synchrone. On teste donc son existence avant de l'utiliser.
-        const legacy = () => {
-            const ta = document.createElement('textarea');
-            ta.value = txt;
-            ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-            document.body.appendChild(ta); ta.focus(); ta.select();
-            let ok = false;
-            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-            ta.remove();
-            ok ? done() : fail();
-        };
-        if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(txt).then(done, legacy);
-        } else {
-            legacy();
-        }
+        Common.copyText(lines.join('\n').trim()).then(ok => {
+            btn.textContent = ok ? '✓ Copié' : '✗ Échec';
+            setTimeout(() => btn.textContent = '📋 Copier', 1500);
+        });
     }
+    document.getElementById('pub-copy')?.addEventListener('click', copyList);
     </script>
 </body>
 </html>
