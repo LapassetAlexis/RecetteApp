@@ -4,27 +4,9 @@
 <div class="hero">
     <h1>📅 Planning semaine</h1>
     <p class="hero-sub">
-        <strong>{{ titre or ("Semaine du " ~ planning.week_start) }}</strong>
-        — {{ planning.saison }} — {{ planning.nb_personnes }} pers.
-        {% if planning.ingredients_force and planning.ingredients_force != "" %}
-        <br><small class="hero-force">🥫 Restes : {{ planning.ingredients_force }}</small>
-        {% endif %}
+        <strong>{{ titre or ("Semaine du " ~ planning.week_start) }}</strong>{% if planning.nb_personnes %} — {{ planning.nb_personnes }} pers.{% endif %}
     </p>
 </div>
-
-{% if creneaux_non_resolus %}
-<div class="alert alert-warn">
-    ⚠ Certains créneaux n'ont pas pu être remplis avec une recette valide du catalogue :
-    <strong>{{ creneaux_non_resolus | join(', ') }}</strong>.
-    Change-les manuellement (↻) ou ajoute des recettes.
-</div>
-{% endif %}
-
-{% if briques_manquantes %}
-<div class="alert alert-warn">
-    ⚠ {{ briques_manquantes }}
-</div>
-{% endif %}
 
 {% if not valide %}
 <div class="card validate-bar">
@@ -58,7 +40,7 @@
         <span class="meal-pers" title="Personnes pour ce repas">👤 {{ plat.persons }}</span>
         {% endif %}
         {% endif %}
-        <button class="meal-ch" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}" title="Changer la recette">↻</button>
+        <button class="meal-ch" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}" title="Changer la recette" aria-label="Changer la recette">↻</button>
     </div>
     {% set link = ('/recette/' ~ plat.notion_id) if plat.notion_id else plat.url %}
     {% if link %}
@@ -79,8 +61,8 @@
             <span class="side-txt">+
             {% if acclink %}<a href="{{ acclink }}"{% if not acc.notion_id %} target="_blank" rel="noopener"{% endif %}>{{ acc.nom_recette | clean_title }}</a>
             {% else %}{{ acc.nom_recette | clean_title }}{% endif %}{% if acc.libre or not acc.notion_id %} <span class="side-warn" title="Accompagnement libre : pense à acheter les ingrédients (voir la liste de courses).">📝</span>{% elif acc.non_enrichi %} <span class="side-warn" title="Accompagnement pas terminé : aucun ingrédient enregistré.">⚠</span>{% endif %}</span>
-            <button class="side-ch" data-nom="{{ acc.nom_recette }}" title="Changer cet accompagnement">↻</button>
-            <button class="side-rm" data-nom="{{ acc.nom_recette }}" title="Retirer cet accompagnement">✕</button>
+            <button class="side-ch" data-nom="{{ acc.nom_recette }}" title="Changer cet accompagnement" aria-label="Changer l'accompagnement {{ acc.nom_recette | clean_title }}">↻</button>
+            <button class="side-rm" data-nom="{{ acc.nom_recette }}" title="Retirer cet accompagnement" aria-label="Retirer l'accompagnement {{ acc.nom_recette | clean_title }}">✕</button>
         </span>
     {% endfor %}
         <button class="side-add" title="Ajouter un accompagnement">➕ accompagnement</button>
@@ -155,20 +137,20 @@
 <div class="bulk" id="bulk" style="display:none">
     <span id="bulk-nb">0</span>
     <button class="btn btn-sm" id="bulk-go">↻ Changer</button>
-    <button class="btn btn-sm btn-ghost" id="bulk-clr">✕</button>
+    <button class="btn btn-sm btn-ghost" id="bulk-clr" title="Annuler la sélection" aria-label="Annuler la sélection">✕</button>
 </div>
 
 <!-- Modal -->
 <div id="modal" class="modal" style="display:none">
     <div class="modal-bg"></div>
-    <div class="modal-box">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-top">
-            <h3>↻ Changer</h3>
-            <button class="modal-x" onclick="c()">✕</button>
+            <h3 id="modal-title">↻ Changer</h3>
+            <button class="modal-x" onclick="c()" title="Fermer" aria-label="Fermer">✕</button>
         </div>
         <div class="modal-body">
             <p id="modal-ctx" class="modal-ctx"></p>
-            <input type="text" id="flt" placeholder="Filtrer..." class="inp">
+            <input type="text" id="flt" placeholder="Filtrer..." class="inp" aria-label="Filtrer les recettes">
             <div id="alt-list"></div>
             <div id="free-meal" style="display:none">
                 <button type="button" class="btn btn-ghost btn-sm" id="free-toggle">➕ Repas libre</button>
@@ -269,15 +251,15 @@
 <div class="card">
     <div class="shop-h">
         <h2>🛒 Liste de courses</h2>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div class="shop-tools">
             <span class="shop-n" id="shop-n">{{ liste_courses|length }}</span>
             {% if liste_courses or repas_libres %}
             <button class="btn btn-ghost btn-sm" id="btn-copy" onclick="copyShop()" title="Copier la liste">📋 Copier</button>
             {% endif %}
             {% if liste_courses %}
             <button class="btn btn-ghost btn-sm" id="btn-share" onclick="partagerListe()" title="Lien de partage public (lecture seule)">🔗 Partager la liste</button>
-            <button class="btn btn-ghost btn-sm" onclick="window.print()" title="Imprimer la liste">🖨️</button>
-            <button class="btn btn-ghost btn-sm" id="btn-regen" onclick="genShop(true)" title="Régénérer la liste">↻</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.print()" title="Imprimer la liste" aria-label="Imprimer la liste">🖨️</button>
+            <button class="btn btn-ghost btn-sm" id="btn-regen" onclick="genShop(true)" title="Régénérer la liste" aria-label="Régénérer la liste">↻</button>
             {% endif %}
         </div>
     </div>
@@ -313,8 +295,8 @@
     </div>
     {% else %}
     <div class="card" style="text-align:center;padding:30px;">
-        <p style="font-size:1.2rem;margin-bottom:10px;">📋 Planning validé !</p>
-        <p style="color:var(--t2);margin-bottom:16px;">Génère la liste de courses maintenant.</p>
+        <p style="font-size:1.2rem;margin-bottom:10px;">🛒 Aucun ingrédient pour l'instant</p>
+        <p style="color:var(--t2);margin-bottom:16px;">Génère la liste de courses à partir des repas de la semaine.</p>
         <button class="btn btn-primary btn-lg" id="btn-shop" onclick="genShop()">🛒 Générer la liste de courses</button>
         <p id="shop-status" class="loading-tip" style="margin-top:10px;"></p>
     </div>
@@ -346,7 +328,6 @@ async function validerSemaine() {
 const DAY_LABELS = {{ day_labels | tojson }};
 const dayShort = i => (DAY_LABELS[i-1] || {}).court || ('J' + i);
 const dayLong = i => (DAY_LABELS[i-1] || {}).long || ('Jour ' + i);
-const RAYON_ORDER = {{ rayon_order | tojson }};
 
 // ── Persistance des cases cochées (côté serveur, cache offline) ────
 // L'état de référence vient du serveur (courses_checked). On garde localStorage
@@ -446,7 +427,7 @@ document.getElementById('bulk-go').onclick = ()=>{
     if (!bul.length) return;
     sideMode=false; document.querySelector('#modal h3').textContent='↻ Changer';
     document.getElementById('modal-ctx').textContent = bul.map(slotLabel).join(', ');
-    document.getElementById('modal').style.display='flex';
+    openModal();
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 };
@@ -454,7 +435,7 @@ document.querySelectorAll('.meal-ch').forEach(b=>b.onclick=function(){
     bul=[{jours:parseJours(this),m:this.dataset.moment}];
     sideMode=false; document.querySelector('#modal h3').textContent='↻ Changer';
     document.getElementById('modal-ctx').textContent=slotLabel(bul[0]);
-    document.getElementById('modal').style.display='flex';
+    openModal();
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 });
@@ -467,7 +448,7 @@ function openSidePicker(slot, replace){
     sideMode=true; sideSlot=slot; sideReplace=replace||null;
     document.getElementById('modal-ctx').textContent=slotLabel(slot)+' — accompagnement';
     document.querySelector('#modal h3').textContent = replace ? '🥦 Changer l\'accompagnement' : '🥦 Ajouter un accompagnement';
-    document.getElementById('modal').style.display='flex';
+    openModal();
     document.getElementById('alt-list').innerHTML='<p class="empty">⏳</p>';
     la();
 }
@@ -512,14 +493,33 @@ async function la() {
     if(sideMode) alts=alts.filter(a=>(a.base||[]).includes('Légume'));
     const el=document.getElementById('alt-list');
     if (!alts.length) { el.innerHTML='<p class="empty">Aucune alternative.</p>'; return; }
-    el.innerHTML=alts.map(a=>{
-        const brique = a.nature==='Ingrédient';
-        let chip='';
-        if(brique) chip=`<span class="chip chip-r">🧱 ${((a.base||[]).join('/'))||'brique'}</span>`;
-        else if((a.repas||[]).length) chip=`<span class="chip chip-r">${a.repas.join('/')}</span>`;
-        return `<div class="alt" data-n="${a.nom.toLowerCase()}"><span>${a.nom}</span>${chip}<button class="btn btn-sm btn-primary selt" data-n="${a.nom}">Choisir</button></div>`;
-    }).join('');
-    document.querySelectorAll('.selt').forEach(b=>b.onclick=()=>{ if(sideMode){ setSide(sideSlot,b.dataset.n); } else { rpl(b.dataset.n); } });
+    // Construction DOM (textContent) : un nom contenant « " < > » reste intact
+    // et le bouton « Choisir » envoie le nom exact (pas d'injection HTML).
+    el.replaceChildren(...alts.map(a=>{
+        const row=document.createElement('div');
+        row.className='alt';
+        row.dataset.n=String(a.nom).toLowerCase();
+        const name=document.createElement('span');
+        name.textContent=a.nom;
+        row.appendChild(name);
+        let chipTxt='';
+        if(a.nature==='Ingrédient') chipTxt='🧱 '+(((a.base||[]).join('/'))||'brique');
+        else if((a.repas||[]).length) chipTxt=a.repas.join('/');
+        if(chipTxt){
+            const chip=document.createElement('span');
+            chip.className='chip chip-r';
+            chip.textContent=chipTxt;
+            row.appendChild(chip);
+        }
+        const btn=document.createElement('button');
+        btn.type='button';
+        btn.className='btn btn-sm btn-primary selt';
+        btn.textContent='Choisir';
+        btn.setAttribute('aria-label','Choisir '+a.nom);
+        btn.addEventListener('click',()=>{ if(sideMode){ setSide(sideSlot,a.nom); } else { rpl(a.nom); } });
+        row.appendChild(btn);
+        return row;
+    }));
     document.getElementById('flt').oninput=function(){const q=this.value.toLowerCase();document.querySelectorAll('.alt').forEach(e=>e.style.display=e.dataset.n.includes(q)?'flex':'none');};
 }
 async function rpl(n) {
@@ -617,27 +617,6 @@ document.getElementById('brique-go').onclick = async function(){
     else { this.disabled = false; this.textContent = 'Créer et placer'; }
 };
 
-const cap = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : s;
-function usl(items) {
-    const g=document.getElementById('shop-g');
-    document.getElementById('shop-n').textContent=items?.length||0;
-    if(!g) return;
-    if(!items||!items.length){g.innerHTML='<p class="empty">Aucun.</p>';return;}
-    // Grouper par rayon (ordre magasin)
-    const buckets={};
-    items.forEach(i=>{ const r=i.rayon||'Autre'; (buckets[r]=buckets[r]||[]).push(i); });
-    const order=[...RAYON_ORDER.filter(r=>buckets[r]), ...Object.keys(buckets).filter(r=>!RAYON_ORDER.includes(r))];
-    g.innerHTML=order.map(r=>`<div class="shop-rayon" data-rayon="${r}"><h3 class="rayon-h">${r} <span class="rayon-n">${buckets[r].length}</span></h3><div class="shop-grid">`+
-        buckets[r].map(i=>{
-            const srcs=(i.recettes&&i.recettes.length)?i.recettes.join(' · '):'';
-            const srcHtml=srcs
-                ? `<button type="button" class="shop-src" title="${srcs.replace(/"/g,'&quot;')}" aria-label="Voir les recettes liées">🍽</button><span class="shop-srcs">🍽 ${srcs}</span>`
-                : '';
-            return `<label class="shop-i" data-item="${i.nom.toLowerCase()}"><input type="checkbox" class="shop-c"> <span>${cap(i.nom)}</span>${i.quantite?`<small>${i.quantite} ${i.unite}</small>`:''}${srcHtml}</label>`;
-        }).join('')+
-        `</div></div>`).join('');
-    bindShopItems();
-}
 // Avertissement recettes non enrichies (posé avant reload par genShop).
 (function(){ const w=sessionStorage.getItem('shop_warn_'+pid);
     if(w){ sessionStorage.removeItem('shop_warn_'+pid); toast(w,'error'); } })();
@@ -755,7 +734,29 @@ async function genShop(regen) {
         if(btn){ btn.disabled=false; btn.textContent='🛒 Réessayer'; }
     }
 }
-function c(){document.getElementById('modal').style.display='none';sideMode=false;sideSlot=null;}
+// ── Modale : ouverture / fermeture accessibles ──────────────────────
+// Mémorise l'élément déclencheur pour lui rendre le focus à la fermeture.
+let _modalOpener=null;
+function openModal(){
+    const m=document.getElementById('modal');
+    if(m.style.display!=='flex') _modalOpener=document.activeElement;
+    m.style.display='flex';
+    const f=document.getElementById('flt');
+    f.value='';
+    // Pointeur précis (desktop) : focus sur le filtre. Tactile : sur « Fermer »,
+    // pour ne pas ouvrir le clavier virtuel d'office.
+    const fine=window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+    (fine ? f : document.querySelector('#modal .modal-x')).focus();
+}
+function c(){
+    document.getElementById('modal').style.display='none';
+    sideMode=false; sideSlot=null;
+    if(_modalOpener && document.contains(_modalOpener)) _modalOpener.focus();
+    _modalOpener=null;
+}
 document.querySelector('.modal-bg')?.addEventListener('click',c);
+document.addEventListener('keydown',e=>{
+    if(e.key==='Escape' && document.getElementById('modal').style.display==='flex'){ e.preventDefault(); c(); }
+});
 </script>
 {% endblock %}

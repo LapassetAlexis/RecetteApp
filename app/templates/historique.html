@@ -30,7 +30,7 @@
     <div class="hist-item" data-preview="{{ p.id }}">
         <a href="/planning/{{ p.id }}" style="text-decoration:none;color:inherit;display:block;">
             <div class="date">📅 {{ p.label }}</div>
-            <div class="meta">{{ p.saison }} · {{ p.nb_personnes }} pers.</div>
+            {% if p.nb_personnes %}<div class="meta">{{ p.nb_personnes }} pers.</div>{% endif %}
             <div class="meta">Créé le {{ p.created_at[:10] }}</div>
         </a>
         <button class="btn btn-ghost btn-sm hist-dup" data-id="{{ p.id }}" title="Refaire cette semaine en brouillon">🔁 Refaire</button>
@@ -41,8 +41,8 @@
 
 {% if not plannings and not drafts %}
 <div class="card text-center">
-    <p>Aucun planning généré pour le moment.</p>
-    <a href="/" class="btn btn-primary">Générer un planning →</a>
+    <p>Aucun planning pour le moment.</p>
+    <a href="/" class="btn btn-primary">Construire une semaine →</a>
 </div>
 {% endif %}
 
