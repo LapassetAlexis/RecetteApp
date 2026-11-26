@@ -1,17 +1,25 @@
 // Service Worker — Menu Planner
 // Stratégie :
-//  - assets statiques (/static/...) : cache-first (rapides, hors-ligne).
+//  - assets statiques (/static/...) : stale-while-revalidate.
 //  - navigations (pages HTML) : network-first avec repli sur le cache, puis
-//    sur une page hors-ligne minimale. La liste de courses reste consultable
-//    sans réseau (la dernière page planning visitée est en cache).
+//    sur la page de secours /static/offline.html (pré-cachée). La liste de
+//    courses reste consultable sans réseau si elle a déjà été visitée.
 //  - le reste (API POST, Notion, LLM) : réseau direct, jamais caché.
+// Seules les réponses 200 « normales » sont mises en cache : ni erreurs,
+// ni redirections (ex. renvoi vers /login quand l'auth est active).
 
-const CACHE = 'menu-planner-v2';
+const CACHE = 'menu-planner-v3';
+const OFFLINE_URL = '/static/offline.html';
 const PRECACHE = [
-  '/',
+  OFFLINE_URL,
   '/static/style.css',
   '/static/icon.svg',
+  '/static/icon-192.png',
 ];
+
+function cacheable(res) {
+  return res && res.status === 200 && !res.redirected && res.type === 'basic';
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -46,9 +54,9 @@ self.addEventListener('fetch', (event) => {
       caches.open(CACHE).then((cache) =>
         cache.match(req).then((hit) => {
           const fetching = fetch(req).then((res) => {
-            cache.put(req, res.clone());
+            if (cacheable(res)) cache.put(req, res.clone());
             return res;
-          }).catch(() => hit);
+          }).catch(() => hit || Response.error());
           return hit || fetching;
         })
       )
@@ -56,19 +64,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigations / pages : network-first, repli cache.
+  // Navigations / pages : network-first, repli cache, puis page de secours.
   if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
     event.respondWith(
       fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
+        if (cacheable(res)) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
         return res;
       }).catch(() =>
-        caches.match(req).then((hit) =>
-          hit || caches.match('/') ||
-          new Response('<h1>Hors ligne</h1><p>Page non disponible sans connexion.</p>',
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-        )
+        caches.match(req)
+          .then((hit) => hit || caches.match(OFFLINE_URL))
+          .then((page) => page || new Response(
+            '<h1>Hors ligne</h1><p>Page non disponible sans connexion.</p>',
+            { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+          ))
       )
     );
   }
