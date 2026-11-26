@@ -5,24 +5,16 @@ import asyncio
 import re
 from pathlib import Path
 
-import pytest
-
 import app.main as main
 from app.routers import courses as courses_router
 from app.services.shopping_list import SHARE_TOKEN_BYTES, share_action
-from tests.test_courses_partage import LAIT_2_LIGNES, data_of, make_client, make_planning, share
+from tests.test_courses_partage import LAIT_2_LIGNES, data_of, make_planning, share
 
 APP = Path(main.__file__).parent
 SW = (APP / "static" / "sw.js").read_text(encoding="utf-8")
 JS_PUB = (APP / "static" / "js" / "courses-public.js").read_text(encoding="utf-8")
 JS_PLANNING = (APP / "static" / "js" / "planning-shopping.js").read_text(encoding="utf-8")
 TPL_PUB = (APP / "templates" / "courses_public.html").read_text(encoding="utf-8")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with make_client(tmp_path, monkeypatch) as c:
-        yield c
 
 
 def _token(url: str) -> str:

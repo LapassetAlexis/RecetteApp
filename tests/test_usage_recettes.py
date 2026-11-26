@@ -95,9 +95,9 @@ def test_week_start_invalide_ignore(db):
     assert _usage(db) == {"soupe": {"count": 1, "last": "2026-11-17"}}
 
 
-def test_today_par_defaut_est_aujourdhui(db):
-    hier = date.today() - timedelta(days=1)
-    demain_semaine = (date.today() + timedelta(days=7)).isoformat()
+def test_today_par_defaut_est_aujourdhui(db, aujourdhui):
+    hier = aujourdhui - timedelta(days=1)
+    demain_semaine = (aujourdhui + timedelta(days=7)).isoformat()
     _valid(db, hier.isoformat(), [_r("passe", 1)])
     _valid(db, demain_semaine, [_r("futur", 1)])
     usage = asyncio.run(db.get_recipe_usage())

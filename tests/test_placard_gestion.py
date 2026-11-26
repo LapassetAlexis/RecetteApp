@@ -9,14 +9,7 @@ import pytest
 import app.main as main
 from app.categories import RAYON_ORDER
 from app.services.shopping_list import add_extra, get_placard, make_extra, set_extra_rayon, set_placard
-from tests.test_courses_partage import data_of, make_client, make_planning, set_data, share
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with make_client(tmp_path, monkeypatch) as c:
-        yield c
-
+from tests.test_courses_partage import data_of, make_planning, set_data, share
 
 SEL = {"Poulet": [{"nom": "poulet", "quantite": "200", "unite": "g"},
                   {"nom": "Sel", "quantite": "1", "unite": "pincée"}]}

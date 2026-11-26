@@ -5,29 +5,18 @@ import json
 import re
 
 import pytest
-from starlette.testclient import TestClient
 
-from app import main
 from app.services.planning_builder import GROUPES_MAX, builder_from_plats
+from tests.aides import _case, _recipe
 from tests.test_brouillons_integrite import _catalogue, _data
-from tests.test_routes import _case, _recipe
 
 POULET, CURRY, SOUPE = _recipe("Poulet", id="p1"), _recipe("Curry", id="c1"), _recipe("Soupe", id="s1")
 QUICHE, RIZ = _recipe("Quiche", id="q1"), _recipe("Riz", id="r1")
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
+@pytest.fixture(autouse=True)
+def _catalogue_fixe(monkeypatch):
     _catalogue(monkeypatch, POULET, CURRY, SOUPE, QUICHE, RIZ)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _brouillon(client, cases, nb_jours="7") -> int:

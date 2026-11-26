@@ -6,26 +6,12 @@ import re
 from datetime import date, timedelta
 
 import pytest
-from starlette.testclient import TestClient
 
 from app import main
 from app.database import Database
 from app.routers import auth as auth_router
 from app.services import planning_builder
-from tests.test_routes import _case, _construire, _recipe
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
+from tests.aides import _case, _construire, _recipe
 
 
 def _catalogue(monkeypatch, *recettes):
@@ -95,7 +81,7 @@ def test_update_planning_sans_date_garde_week_start(tmp_path):
 # ── B2 / B3 : « Refaire » produit un brouillon reprenable, daté d'aujourd'hui ──
 
 
-def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch):
+def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch, aujourdhui):
     poulet, soupe = _recipe("Poulet", id="p1"), _recipe("Soupe", id="s1")
     _catalogue(monkeypatch, poulet, soupe)
     pid = _construire(client, [_case(1, "midi", poulet, persons=2),
@@ -105,7 +91,7 @@ def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch):
 
     new_id = client.post(f"/planning/{pid}/dupliquer").json()["planning_id"]
     copie = _planning(new_id)
-    assert copie["week_start"] == date.today().isoformat()
+    assert copie["week_start"] == aujourdhui.isoformat()
     data = json.loads(copie["data_json"])
     assert data["builder"] and "off_meals" in data
 
@@ -116,7 +102,7 @@ def test_refaire_brouillon_reprenable_et_date_du_jour(client, monkeypatch):
     midi1 = next(c for c in builder if c["jour"] == 1 and c["moment"] == "midi")
     assert midi1["main"]["nom"] == "Poulet"
     # Le jour 1 de la copie = aujourd'hui (titre de la page planning).
-    today = date.today()
+    today = aujourdhui
     assert f"{today.day:02d}/{today.month:02d}" in client.get(f"/planning/{new_id}").text
 
     # Reprendre puis enregistrer met à jour la copie, sans 3ᵉ planning.

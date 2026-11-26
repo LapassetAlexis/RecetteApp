@@ -11,29 +11,21 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from starlette.testclient import TestClient
 
 from app import main
 from app.services.creations import slots_from_body
 from app.services.planning_construire import periode_saisie
+from tests.aides import _case, _construire, _recipe
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
-from tests.test_routes import _case, _construire, _recipe
 
 STATIC = Path(main.__file__).resolve().parent / "static"
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
+@pytest.fixture(autouse=True)
+def _ingredients_notion_ignores(monkeypatch):
     async def _noop(*a, **k):
         return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
     monkeypatch.setattr(main.notion, "update_ingredients", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 @pytest.fixture

@@ -4,29 +4,13 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-from starlette.testclient import TestClient
-
 from app import main
-from tests.test_routes import _case, _construire, _recipe
+from tests.aides import _case, _construire, _recipe
 
 APP_DIR = Path(main.__file__).resolve().parent
 TEMPLATES = APP_DIR / "templates"
 STATIC = APP_DIR / "static"
 ASSET_RE = re.compile(r'(?:src|href)="(/static/(?:js|css)/[^"?]+)')
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _template_assets() -> set[str]:

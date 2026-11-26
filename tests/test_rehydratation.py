@@ -9,10 +9,7 @@ import app.main as main
 from app.notion_client import NotionClient
 from app.services import backup
 from app.services.shopping import ingredients_to_text
-from tests import test_routes
-from tests.test_routes import _recipe
-
-client = test_routes.client  # fixture réutilisée
+from tests.aides import _recipe
 
 
 def _page(props):

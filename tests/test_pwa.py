@@ -6,25 +6,11 @@ import struct
 from pathlib import Path
 
 import pytest
-from starlette.testclient import TestClient
 
 import app.main as main
 
 STATIC = Path(main.__file__).parent / "static"
 ICONS = {"/static/icon-180.png": 180, "/static/icon-192.png": 192, "/static/icon-512.png": 512}
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _png_size(data: bytes) -> tuple[int, int]:

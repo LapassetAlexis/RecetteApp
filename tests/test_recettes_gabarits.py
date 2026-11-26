@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 import app.main as main
-from tests.test_routes import _recipe, client  # noqa: F401  (fixture réutilisée)
+from tests.aides import _recipe
 
 TEMPLATES = Path(main.BASE_DIR) / "templates"
 RATING_SRC = '<script src="/static/js/rating.js'
@@ -38,7 +38,7 @@ def _mock_fiche(monkeypatch, note=""):
     monkeypatch.setattr(main.db, "get_enriched", _enriched)
 
 
-def test_assets_partages_servis(client):  # noqa: F811
+def test_assets_partages_servis(client):
     for path, marker in (
         ("/static/js/rating.js", "/api/rate/"),
         ("/static/js/steps-editor.js", "addStepRow"),
@@ -49,7 +49,7 @@ def test_assets_partages_servis(client):  # noqa: F811
         assert marker in r.text, path
 
 
-def test_liste_cartes_en_liens_et_etoiles_boutons(client, monkeypatch):  # noqa: F811
+def test_liste_cartes_en_liens_et_etoiles_boutons(client, monkeypatch):
     _mock_liste(monkeypatch)
     html = client.get("/recettes").text
     assert RATING_SRC in html
@@ -68,7 +68,7 @@ def test_liste_cartes_en_liens_et_etoiles_boutons(client, monkeypatch):  # noqa:
     assert re.search(r'class="star-clear"[^>]*\bhidden\b', curry)    # pas de note → masqué
 
 
-def test_liste_chips_de_filtre_en_boutons(client, monkeypatch):  # noqa: F811
+def test_liste_chips_de_filtre_en_boutons(client, monkeypatch):
     _mock_liste(monkeypatch)
     html = client.get("/recettes").text
     assert '<span class="stat-chip' not in html
@@ -80,7 +80,7 @@ def test_liste_chips_de_filtre_en_boutons(client, monkeypatch):  # noqa: F811
     assert "setTimeout(applyFilters, 120)" in js                     # recherche temporisée
 
 
-def test_fiche_notation_partagee_et_modale_accessible(client, monkeypatch):  # noqa: F811
+def test_fiche_notation_partagee_et_modale_accessible(client, monkeypatch):
     _mock_fiche(monkeypatch, note="⭐⭐")
     html = client.get("/recette/abc").text
     assert RATING_SRC in html
@@ -99,7 +99,7 @@ def test_aucun_bloc_de_notation_inline():
         assert RATING_SRC in src, name
 
 
-def test_editeur_etapes_mutualise(client, monkeypatch):  # noqa: F811
+def test_editeur_etapes_mutualise(client, monkeypatch):
     for name in ("ajouter.html", "enrichir.html"):
         src = (TEMPLATES / name).read_text(encoding="utf-8")
         assert STEPS_SRC in src, name

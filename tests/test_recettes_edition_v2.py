@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import app.main as main
-from tests.test_routes import _case, _recipe, client  # noqa: F401  (fixture réutilisée)
+from tests.aides import _case, _recipe
 
 APP_DIR = Path(main.__file__).resolve().parent
 TEMPLATES = APP_DIR / "templates"
@@ -64,7 +64,7 @@ def test_common_js_charge_avant_les_scripts_de_page(name):
     assert scripts and scripts[0] == "common.js", (name, scripts)
 
 
-def test_nouveaux_fichiers_servis_et_sans_fetch_direct(client):  # noqa: F811
+def test_nouveaux_fichiers_servis_et_sans_fetch_direct(client):
     for name in NOUVEAUX_JS:
         r = client.get(f"/static/js/{name}")
         assert r.status_code == 200 and r.text.strip(), name
@@ -104,7 +104,7 @@ def test_common_js_charge_deux_fois_garde_la_premiere_copie():
 # ── Historique ───────────────────────────────────────────────────────────
 
 
-def test_historique_dates_lisibles_et_liens_du_brouillon(client, monkeypatch):  # noqa: F811
+def test_historique_dates_lisibles_et_liens_du_brouillon(client, monkeypatch):
     poulet = _recipe("Poulet", id="p1")
 
     async def _all():
@@ -129,7 +129,7 @@ def test_historique_dates_lisibles_et_liens_du_brouillon(client, monkeypatch):  
 # ── Fiche : données serveur par #page-data ───────────────────────────────
 
 
-def test_fiche_page_data_porte_les_portions(client, monkeypatch):  # noqa: F811
+def test_fiche_page_data_porte_les_portions(client, monkeypatch):
     _mock_recette(monkeypatch, cached={"ingredients": json.dumps([{"nom": "riz", "quantite": "200", "unite": "g"}]),
                                        "base_servings": 3})
     html = client.get("/recette/abc").text
@@ -138,7 +138,7 @@ def test_fiche_page_data_porte_les_portions(client, monkeypatch):  # noqa: F811
     assert "/static/js/recette-fiche.js?v=" in html
 
 
-def test_enrichir_page_data(client, monkeypatch):  # noqa: F811
+def test_enrichir_page_data(client, monkeypatch):
     _mock_recette(monkeypatch)
     html = client.get("/recette/abc/enrichir").text
     data = json.loads(html.split('id="page-data">', 1)[1].split("</script>", 1)[0])
@@ -148,7 +148,7 @@ def test_enrichir_page_data(client, monkeypatch):  # noqa: F811
 # ── Édition : cache local et message d'échec ─────────────────────────────
 
 
-def test_edition_sans_ingredient_ecrit_portions_et_duree_dans_le_cache(client, monkeypatch):  # noqa: F811
+def test_edition_sans_ingredient_ecrit_portions_et_duree_dans_le_cache(client, monkeypatch):
     _mock_recette(monkeypatch)
     r = client.post("/recette/abc/enrichir", data={
         "ingredients_text": "", "base_servings": "6", "duree_minutes": "40",
@@ -158,7 +158,7 @@ def test_edition_sans_ingredient_ecrit_portions_et_duree_dans_le_cache(client, m
     assert c["base_servings"] == 6 and c["cuisson_minutes"] == 40
 
 
-def test_edition_ingredients_vides_vident_le_cache(client, monkeypatch):  # noqa: F811
+def test_edition_ingredients_vides_vident_le_cache(client, monkeypatch):
     _mock_recette(monkeypatch, cached={
         "ingredients": json.dumps([{"nom": "riz", "quantite": "200", "unite": "g"}]),
         "base_servings": 2, "cuisson_minutes": 25,
@@ -177,7 +177,7 @@ def test_edition_ingredients_vides_vident_le_cache(client, monkeypatch):  # noqa
     assert "Aucun ingrédient enregistré" in page
 
 
-def test_edition_decoupe_sel_poivre(client, monkeypatch):  # noqa: F811
+def test_edition_decoupe_sel_poivre(client, monkeypatch):
     _mock_recette(monkeypatch)
     client.post("/recette/abc/enrichir", data={"ingredients_text": "200 g riz\nsel, poivre"},
                 follow_redirects=False)
@@ -185,7 +185,7 @@ def test_edition_decoupe_sel_poivre(client, monkeypatch):  # noqa: F811
     assert noms == ["riz", "sel", "poivre"]
 
 
-def test_edition_echec_liste_ce_qui_est_enregistre(client, monkeypatch):  # noqa: F811
+def test_edition_echec_liste_ce_qui_est_enregistre(client, monkeypatch):
     _mock_recette(monkeypatch)
 
     async def _ko(*a, **k):
@@ -203,7 +203,7 @@ def test_edition_echec_liste_ce_qui_est_enregistre(client, monkeypatch):  # noqa
     assert "Rien n&#39;a été validé" not in t and "Rien n'a été validé" not in t
 
 
-def test_edition_echec_sans_ingredient_mentionne_le_cache_des_portions(client, monkeypatch):  # noqa: F811
+def test_edition_echec_sans_ingredient_mentionne_le_cache_des_portions(client, monkeypatch):
     _mock_recette(monkeypatch)
 
     async def _ko(*a, **k):
@@ -215,7 +215,7 @@ def test_edition_echec_sans_ingredient_mentionne_le_cache_des_portions(client, m
     assert _cache()["base_servings"] == 3
 
 
-def test_extraction_source_decoupe_sel_poivre(client, monkeypatch):  # noqa: F811
+def test_extraction_source_decoupe_sel_poivre(client, monkeypatch):
     _mock_recette(monkeypatch)
 
     async def _extract(url):
@@ -230,7 +230,7 @@ def test_extraction_source_decoupe_sel_poivre(client, monkeypatch):  # noqa: F81
 # ── Ajout : « sel, poivre » découpé dans le cache ────────────────────────
 
 
-def test_ajout_decoupe_sel_poivre(client, monkeypatch):  # noqa: F811
+def test_ajout_decoupe_sel_poivre(client, monkeypatch):
     async def _create(**kw):
         return {"id": "newid", "url": ""}
     monkeypatch.setattr(main.notion, "create_recipe", _create)

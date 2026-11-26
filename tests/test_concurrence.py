@@ -9,12 +9,11 @@ import json
 
 import httpx
 import pytest
-from starlette.testclient import TestClient
 
 from app import main
 from app.services import shopping_list, store
+from tests.aides import _case, _construire, _recipe
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
-from tests.test_routes import _case, _construire, _recipe
 
 # Sept ingrédients du poulet (jour 1 midi) : les articles cochés pendant que le
 # soir du jour 4 change de plat.
@@ -26,20 +25,11 @@ POULET, CURRY = _recipe("Poulet", id="p1"), _recipe("Curry", id="c1")
 RIZ, HARICOTS = _recipe("Riz", id="r1"), _recipe("Haricots verts sautés", id="h1")
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
+@pytest.fixture(autouse=True)
+def _sans_limite_de_coches(monkeypatch):
     # M06 : les coches publiques sont limitées à 120 par minute et par jeton ;
     # le scénario de charge en envoie 280 d'affilée.
     monkeypatch.setattr("app.routers.courses.CHECK_LIMIT", 10**6)
-    with TestClient(main.app) as c:
-        yield c
 
 
 def _setup(client, monkeypatch) -> int:

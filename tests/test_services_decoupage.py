@@ -14,7 +14,7 @@ import pytest
 
 import app.main as main
 from app.services import planning, store
-from tests.test_routes import _case, _construire, _recipe, client  # noqa: F401  (fixture réutilisée)
+from tests.aides import _case, _construire, _recipe
 
 SERVICES = Path(__file__).resolve().parent.parent / "app" / "services"
 MODULES = sorted(f"app.services.{p.stem}" for p in SERVICES.glob("*.py") if p.stem != "__init__")
@@ -89,7 +89,7 @@ def test_libelle_des_listes_suit_la_periode():
         == "Semaine du 2026-07-13"
 
 
-def test_historique_affiche_la_periode_complete(client, monkeypatch):  # noqa: F811
+def test_historique_affiche_la_periode_complete(client, monkeypatch):
     poulet = _recipe("Poulet", id="p1")
 
     async def _all(*a, **k):
@@ -106,7 +106,7 @@ def test_historique_affiche_la_periode_complete(client, monkeypatch):  # noqa: F
 # ── Repas libre : « sel, poivre » donne deux ingrédients ────────────────
 
 
-def test_repas_libre_eclate_les_condiments(client, monkeypatch):  # noqa: F811
+def test_repas_libre_eclate_les_condiments(client, monkeypatch):
     poulet = _recipe("Poulet", id="p1")
 
     async def _all(*a, **k):
@@ -131,7 +131,7 @@ def test_repas_libre_eclate_les_condiments(client, monkeypatch):  # noqa: F811
 # ── Ajout d'une recette : pas de détail d'exception dans la page ────────
 
 
-def test_ajout_en_echec_message_generique_detail_dans_les_logs(client, monkeypatch, caplog):  # noqa: F811
+def test_ajout_en_echec_message_generique_detail_dans_les_logs(client, monkeypatch, caplog):
     async def _boom(*a, **k):
         raise RuntimeError("jeton Notion secret-123 refusé")
     monkeypatch.setattr(main.notion, "create_recipe", _boom)

@@ -5,28 +5,12 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-from starlette.testclient import TestClient
-
 from app import main
+from tests.aides import _case, _recipe
 from tests.test_brouillons_integrite import _catalogue, _data
-from tests.test_routes import _case, _recipe
 
 APP_DIR = Path(main.__file__).resolve().parent
 STATIC = APP_DIR / "static"
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    dbpath = str(tmp_path / "t.db")
-    main.db.path = dbpath
-    monkeypatch.setattr(main.settings, "database_path", dbpath)
-
-    async def _noop(*a, **k):
-        return True
-    monkeypatch.setattr(main.notion, "ensure_ingredients_field", _noop)
-    with TestClient(main.app) as c:
-        yield c
 
 
 POULET = _recipe("Poulet", id="p1")

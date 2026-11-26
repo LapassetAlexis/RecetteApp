@@ -11,18 +11,12 @@ from pathlib import Path
 import pytest
 
 import app.main as main
-from tests.test_courses_partage import LAIT_2_LIGNES, make_client, make_planning, share
+from tests.test_courses_partage import LAIT_2_LIGNES, make_planning, share
 
 APP = Path(main.__file__).parent
 SW = (APP / "static" / "sw.js").read_text(encoding="utf-8")
 JS = (APP / "static" / "js" / "courses-public.js").read_text(encoding="utf-8")
 TPL = (APP / "templates" / "courses_public.html").read_text(encoding="utf-8")
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    with make_client(tmp_path, monkeypatch) as c:
-        yield c
 
 
 @pytest.fixture

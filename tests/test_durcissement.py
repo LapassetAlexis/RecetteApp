@@ -10,9 +10,9 @@ import pytest
 
 import app.main as main
 from app.routers import auth
+from tests.aides import _case, _construire, _recipe
 from tests.test_auth import _client, _reload_app
-from tests.test_courses_partage import client, make_planning  # noqa: F401
-from tests.test_routes import _case, _construire, _recipe
+from tests.test_courses_partage import make_planning
 
 # ── Connexion / déconnexion ─────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ def test_limite_login_purge_les_adresses_inactives():
 # ── Enrichissement de masse ─────────────────────────────────────────────
 
 
-def test_flux_enrichissement_refuse_une_navigation(client, monkeypatch):  # noqa: F811
+def test_flux_enrichissement_refuse_une_navigation(client, monkeypatch):
     appels = []
 
     async def _all():
@@ -101,7 +101,7 @@ def test_flux_enrichissement_refuse_une_navigation(client, monkeypatch):  # noqa
     assert r.status_code == 200 and "event: done" in r.text
 
 
-def test_flux_enrichissement_erreur_sans_detail(client, monkeypatch):  # noqa: F811
+def test_flux_enrichissement_erreur_sans_detail(client, monkeypatch):
     async def _ko():
         raise RuntimeError("jeton Notion secret")
     monkeypatch.setattr(main.notion, "get_all_recipes", _ko)
@@ -112,7 +112,7 @@ def test_flux_enrichissement_erreur_sans_detail(client, monkeypatch):  # noqa: F
 # ── Page planning illisible ─────────────────────────────────────────────
 
 
-def _planning_brut(client, monkeypatch, data_json: str) -> int:  # noqa: F811
+def _planning_brut(client, monkeypatch, data_json: str) -> int:
     poulet = _recipe("Poulet", id="p1")
 
     async def _all():
@@ -133,7 +133,7 @@ def _planning_brut(client, monkeypatch, data_json: str) -> int:  # noqa: F811
     json.dumps({"plats": [{"jour": 1, "moment": "midi"}]}),
     json.dumps({"plats": ["X"]}),
 ])
-def test_planning_illisible_422(client, monkeypatch, data_json):  # noqa: F811
+def test_planning_illisible_422(client, monkeypatch, data_json):
     pid = _planning_brut(client, monkeypatch, data_json)
     r = client.get(f"/planning/{pid}")
     assert r.status_code == 422
@@ -141,7 +141,7 @@ def test_planning_illisible_422(client, monkeypatch, data_json):  # noqa: F811
     assert 'class="nav"' in r.text                     # gabarit de base, menu compris
 
 
-def test_planning_sans_plats_reste_lisible(client, monkeypatch):  # noqa: F811
+def test_planning_sans_plats_reste_lisible(client, monkeypatch):
     pid = _planning_brut(client, monkeypatch, json.dumps({}))
     assert client.get(f"/planning/{pid}").status_code == 200
 
@@ -149,7 +149,7 @@ def test_planning_sans_plats_reste_lisible(client, monkeypatch):  # noqa: F811
 # ── ?draft= d'une semaine validée ───────────────────────────────────────
 
 
-def test_draft_d_une_semaine_validee_redirige(client, monkeypatch):  # noqa: F811
+def test_draft_d_une_semaine_validee_redirige(client, monkeypatch):
     pid = make_planning(client, monkeypatch, {"Gratin": []}, generate=False)
     # Brouillon : ouvert tel quel.
     assert client.get(f"/?draft={pid}", follow_redirects=False).status_code == 200

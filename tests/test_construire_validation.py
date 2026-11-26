@@ -13,8 +13,8 @@ from app.services import planning as planning_svc
 from app.services import planning_construire, store
 from app.services import shopping as shopping_svc
 from app.services.recette_planifier import planifier
+from tests.aides import _case, _construire, _recipe
 from tests.test_brouillons_integrite import _catalogue, _data, _planning
-from tests.test_routes import _case, _construire, _recipe, client  # noqa: F401  (fixture)
 
 POULET, CURRY = _recipe("Poulet", id="p1"), _recipe("Curry", id="c1")
 
@@ -35,7 +35,7 @@ def _enrichir():
 
 
 @pytest.mark.parametrize("saisie", ["pas-une-date", "", "2026-13-01", "26/11/2026"])
-def test_construire_date_invalide_ne_cree_rien(client, monkeypatch, saisie):  # noqa: F811
+def test_construire_date_invalide_ne_cree_rien(client, monkeypatch, saisie):
     _catalogue(monkeypatch, POULET)
     cases = [_case(1, "midi", POULET, persons=2)]
     r = client.post("/construire", data={"week_start": saisie, "meals": json.dumps(cases)},
@@ -47,7 +47,7 @@ def test_construire_date_invalide_ne_cree_rien(client, monkeypatch, saisie):  # 
     assert _nb_plannings() == 0
 
 
-def test_construire_date_invalide_ne_touche_pas_au_brouillon(client, monkeypatch):  # noqa: F811
+def test_construire_date_invalide_ne_touche_pas_au_brouillon(client, monkeypatch):
     _catalogue(monkeypatch, POULET, CURRY)
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
     avant = _planning(pid)
@@ -67,7 +67,7 @@ def test_parse_week_start():
 # ── Liste de courses et mise à jour d'un brouillon ─────────────────────
 
 
-def test_construire_ecrit_la_cle_et_le_rayon_de_chaque_article(client, monkeypatch):  # noqa: F811
+def test_construire_ecrit_la_cle_et_le_rayon_de_chaque_article(client, monkeypatch):
     _catalogue(monkeypatch, POULET)
     _enrichir()
     pid = _construire(client, [_case(1, "midi", POULET, persons=4)])
@@ -76,7 +76,7 @@ def test_construire_ecrit_la_cle_et_le_rayon_de_chaque_article(client, monkeypat
     assert all(i.get("rayon") for i in liste)
 
 
-def test_construire_sur_un_brouillon_garde_partage_et_articles(client, monkeypatch):  # noqa: F811
+def test_construire_sur_un_brouillon_garde_partage_et_articles(client, monkeypatch):
     _catalogue(monkeypatch, POULET, CURRY)
     _enrichir()
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
@@ -97,7 +97,7 @@ def test_construire_sur_un_brouillon_garde_partage_et_articles(client, monkeypat
     assert _nb_plannings() == 1
 
 
-def test_construire_brouillon_supprime_entre_temps_en_cree_un_nouveau(client, monkeypatch):  # noqa: F811
+def test_construire_brouillon_supprime_entre_temps_en_cree_un_nouveau(client, monkeypatch):
     _catalogue(monkeypatch, POULET)
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
     real = store.update_planning
@@ -113,7 +113,7 @@ def test_construire_brouillon_supprime_entre_temps_en_cree_un_nouveau(client, mo
     assert new_id != pid and _planning(new_id)["week_start"] == "2026-02-02"
 
 
-def test_planning_from_builder_sans_repas(client, monkeypatch):  # noqa: F811
+def test_planning_from_builder_sans_repas(client, monkeypatch):
     _catalogue(monkeypatch, POULET)
     assert asyncio.run(planning_construire.planning_from_builder("[]", "")) is None
 
@@ -122,7 +122,7 @@ def test_planning_from_builder_sans_repas(client, monkeypatch):  # noqa: F811
 
 
 @pytest.mark.parametrize("route", ["update-meal", "add-side", "remove-side"])
-def test_routes_depreciees_supprimees(client, route):  # noqa: F811
+def test_routes_depreciees_supprimees(client, route):
     assert client.post(f"/api/{route}/1", json={}).status_code == 404
 
 
@@ -140,7 +140,7 @@ def test_router_planning_moins_de_350_lignes():
     assert len((BASE_DIR / "routers" / "planning.py").read_text().splitlines()) < 350
 
 
-def test_generation_ignore_ingredients_force(client, monkeypatch):  # noqa: F811
+def test_generation_ignore_ingredients_force(client, monkeypatch):
     _catalogue(monkeypatch, POULET)
     _enrichir()
     pid = asyncio.run(main.db.save_planning(
@@ -152,7 +152,7 @@ def test_generation_ignore_ingredients_force(client, monkeypatch):  # noqa: F811
     assert noms == {"poulet", "tomates"}
 
 
-def test_generation_planning_vide_ou_absent(client, monkeypatch):  # noqa: F811
+def test_generation_planning_vide_ou_absent(client, monkeypatch):
     pid = asyncio.run(main.db.save_planning(
         week_start="2026-01-05", saison="", nb_personnes=4, ingredients_force="",
         data_json=json.dumps({"plats": []}), recipes=[]))
@@ -166,7 +166,7 @@ def test_generation_planning_vide_ou_absent(client, monkeypatch):  # noqa: F811
 # ── Dupliquer et aperçu (fonctions sorties du routeur) ─────────────────
 
 
-def test_dupliquer_et_apercu(client, monkeypatch):  # noqa: F811
+def test_dupliquer_et_apercu(client, monkeypatch):
     _catalogue(monkeypatch, POULET, CURRY)
     pid = _construire(client, [_case(1, "midi", POULET, persons=2),
                                _case(2, "soir", CURRY, persons=2)])
@@ -193,7 +193,7 @@ def _fiche(monkeypatch):
     _catalogue(monkeypatch, POULET, CURRY)
 
 
-def test_planifier_nouveau_brouillon_supprime_si_l_ecriture_echoue(client, monkeypatch):  # noqa: F811
+def test_planifier_nouveau_brouillon_supprime_si_l_ecriture_echoue(client, monkeypatch):
     _fiche(monkeypatch)
 
     async def _boom(*a, **k):
@@ -204,7 +204,7 @@ def test_planifier_nouveau_brouillon_supprime_si_l_ecriture_echoue(client, monke
     assert _nb_plannings() == 0
 
 
-def test_planifier_parametres_invalides_ne_cree_rien(client, monkeypatch):  # noqa: F811
+def test_planifier_parametres_invalides_ne_cree_rien(client, monkeypatch):
     _fiche(monkeypatch)
     for body in ({"moment": "goûter"}, {"moment": "soir", "date": "pas-une-date"},
                  {"moment": "soir", "planning_id": 1, "jour": 9}):
@@ -213,7 +213,7 @@ def test_planifier_parametres_invalides_ne_cree_rien(client, monkeypatch):  # no
     assert _nb_plannings() == 0
 
 
-def test_planifier_semaine_validee_refusee(client, monkeypatch):  # noqa: F811
+def test_planifier_semaine_validee_refusee(client, monkeypatch):
     _fiche(monkeypatch)
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
     asyncio.run(main.db.mark_planning_valid(pid))
@@ -225,7 +225,7 @@ def test_planifier_semaine_validee_refusee(client, monkeypatch):  # noqa: F811
         == {"error": "Brouillon introuvable"}
 
 
-def test_planifier_remplace_avec_les_convives_demandes(client, monkeypatch):  # noqa: F811
+def test_planifier_remplace_avec_les_convives_demandes(client, monkeypatch):
     _fiche(monkeypatch)
     pid = _construire(client, [_case(1, "midi", POULET, persons=2)])
     r = asyncio.run(planifier("c1", {"planning_id": pid, "jour": 1, "moment": "midi",
