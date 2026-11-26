@@ -4,6 +4,9 @@
     --t2: #5c574f; --pr: #e67e22; --prd: #d35400;
     --sc: #27ae60; --ac: #8e44ad; --bo: #e0dbd5;
     --sh: 0 2px 8px rgba(0,0,0,0.08); --r: 12px;
+    /* Alias historiques (utilisés par les templates) : pointent vers les jetons ci-dessus. */
+    --bd: var(--bo); --bg2: var(--bg); --bg3: var(--bo);
+    --t1: var(--text); --pri: var(--pr); --card: var(--surface);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background: var(--bg); color: var(--text); line-height:1.5; }
@@ -33,6 +36,10 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; back
 .form-r .form-g { flex:1; }
 input, select, textarea { width:100%; padding:9px 12px; border:2px solid var(--bo); border-radius:8px; font-size:0.9rem; background:var(--surface); font-family:inherit; }
 input:focus, select:focus, textarea:focus { outline:none; border-color:var(--pr); }
+/* Focus clavier visible : contour commun (les champs gardent en plus leur bordure colorée). */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible, summary:focus-visible,
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid var(--pr); outline-offset:2px; }
 textarea { resize:vertical; }
 hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 
@@ -53,14 +60,6 @@ hr.sep { border:none; border-top:1px solid var(--bo); margin:16px 0; }
 .btn.loading { position:relative; color:transparent !important; pointer-events:none; }
 .btn.loading::after { content:""; position:absolute; top:50%; left:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid rgba(0,0,0,0.15); border-top-color:var(--prd); border-radius:50%; animation:s 0.7s linear infinite; }
 .btn-primary.loading::after, .btn-secondary.loading::after { border-color:rgba(255,255,255,0.45); border-top-color:#fff; }
-
-/* ── Day Group Picker ────────────────────────── */
-.day-group { position:relative; padding:10px 4px 6px; border-radius:8px; font-size:0.75rem; font-weight:600; transition:border 0.15s, background 0.15s; }
-.group-picker { position:absolute; top:100%; left:50%; transform:translateX(-50%); z-index:20; background:#fff; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.15); padding:6px; display:flex; gap:4px; margin-top:4px; white-space:nowrap; }
-.nb-input { -moz-appearance:textfield; text-align:center; padding:4px 0; border:1px solid var(--bo); border-radius:4px; font-size:0.75rem; font-weight:600; width:100%; }
-.nb-input::-webkit-outer-spin-button,
-.nb-input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
-.nb-input:focus { border-color:var(--pr) !important; outline:none; }
 
 /* ── Alerts ──────────────────────────────────── */
 .alert { padding:12px 16px; border-radius:8px; margin-bottom:16px; font-weight:500; font-size:0.9rem; }
@@ -152,7 +151,8 @@ a.meal-warn:hover { background:#f9e0c4; }
 .chip-duree { background:#f3eafc; color:var(--ac); }
 
 /* ── Shopping ────────────────────────────────── */
-.shop-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.shop-h { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.shop-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 .shop-h h2 { margin:0; font-size:1.1rem; }
 .shop-n { font-size:0.8rem; color:var(--t2); background:var(--bg); padding:3px 10px; border-radius:12px; font-weight:500; }
 .shop-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:4px; }
@@ -215,12 +215,6 @@ a.meal-warn:hover { background:#f9e0c4; }
 .star:hover { transform:scale(1.25); }
 .star-clear { background:none; border:none; cursor:pointer; font-size:0.85rem; color:var(--t2); margin-left:6px; padding:4px 6px; border-radius:6px; }
 .star-clear:hover { background:var(--bg); color:var(--prd); }
-.cook-render { font-size:0.9rem; line-height:1.7; }
-.cook-step { margin-bottom:6px; padding:4px 0; }
-.cook-step:first-child { margin-top:0; }
-.cook-ing { display:inline-block; background:#fef3e2; color:var(--prd); padding:2px 8px; border-radius:4px; font-weight:600; font-size:0.85rem; margin:1px 0; }
-.cook-ighl { background:#ffedd5; }
-.cook-cw { display:inline-block; background:#e8f0fe; color:#2980b9; padding:1px 6px; border-radius:4px; font-size:0.8rem; }
 
 /* ── Stats ───────────────────────────────────── */
 .stats-bar { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-bottom:16px; }
@@ -263,6 +257,10 @@ a.meal-warn:hover { background:#f9e0c4; }
     .nav-brand { font-size:1rem; }
     .nav-links { gap:2px; flex-wrap:wrap; justify-content:flex-end; }
     .nav-links a { padding:6px 8px; font-size:0.82rem; }
+    /* Cibles tactiles : 40 px minimum pour les petits boutons à pictogramme. */
+    .b-x, .side-ch, .side-rm, .meal-ch, .star { min-width:40px; min-height:40px; }
+    .b-x, .side-ch, .side-rm, .meal-ch { display:inline-flex; align-items:center; justify-content:center; }
+    .star { display:inline-flex; align-items:center; justify-content:center; }
 }
 /* Sous 640px : on remplace la grille (illisible) par la liste empilée */
 @media (max-width:640px) {
@@ -271,13 +269,14 @@ a.meal-warn:hover { background:#f9e0c4; }
     .container { padding:12px; }
     .card { padding:14px; }
     .week-toolbar { flex-wrap:wrap; }
+    /* Liste de courses : titre sur sa propre ligne, outils repliés dessous. */
+    .shop-h h2 { flex:1 1 100%; }
+    .shop-tools { width:100%; }
 }
 @media (max-width:480px) {
     .recettes-grid { grid-template-columns:1fr; }
     .nav-links a { padding:5px 7px; font-size:0.78rem; }
     .hero h1 { font-size:1.1rem; }
-    .midi-grid { gap:3px; }
-    .nb-input { font-size:0.7rem; }
     .modal-box { width:96%; }
 }
 @media (min-width:1024px) {
@@ -288,7 +287,6 @@ a.meal-warn:hover { background:#f9e0c4; }
 .inp { /* alias sémantique : le style vient du sélecteur input/select/textarea */ }
 .act { text-align:center; margin-top:16px; }
 .hero-sub { color:var(--t2); font-size:0.9rem; }
-.hero-force { color:var(--prd); font-weight:500; }
 .chip-r { background:#fef3e2; color:var(--pr); }
 
 /* Pills de tags (page Ajouter) — cohérence avec .chip/.tag */
@@ -306,24 +304,11 @@ a.meal-warn:hover { background:#f9e0c4; }
 .tag-group-h { display:block; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--t2); margin-bottom:5px; }
 .tag-group-chips { display:flex; flex-wrap:wrap; gap:5px; }
 
-/* ── Générer : organisation des midis ────────── */
+/* ── Constructeur ────────────────────────────── */
 .row-between { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-.btn-tiny { font-size:0.75rem; }
-.midi-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; text-align:center; }
-.day-name { font-size:0.7rem; color:var(--t2); margin-bottom:4px; }
-.group-label { display:block; width:100%; padding:6px 0; border-radius:6px; margin-bottom:6px; font-size:0.7rem; font-weight:700; border:none; cursor:pointer; transition:transform 0.1s; }
-.group-label:hover { transform:scale(1.06); }
-.nb-field { display:flex; align-items:center; gap:3px; justify-content:center; }
-.nb-field label { font-size:0.8rem; cursor:default; }
-.meal-toggles { display:flex; gap:3px; justify-content:center; margin-top:5px; }
-.mt { border:1px solid var(--bo); background:var(--surface); border-radius:6px; padding:2px 5px; font-size:0.8rem; cursor:pointer; line-height:1; opacity:1; transition:opacity 0.12s, filter 0.12s; }
-.mt.off { opacity:0.35; filter:grayscale(1); text-decoration:line-through; background:var(--bg); }
 .group-legend { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; font-size:0.75rem; color:var(--t2); }
 .hint { margin-top:6px; display:block; }
 .muted-sm { font-size:0.8rem; color:var(--t2); }
-.preview-row { display:flex; gap:8px; align-items:center; margin-top:6px; }
-.preview-box { display:none; margin-top:8px; }
-.preview-area { font-family:monospace; font-size:0.78rem; background:var(--bg); }
 
 /* ── Barre de progression de navigation ──────── */
 #nav-progress { position:fixed; top:0; left:0; height:3px; width:0; background:linear-gradient(90deg,var(--pr),var(--prd)); z-index:5000; opacity:0; }
