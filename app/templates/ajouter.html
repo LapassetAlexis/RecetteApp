@@ -9,10 +9,14 @@
 <div class="alert alert-success">{{ success }}</div>
 {% endif %}
 {% if error %}
-<div class="alert alert-error">{{ error }}</div>
+<div class="alert alert-error">{{ error }}{% if page_id and not form %} <a href="/recette/{{ page_id }}/enrichir">Modifier la recette</a>{% endif %}</div>
 {% endif %}
+{% if success and page_id %}
+<p><a href="/recette/{{ page_id }}" class="btn btn-ghost btn-sm">Voir la recette</a></p>
+{% endif %}
+{% set f = form or {} %}
 
-<div class="card" id="step1">
+<div class="card" id="step1"{% if form %} style="display:none;"{% endif %}>
     <!-- Depuis une URL -->
     <div class="form-g">
         <label for="url-input">🔗 Depuis une URL (site, vidéo)</label>
@@ -43,14 +47,14 @@
     <div id="analyze-status" style="margin-top:8px;font-size:0.85rem;color:var(--t2);"></div>
 </div>
 
-<form method="POST" action="/ajouter-recette" class="card" id="step2" style="display:none;">
-    <input type="hidden" name="url" id="url-hidden">
+<form method="POST" action="/ajouter-recette" class="card" id="step2"{% if not form %} style="display:none;"{% endif %}>
+    <input type="hidden" name="url" id="url-hidden" value="{{ f.url or '' }}">
 
     <div class="form-g">
         <label>🧬 Nature</label>
         <div class="tag-group-chips">
             {% for opt in nature_options %}
-            <label class="tgl"><input type="radio" name="nature" value="{{ opt }}" class="nature-cb" {% if opt == 'Recette' %}checked{% endif %}><span>{{ opt }}</span></label>
+            <label class="tgl"><input type="radio" name="nature" value="{{ opt }}" class="nature-cb" {% if opt == (f.nature or 'Recette') %}checked{% endif %}><span>{{ opt }}</span></label>
             {% endfor %}
         </div>
         <small class="muted-sm">Une « brique » (Ingrédient : steak, œuf, riz…) se classe surtout par sa Base ; le Type peut rester vide.</small>
@@ -58,7 +62,7 @@
 
     <div class="form-g">
         <label for="nom">📝 Nom de la recette</label>
-        <input type="text" id="nom" name="nom" class="inp" required>
+        <input type="text" id="nom" name="nom" class="inp" required value="{{ f.nom or '' }}">
     </div>
 
     <div class="form-r">
@@ -66,16 +70,16 @@
             <label>🍽️ Type</label>
             <div class="tag-group-chips">
                 {% for opt in repas_options %}
-                <label class="tgl"><input type="checkbox" name="repas" value="{{ opt }}" class="repas-cb"><span>{{ opt }}</span></label>
+                <label class="tgl"><input type="checkbox" name="repas" value="{{ opt }}" class="repas-cb"{% if opt in (f.repas or []) %} checked{% endif %}><span>{{ opt }}</span></label>
                 {% endfor %}
             </div>
         </div>
         <div class="form-g">
             <label for="moment">🕐 Moment</label>
             <select id="moment" name="moment">
-                <option value="Les deux">Midi et soir</option>
-                <option value="Midi">Midi uniquement</option>
-                <option value="Soir">Soir uniquement</option>
+                {% for val, label in moment_options %}
+                <option value="{{ val }}"{% if val == (f.moment or 'Les deux') %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
             </select>
         </div>
     </div>
@@ -84,7 +88,7 @@
         <label>🥩 Base <small class="muted-sm">(ingrédient principal)</small></label>
         <div class="tag-group-chips">
             {% for opt in base_options %}
-            <label class="tgl"><input type="checkbox" name="base" value="{{ opt }}" class="base-cb"><span>{{ opt }}</span></label>
+            <label class="tgl"><input type="checkbox" name="base" value="{{ opt }}" class="base-cb"{% if opt in (f.base or []) %} checked{% endif %}><span>{{ opt }}</span></label>
             {% endfor %}
         </div>
     </div>
@@ -97,7 +101,7 @@
                 <span class="tag-group-h">{{ grp.label }}</span>
                 <div class="tag-group-chips">
                     {% for tag in grp.tags %}
-                    <label class="tgl"><input type="checkbox" name="tags" value="{{ tag }}" class="tag-cb"><span>{{ tag }}</span></label>
+                    <label class="tgl"><input type="checkbox" name="tags" value="{{ tag }}" class="tag-cb"{% if tag in (f.tags or []) %} checked{% endif %}><span>{{ tag }}</span></label>
                     {% endfor %}
                 </div>
             </div>
@@ -107,24 +111,32 @@
 
     <div class="form-g">
         <label for="base_servings">👤 Portions <small class="muted-sm">(nombre de personnes pour ces quantités)</small></label>
-        <input type="number" id="base_servings" name="base_servings" class="inp" min="1" step="1" value="4">
+        <input type="number" id="base_servings" name="base_servings" class="inp" min="1" step="1" value="{{ f.base_servings or 4 }}">
     </div>
 
     <div class="form-g">
         <label for="ingredients_manual">🥦 Ingrédients</label>
-        <textarea id="ingredients_manual" name="ingredients_manual" rows="4" class="inp" placeholder="Un ingrédient par ligne : 200 g de farine"></textarea>
+        <textarea id="ingredients_manual" name="ingredients_manual" rows="4" class="inp" placeholder="Un ingrédient par ligne : 200 g de farine">{{ f.ingredients_manual or '' }}</textarea>
     </div>
 
     <div class="form-g">
         <label>👨‍🍳 Instructions de cuisson <small class="muted-sm">(une étape par bloc)</small></label>
-        <div id="steps"></div>
+        <div id="steps">
+            {% for step in (f.steps or []) %}
+            <div class="step-row">
+                <span class="step-num"></span>
+                <textarea name="steps" rows="2" class="inp">{{ step }}</textarea>
+                <button type="button" class="step-del" title="Supprimer l'étape">✕</button>
+            </div>
+            {% endfor %}
+        </div>
         <button type="button" id="add-step" class="btn btn-ghost btn-sm" style="margin-top:6px;">+ Ajouter une étape</button>
     </div>
 
     <div class="form-g">
         <label for="image_url">🖼️ Image <small class="muted-sm">(URL, optionnel)</small></label>
-        <input type="url" id="image_url" name="image_url" class="inp" placeholder="https://... (lien vers une image)">
-        <img id="recipe-preview-img" style="width:100%;max-height:180px;border-radius:8px;object-fit:cover;margin-top:8px;display:none;">
+        <input type="url" id="image_url" name="image_url" class="inp" placeholder="https://... (lien vers une image)" value="{{ f.image_url or '' }}">
+        <img id="recipe-preview-img" alt="" style="width:100%;max-height:180px;border-radius:8px;object-fit:cover;margin-top:8px;display:none;">
     </div>
 
     <button type="submit" class="btn btn-primary btn-lg" id="btn-add">💾 Ajouter la recette</button>
@@ -160,6 +172,7 @@ function refreshImgPreview() {
     else { imgPreview.removeAttribute('src'); imgPreview.style.display = 'none'; }
 }
 imgInput?.addEventListener('input', refreshImgPreview);
+refreshImgPreview();  // saisie ré-affichée après une erreur
 
 // ── Bascule vers le formulaire (rempli ou vide) ─────
 function showForm() {

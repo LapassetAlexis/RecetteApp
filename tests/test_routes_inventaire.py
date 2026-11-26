@@ -44,6 +44,7 @@ ROUTES_ATTENDUES = {
     ("POST", "/api/enrich-week/{planning_id}"),
     ("POST", "/api/free-meal/{planning_id}"),
     ("POST", "/api/rate/{page_id}"),
+    ("POST", "/api/recette/{page_id}/planifier"),
     ("POST", "/api/remove-side/{planning_id}"),
     ("POST", "/api/shopping-check/{planning_id}"),
     ("POST", "/api/update-meal/{planning_id}"),
