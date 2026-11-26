@@ -18,3 +18,25 @@ button.star-clear:focus-visible { outline: 2px solid var(--pr); outline-offset: 
 /* Chips de filtre devenues des boutons. */
 button.stat-chip { font-family: inherit; color: var(--text); }
 button.stat-chip:focus-visible { outline: 2px solid var(--pr); outline-offset: 2px; }
+
+/* Usage d'une recette (« Cuisinée 3 fois · dernière fois le 12/10 »). */
+.recipe-usage { margin: 4px 0 0; font-size: 0.78rem; color: var(--t2); }
+.detail-usage { margin: 6px 0 0; font-size: 0.85rem; color: var(--t2); text-align: center; }
+
+/* Tri de la liste. */
+.sort-row { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--t2); }
+.sort-row select { width: auto; min-width: 0; max-width: 100%; }
+
+/* Modale « Ajouter au planning ». */
+.plan-body .form-g select,
+.plan-body .form-g input[type="date"] { width: 100%; }
+.plan-warn { margin: 0 0 8px; font-size: 0.85rem; color: #a0531c; }
+.plan-done { margin: 0; font-size: 0.9rem; }
+.plan-done a { font-weight: 600; color: var(--prd); }
+[hidden] { display: none !important; }
+
+/* Édition : sur mobile, le bouton « Ré-extraire » passe sous l'URL. */
+@media (max-width: 520px) {
+    .url-row { flex-wrap: wrap; }
+    .url-row .inp { flex-basis: 100%; }
+}

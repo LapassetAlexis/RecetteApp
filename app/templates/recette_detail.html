@@ -21,10 +21,12 @@
             {% endfor %}
             <button type="button" class="star-clear" title="Retirer la note" aria-label="Retirer la note"{{ '' if note_len else ' hidden' }}>✕</button>
         </div>
+        <p class="detail-usage">🍳 {{ usage_label or "Jamais planifiée dans une semaine validée" }}</p>
         <div class="detail-links">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-planifier">📅 Ajouter au planning</button>
             {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
             {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
-            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">{% if ingredients %}✏️ Modifier{% else %}✨ Enrichir{% endif %}</a>
+            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">✏️ Modifier</a>
             <button type="button" class="btn btn-ghost btn-sm" id="btn-delete">🗑 Supprimer</button>
         </div>
     </div>
@@ -107,10 +109,57 @@
         </div>
     </div>
 </div>
+
+<!-- Modale « Ajouter au planning » : brouillon existant ou nouveau, jour, moment -->
+<div id="plan-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="plan-title">
+    <div class="modal-bg"></div>
+    <form class="modal-box" id="plan-form">
+        <div class="modal-top">
+            <h3 id="plan-title">📅 Ajouter au planning</h3>
+            <button class="modal-x" type="button" id="plan-x" aria-label="Fermer" title="Fermer">✕</button>
+        </div>
+        <div class="modal-body plan-body">
+            <div class="form-g">
+                <label for="plan-draft">Brouillon</label>
+                <select id="plan-draft" class="inp">
+                    {% for d in drafts %}<option value="{{ d.id }}">{{ d.label }}</option>{% endfor %}
+                    <option value="new"{% if not drafts %} selected{% endif %}>➕ Nouveau brouillon</option>
+                </select>
+            </div>
+            <div class="form-g" id="plan-day-g">
+                <label for="plan-day">Jour</label>
+                <select id="plan-day" class="inp"></select>
+            </div>
+            <div class="form-g" id="plan-date-g">
+                <label for="plan-date">Date du repas</label>
+                <input type="date" id="plan-date" class="inp">
+            </div>
+            <div class="form-g">
+                <label for="plan-moment">Moment</label>
+                <select id="plan-moment" class="inp">
+                    <option value="midi">☀️ Midi</option>
+                    <option value="soir"{% if recette.moment == 'Soir' %} selected{% endif %}>🌙 Soir</option>
+                </select>
+            </div>
+            <p class="plan-warn" id="plan-warn" hidden></p>
+            <p class="plan-done" id="plan-done" role="status" hidden>
+                ✅ <span id="plan-done-text"></span>
+                <a id="plan-done-link" href="#">Ouvrir le brouillon</a>
+            </p>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm" type="button" id="plan-cancel">Annuler</button>
+            <button class="btn btn-primary btn-sm" type="submit" id="plan-ok">📅 Ajouter</button>
+        </div>
+    </form>
+</div>
+<script type="application/json" id="page-data">{{ {"recette_id": recette.id, "drafts": drafts} | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/common.js?v={{ asset_version }}"></script>
 <script src="/static/js/rating.js?v={{ asset_version }}"></script>
+<script src="/static/js/recette-planifier.js?v={{ asset_version }}"></script>
 <script>
 const BASE_SERVINGS = {{ base_servings }};
 let servings = BASE_SERVINGS;
@@ -144,7 +193,8 @@ function render() {
         else if (scaled) cookLines.push(`@${nom}{${scaled}}`);
         else cookLines.push(`@${nom}`);
     });
-    document.getElementById('srv-n').textContent = servings;
+    const srvN = document.getElementById('srv-n');
+    if (srvN) srvN.textContent = servings;  // absent sans ingrédients
     const raw = document.getElementById('cook-raw');
     if (raw) raw.textContent = cookLines.join('\n');
 }

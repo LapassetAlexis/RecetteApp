@@ -6,14 +6,23 @@
     <h1>📖 Livre de recettes</h1>
     <p>{{ total }} recettes dans Notion</p>
     <div style="margin-top:8px;">
-        <button class="btn btn-sm btn-secondary" id="btn-enrich" onclick="enrichAll()">🔄 Enrichir toutes les recettes</button>
+        <button type="button" class="btn btn-sm btn-secondary" id="btn-enrich">🔄 Enrichir toutes les recettes</button>
         <span id="enrich-status" style="margin-left:8px;font-size:0.85rem;color:var(--t2);"></span>
     </div>
 </div>
 
 <!-- Recherche -->
 <div class="search-bar">
-    <input type="search" id="recipe-search" class="inp" placeholder="🔍 Rechercher (nom ou ingrédient : « courgette thon »)...">
+    <input type="search" id="recipe-search" class="inp" aria-label="Rechercher une recette" placeholder="🔍 Rechercher (nom ou ingrédient : « courgette thon »)...">
+    <label class="sort-row" for="recipe-sort">
+        <span>Trier</span>
+        <select id="recipe-sort" class="inp">
+            <option value="">Ordre Notion</option>
+            <option value="oubliees">Pas faite depuis longtemps</option>
+            <option value="notees">Mieux notées</option>
+            <option value="nom">Nom (A → Z)</option>
+        </select>
+    </label>
 </div>
 
 <!-- Filtres cliquables (nature / type / base / état / tag) -->
@@ -77,7 +86,7 @@
 } %}
 <div class="recettes-grid" id="recettes-grid">
     {% for recette in recettes %}
-    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-nature="{{ recette.nature or 'Recette' }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-base="{{ recette.base|join('|') }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
+    <div class="card recipe-card" data-name="{{ recette.nom|clean_title|lower }}" data-ings="{{ recette.ingredients_search }}" data-duree="{{ recette.duree }}" data-nature="{{ recette.nature or 'Recette' }}" data-type="{{ recette.repas|join('|') or 'Non classé' }}" data-base="{{ recette.base|join('|') }}" data-etat="{{ recette.etat }}" data-tags="{{ recette.tags|join('|')|lower }}" data-note="{{ recette.note|length }}" data-last="{{ recette.usage_last }}" data-count="{{ recette.usage_count or 0 }}" data-order="{{ loop.index0 }}" style="border-left:4px solid {{ type_colors.get((recette.repas or ['Non classé'])[0], '#d8d2cb') }};">
         {% if recette.image %}<img class="recipe-img" src="{{ recette.image }}" alt="" loading="lazy">{% else %}<div class="recipe-img recipe-img-ph" aria-hidden="true">🍽️</div>{% endif %}
         <h3 class="recipe-title"><a class="recipe-card-link" href="/recette/{{ recette.id }}">{{ recette.nom | clean_title }}</a></h3>
         <div class="recipe-meta">
@@ -97,6 +106,9 @@
             <span class="chip chip-moment">{{ recette.moment }}</span>
             {% endif %}
         </div>
+        {% if recette.usage_label %}
+        <p class="recipe-usage">🍳 {{ recette.usage_label }}</p>
+        {% endif %}
         {% if recette.tags %}
         <div class="recipe-tags">
             {% for tag in recette.tags %}
@@ -175,7 +187,30 @@ document.querySelectorAll('.stat-chip[data-filter]').forEach(chip => {
 });
 applyFilters();  // au chargement : masque les briques (nature=Recette par défaut)
 
+// ── Tri : pas faite depuis longtemps / mieux notées / nom ─────
+// « Pas faite depuis longtemps » : recettes déjà cuisinées, la plus ancienne
+// d'abord ; celles jamais planifiées viennent ensuite.
+const grid = document.getElementById('recettes-grid');
+const noteOf = card => card.querySelectorAll('.recipe-stars .star:not(.empty)').length;
+const SORTS = {
+    '': (a, b) => a.dataset.order - b.dataset.order,
+    nom: (a, b) => a.dataset.name.localeCompare(b.dataset.name, 'fr'),
+    notees: (a, b) => noteOf(b) - noteOf(a) || a.dataset.name.localeCompare(b.dataset.name, 'fr'),
+    oubliees: (a, b) => {
+        const la = a.dataset.last, lb = b.dataset.last;
+        if (!la !== !lb) return la ? -1 : 1;
+        return la.localeCompare(lb) || a.dataset.name.localeCompare(b.dataset.name, 'fr');
+    },
+};
+document.getElementById('recipe-sort').addEventListener('change', function() {
+    const cards = Array.from(grid.querySelectorAll('.recipe-card'));
+    cards.sort(SORTS[this.value] || SORTS['']);
+    const noResult = document.getElementById('no-result');
+    cards.forEach(c => grid.insertBefore(c, noResult));
+});
+
 // ── Enrichissement de masse (SSE, progression en direct) ─────
+document.getElementById('btn-enrich').addEventListener('click', enrichAll);
 function enrichAll() {
     if (!confirm("Enrichir toutes les recettes ? Cela lance des appels au LLM et écrit dans Notion pour chaque recette sans ingrédients.")) return;
     const btn = document.getElementById('btn-enrich');
