@@ -32,6 +32,7 @@ ROUTES_ATTENDUES = {
     ("GET", "/planning/{planning_id}"),
     ("GET", "/recette/{page_id}"),
     ("GET", "/recette/{page_id}/enrichir"),
+    ("GET", "/recette/{page_id}/cuisine"),
     ("GET", "/recettes"),
     ("GET", "/redoc"),
     ("GET", "/sw.js"),
