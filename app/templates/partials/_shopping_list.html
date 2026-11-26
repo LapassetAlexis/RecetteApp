@@ -1,0 +1,62 @@
+{# Corps de la liste de courses de la page planning. Rendu aussi seul par les
+   actions de /api/courses/… (ajout, retrait, masque, placard) : variables
+   `shop` (services.shopping.shopping_view) et `planning.id`. #}
+{% if shop.articles %}
+<div id="shop-g">
+    {% for grp in shop.par_rayon %}
+    <div class="shop-rayon" data-rayon="{{ grp.rayon }}">
+        <h3 class="rayon-h">{{ grp.rayon }} <span class="rayon-n">{{ grp['items']|length }}</span></h3>
+        <div class="shop-grid">
+            {% for item in grp['items'] %}
+            <label class="shop-i{% if item.extra %} shop-extra{% endif %}" data-item="{{ item.key }}">
+                <input type="checkbox" class="shop-c"{% if item.checked %} checked{% endif %}> <span>{{ item.nom|capitalize }}</span>
+                {% if item.qte %}<small>{{ item.qte }}</small>{% endif %}
+                {% if item.recettes %}
+                <button type="button" class="shop-src" title="{{ item.recettes | join(' · ') }}" aria-label="Voir les recettes liées">🍽</button>
+                {% endif %}
+                <button type="button" class="shop-more" aria-expanded="false" aria-label="Autres actions pour {{ item.nom }}" title="Autres actions">⋯</button>
+                {% if item.recettes %}<span class="shop-srcs">🍽 {{ item.recettes | join(' · ') }}</span>{% endif %}
+                <span class="shop-acts">
+                    {% if item.extra %}
+                    <button type="button" class="shop-act" data-act="suppr">✕ Retirer de la liste</button>
+                    {% else %}
+                    <button type="button" class="shop-act" data-act="masquer">Je l'ai déjà</button>
+                    <button type="button" class="shop-act" data-act="placard">🏠 Toujours à la maison</button>
+                    {% endif %}
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% elif shop.genere %}
+<p class="shop-vide">Tous les articles sont masqués.</p>
+{% endif %}
+{% if shop.masques %}
+<details class="shop-masques" id="shop-masques">
+    <summary>Masqués ({{ shop.masques|length }})</summary>
+    <ul>
+        {% for item in shop.masques %}
+        <li class="shop-m" data-item="{{ item.key }}">
+            <span>{{ item.nom|capitalize }}</span>
+            {% if item.qte %}<small>{{ item.qte }}</small>{% endif %}
+            {% if item.raison == 'placard' %}
+            <em class="shop-m-why">🏠 toujours à la maison</em>
+            <button type="button" class="shop-act" data-act="deplacard">Retirer du placard</button>
+            {% else %}
+            <button type="button" class="shop-act" data-act="restaurer">Restaurer</button>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</details>
+{% endif %}
+{% if not shop.genere %}
+<div class="shop-empty">
+    <p class="shop-empty-t">🛒 Aucun ingrédient pour l'instant</p>
+    <p class="shop-empty-s">Génère la liste de courses à partir des repas de la semaine.</p>
+    <button class="btn btn-primary btn-lg" id="btn-shop">🛒 Générer la liste de courses</button>
+    <p id="shop-status" class="loading-tip"></p>
+</div>
+{% endif %}

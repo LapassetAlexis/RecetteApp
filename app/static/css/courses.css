@@ -1,0 +1,64 @@
+/* Liste de courses : saisie rapide, actions par ligne, masqués, page publique. */
+
+/* ── Page planning ─────────────────────────────── */
+.shop-add { display:flex; gap:8px; margin-bottom:12px; }
+.shop-add input { flex:1; min-width:0; padding:8px 10px; border:1px solid var(--bo); border-radius:8px;
+    font-size:16px; background:var(--surface); color:var(--text); }
+.shop-add input:focus { outline:2px solid var(--pr); outline-offset:1px; }
+
+/* « ⋯ » à droite de la ligne ; les actions se déplient dessous. */
+.shop-more { border:none; background:transparent; color:var(--t2); cursor:pointer; font-size:1rem;
+    line-height:1; padding:4px 6px; min-width:32px; min-height:32px; margin-left:auto; flex-shrink:0; }
+.shop-i small ~ .shop-more, .shop-src ~ .shop-more { margin-left:0; }
+.shop-more:hover, .shop-i.acts-open .shop-more { color:var(--prd); }
+.shop-acts { display:none; flex-basis:100%; flex-wrap:wrap; gap:6px; padding:4px 0 2px 26px; }
+.shop-i.acts-open .shop-acts { display:flex; }
+.shop-act { border:1px solid var(--bo); background:var(--surface); color:var(--text); border-radius:6px;
+    padding:6px 10px; font-size:0.8rem; cursor:pointer; min-height:36px; }
+.shop-act:hover { border-color:var(--pr); }
+.shop-act:disabled { opacity:0.5; cursor:wait; }
+/* Barré « coché » : pas sur les boutons d'action. */
+.shop-i:has(.shop-c:checked) .shop-acts { text-decoration:none; }
+.shop-extra { border-style:dashed; }
+
+.shop-vide { color:var(--t2); font-size:0.88rem; margin:4px 0 8px; }
+.shop-masques { margin-top:12px; border-top:1px solid var(--bo); padding-top:4px; }
+.shop-masques summary { cursor:pointer; color:var(--t2); font-size:0.88rem; min-height:44px;
+    display:flex; align-items:center; }
+.shop-masques ul { list-style:none; margin:0; padding:0; }
+.shop-m { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 0;
+    border-bottom:1px solid var(--bo); font-size:0.85rem; color:var(--t2); }
+.shop-m small { font-size:0.75rem; background:var(--bg); padding:1px 6px; border-radius:8px; }
+.shop-m-why { font-size:0.75rem; }
+.shop-m .shop-act { margin-left:auto; }
+
+.shop-empty { text-align:center; padding:24px 8px 8px; }
+.shop-empty-t { font-size:1.2rem; margin-bottom:10px; }
+.shop-empty-s { color:var(--t2); margin-bottom:16px; }
+.shop-empty .loading-tip { margin-top:10px; }
+
+/* ── Page publique /courses/<jeton> ────────────── */
+.pub-wrap { max-width:680px; margin:0 auto; padding:16px; }
+.pub-h { display:flex; align-items:baseline; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.pub-h h1 { font-size:1.4rem; margin:0; }
+.pub-count { color:var(--t2); font-size:0.95rem; }
+.pub-copy { margin-left:auto; cursor:pointer; border:1px solid var(--bo); border-radius:8px;
+    background:var(--surface); color:var(--text); font-size:0.9rem; padding:8px 14px; min-height:44px; }
+.pub-copy:active { transform:scale(.97); }
+.pub-status { background:#fdecea; color:#a93226; border-radius:8px; padding:8px 12px; margin-bottom:12px;
+    font-size:0.9rem; }
+/* Cibles tactiles de 48 px : toute la ligne coche l'article. */
+.pub-i { min-height:48px; padding:8px 12px; font-size:1rem; background:var(--surface); }
+.pub-i .shop-c { width:26px; height:26px; }
+.pub-i .shop-src { min-width:40px; min-height:40px; font-size:1rem; }
+.pub-i .shop-srcs { padding-left:34px; }
+.pub-empty { text-align:center; padding:32px 16px; color:var(--t2); }
+.pub-empty p:first-child { font-size:1.4rem; margin-bottom:8px; }
+.pub-pris { margin-top:16px; }
+.pub-pris summary { cursor:pointer; min-height:48px; display:flex; align-items:center;
+    font-weight:600; color:var(--t2); }
+.pub-pris .shop-grid { margin-top:4px; }
+
+@media print {
+    .shop-add, .shop-more, .shop-acts, .shop-masques { display:none !important; }
+}
