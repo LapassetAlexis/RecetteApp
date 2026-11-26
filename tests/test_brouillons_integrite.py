@@ -165,8 +165,8 @@ def test_update_meal_met_a_jour_la_grille_du_brouillon(client, monkeypatch):
     _catalogue(monkeypatch, poulet, soupe, curry)
     pid = _construire(client, [_case(1, "midi", poulet, persons=2),
                                _case(1, "soir", soupe, persons=2)])
-    r = client.post(f"/api/update-meal/{pid}",
-                    json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
+    r = client.post(f"/api/planning/{pid}/meals",
+                    json={"slots": [{"jour": 1, "moment": "midi"}], "action": "set_main", "nom": "Curry"})
     assert r.json().get("success")
 
     builder = _initial_builder(client.get(f"/?draft={pid}").text)
@@ -190,8 +190,8 @@ def test_update_meal_purge_les_coches_orphelines(client, monkeypatch):
     for item in ("poulet", "sel"):
         client.post(f"/api/shopping-check/{pid}", json={"item": item, "checked": True})
 
-    client.post(f"/api/update-meal/{pid}",
-                json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
+    client.post(f"/api/planning/{pid}/meals",
+                json={"slots": [{"jour": 1, "moment": "midi"}], "action": "set_main", "nom": "Curry"})
     # « poulet » n'est plus dans la liste → coche retirée ; « sel » reste.
     assert _data(pid)["courses_checked"] == ["sel"]
 
@@ -216,7 +216,7 @@ def test_builder_from_plats_midis_consecutifs_groupes():
     plats.append(_plat(5, "midi", "Lasagnes", "l1"))  # identique mais non consécutif
     b = planning_svc._builder_from_plats(plats)
     assert len(b) == 14
-    assert [_slot(b, j, "midi")["group"] for j in range(1, 6)] == [1, 1, 1, 4, 5]
+    assert [_slot(b, j, "midi")["group"] for j in range(1, 6)] == [1, 1, 1, 2, 3]
     # Seul le premier midi du groupe porte le repas (comme le constructeur).
     assert _slot(b, 1, "midi")["main"]["nom"] == "Lasagnes"
     assert "main" not in _slot(b, 2, "midi")

@@ -219,8 +219,8 @@ def test_changement_de_repas_purge_les_coches_par_cle(client, monkeypatch):
     })
     for key in ("poulet|masse", "sel|pincee"):
         client.post(f"/api/shopping-check/{pid}", json={"item": key, "checked": True})
-    client.post(f"/api/update-meal/{pid}",
-                json={"jour": 1, "moment": "midi", "nouvelle_recette": "Curry"})
+    client.post(f"/api/planning/{pid}/meals",
+                json={"slots": [{"jour": 1, "moment": "midi"}], "action": "set_main", "nom": "Curry"})
     assert data_of(pid)["courses_checked"] == ["sel|pincee"]
 
 

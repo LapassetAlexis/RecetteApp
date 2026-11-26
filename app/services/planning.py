@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 from app.config import recipe_base, recipe_nature, recipe_types
 from app.deps import db, notion
-from app.text_utils import clean_recipe_title, parse_ingredient_line
+from app.text_utils import clean_recipe_title, merge_ingredients, parse_ingredient_line
 
 
 def _index_by_name(recettes: list[dict]) -> dict[str, dict]:
@@ -245,8 +245,163 @@ def _builder_item(src: dict) -> dict:
     }
 
 
+GROUPES_MAX = 5   # couleurs du constructeur (builder.js : GROUP_COLORS)
+
+
+def _persons_of(p: dict, default: int) -> int:
+    try:
+        n = int(p.get("persons") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return n if n > 0 else default
+
+
+def _plat_signature(p: dict | None):
+    """Identité d'un repas (plat + accompagnements), None pour un créneau vide."""
+    if not p:
+        return None
+    return (
+        str(p.get("notion_id", "") or ""), p.get("nom_recette", ""),
+        tuple((str(a.get("notion_id", "") or ""), a.get("nom_recette", ""))
+              for a in plat_accompagnements(p)),
+    )
+
+
+def _item_signature(main, accs) -> tuple | None:
+    """Même identité qu'un plat, calculée sur une case du constructeur."""
+    if not isinstance(main, dict) or not main.get("nom"):
+        return None
+    return (
+        str(main.get("notion_id", "") or ""), main.get("nom", ""),
+        tuple((str(a.get("notion_id", "") or ""), a.get("nom", ""))
+              for a in (accs if isinstance(accs, list) else [])
+              if isinstance(a, dict) and a.get("nom")),
+    )
+
+
+def _previous_cases(previous) -> dict[tuple[int, str], dict]:
+    """Cases lisibles de l'ancienne grille : {(jour, moment): {group, persons, sig}}.
+
+    Dans la grille, seul le premier midi actif d'un groupe porte le repas ; les
+    autres midis actifs du groupe le partagent (`sig` = repas du groupe)."""
+    out: dict[tuple[int, str], dict] = {}
+    for c in previous if isinstance(previous, list) else []:
+        if not isinstance(c, dict) or c.get("moment") not in ("midi", "soir"):
+            continue
+        try:
+            jour = int(c.get("jour"))
+            persons = max(0, int(c.get("persons") or 0))
+            group = int(c.get("group")) if c["moment"] == "midi" else 0
+        except (TypeError, ValueError):
+            continue
+        if 1 <= jour <= 7 and (jour, c["moment"]) not in out:
+            out[(jour, c["moment"])] = {
+                "group": group, "persons": persons,
+                "sig": _item_signature(c.get("main"), c.get("accompagnements")),
+            }
+    repas: dict[int, tuple] = {}
+    for jour in range(1, 8):
+        m = out.get((jour, "midi"))
+        if m and m["persons"] > 0 and m["sig"] is not None:
+            repas.setdefault(m["group"], m["sig"])
+    for jour in range(1, 8):
+        m = out.get((jour, "midi"))
+        if m:
+            m["sig"] = repas.get(m["group"]) if m["persons"] > 0 else None
+    return out
+
+
+def _midi_groups(sigs: dict[int, tuple | None], actifs: set[int],
+                 prev: dict[int, dict]) -> dict[int, int]:
+    """Numéro de groupe de chaque midi (jours 1..7). Même couleur = même repas :
+    deux midis actifs d'un même groupe ont toujours le même repas.
+
+    - midi actif dont le repas n'a pas changé : garde son ancien groupe
+      (s'il est entre 1 et GROUPES_MAX ; au-delà, les midis qui le partageaient
+      reçoivent ensemble un nouveau numéro) ;
+    - midis actifs consécutifs au même repas : même groupe ;
+    - sinon le plus petit groupe libre entre 1 et GROUPES_MAX. Si un groupe par
+      série ne tient pas dans GROUPES_MAX, les repas identiques non consécutifs
+      partagent leur groupe et les midis sans repas un groupe commun ; on ne
+      dépasse GROUPES_MAX que si cela ne suffit pas ;
+    - midi inactif (absent, hors période) : un groupe sans midi actif, de
+      préférence son ancien."""
+    groups: dict[int, int] = {}
+    repas_du_groupe: dict[int, tuple | None] = {}
+    remap: dict[int, int] = {}
+
+    def _garde(j: int, vides: bool = True) -> bool:
+        return (j in prev and prev[j]["sig"] == sigs[j] and 1 <= prev[j]["group"] <= GROUPES_MAX
+                and (vides or sigs[j] is not None))
+
+    # Groupes nécessaires si chaque série de repas et chaque midi vide a le sien.
+    gardes = {prev[j]["group"] for j in actifs if _garde(j)}
+    series = sum(1 for j in actifs if not _garde(j) and (
+        sigs[j] is None or not ((j - 1) in actifs and sigs[j - 1] == sigs[j])))
+    serre = len(gardes) + series > GROUPES_MAX
+    deja = [j for j in sorted(actifs) if _garde(j)]
+    if serre:
+        # Les midis vides ne gardent rien et passent en dernier : ils prennent
+        # ce qui reste, puis partagent un groupe sans repas. Un repas présent
+        # dans plusieurs anciens groupes n'en garde qu'un (le premier).
+        premier: dict[tuple, int] = {}
+        for j in deja:
+            if sigs[j] is not None:
+                premier.setdefault(sigs[j], prev[j]["group"])
+        deja = [j for j in deja if sigs[j] is not None and premier[sigs[j]] == prev[j]["group"]]
+    gardes = {prev[j]["group"] for j in deja}
+    autres = [j for j in sorted(actifs) if j not in deja]
+    if serre:
+        autres.sort(key=lambda j: (sigs[j] is None, j))
+
+    def _inchange(j: int) -> bool:
+        return j in prev and prev[j]["sig"] == sigs[j]
+
+    def _libre(exclure: set[int]) -> int | None:
+        return next((g for g in range(1, GROUPES_MAX + 1) if g not in exclure), None)
+
+    def _meme_repas(sig) -> int | None:
+        return next((k for k, s in repas_du_groupe.items() if s == sig), None)
+
+    for jour in deja + autres:
+        sig = sigs[jour]
+        old = prev.get(jour)
+        g = old["group"] if jour in deja else None
+        if g is None and _inchange(jour) and old["group"] > GROUPES_MAX:
+            g = remap.get(old["group"])
+        if g is not None and g in repas_du_groupe and repas_du_groupe[g] != sig:
+            g = None   # ancienne grille incohérente : on ne mélange pas deux repas
+        if g is None and sig is not None and (jour - 1) in groups and sigs[jour - 1] == sig:
+            g = groups[jour - 1]
+        if g is None and serre and sig is not None:
+            g = _meme_repas(sig)
+        if g is None:
+            g = _libre(set(repas_du_groupe) | gardes)
+        if g is None:
+            g = _meme_repas(sig)     # midi vide : rejoint un groupe sans repas
+        if g is None:
+            g = max(GROUPES_MAX, *repas_du_groupe, *gardes) + 1
+        if _inchange(jour) and old["group"] > GROUPES_MAX:
+            remap.setdefault(old["group"], g)
+        groups[jour] = g
+        repas_du_groupe.setdefault(g, sig)
+
+    utilises = set(repas_du_groupe)
+    for jour in range(1, 8):
+        if jour in groups:
+            continue
+        old = prev.get(jour)
+        if old and 1 <= old["group"] <= GROUPES_MAX and old["group"] not in utilises:
+            groups[jour] = old["group"]
+        else:
+            groups[jour] = (_libre(utilises | set(groups.values()))
+                            or _libre(utilises) or groups.get(jour - 1) or 1)
+    return groups
+
+
 def _builder_from_plats(plats: list[dict], off_meals: list[str] | None = None,
-                        default_persons: int = 4) -> list[dict]:
+                        default_persons: int = 4, previous: list | None = None,
+                        nb_jours: int | None = None) -> list[dict]:
     """Reconstruit la grille du constructeur (`builder`) depuis les plats.
 
     Sert aux anciens plannings sans `builder` et après une modification depuis
@@ -254,11 +409,14 @@ def _builder_from_plats(plats: list[dict], off_meals: list[str] | None = None,
     Une case par (jour, moment) sur 7 jours :
     - case avec plat : `persons` du plat (repli `default_persons`), plat
       principal + accompagnements ;
-    - case sans plat : absente (persons 0) si elle est dans `off_meals` ou si
-      le jour n'a aucun plat ; sinon vide avec les convives d'un plat du jour ;
-    - midis : `group` = jour, sauf midis CONSÉCUTIFS au même repas (même
-      plat, mêmes accompagnements) qui partagent le groupe du premier. Comme
-      dans le constructeur, seul le premier midi du groupe porte le repas."""
+    - case sans plat : absente (persons 0) si elle est dans `off_meals` ou hors
+      de la période (`nb_jours`, défaut : dernier jour porteur d'un plat) ;
+      sinon vide, avec ses anciens convives (`previous`), ceux d'un plat du
+      jour, ou à défaut `default_persons` ;
+    - midis : voir `_midi_groups`. `previous` (l'ancienne grille) garde les
+      groupes choisis dans le constructeur pour les midis inchangés ; sans
+      elle, numérotation compacte (1, 2, 3…). Comme dans le constructeur,
+      seul le premier midi actif d'un groupe porte le repas."""
     off = set(off_meals or [])
     by_slot: dict[tuple[int, str], dict] = {}
     for p in plats:
@@ -268,53 +426,43 @@ def _builder_from_plats(plats: list[dict], off_meals: list[str] | None = None,
             continue
         if 1 <= key[0] <= 7 and key[1] in ("midi", "soir"):
             by_slot.setdefault(key, p)
+    if not nb_jours:
+        nb_jours = max((j for j, _ in by_slot), default=0)
+    prev = _previous_cases(previous)
 
-    def _persons(p: dict) -> int:
-        try:
-            n = int(p.get("persons") or 0)
-        except (TypeError, ValueError):
-            n = 0
-        return n if n > 0 else default_persons
-
-    def _signature(p: dict | None):
-        if not p:
-            return None
-        return (
-            str(p.get("notion_id", "") or ""), p.get("nom_recette", ""),
-            tuple((str(a.get("notion_id", "") or ""), a.get("nom_recette", ""))
-                  for a in plat_accompagnements(p)),
-        )
-
-    out: list[dict] = []
-    prev_sig, prev_group = None, None
+    cases: dict[tuple[int, str], dict] = {}
     for jour in range(1, 8):
-        day_plats = [by_slot.get((jour, m)) for m in ("midi", "soir")]
-        day_persons = next((_persons(p) for p in day_plats if p), 0)
+        day_persons = next((_persons_of(by_slot[(jour, m)], default_persons)
+                            for m in ("midi", "soir") if (jour, m) in by_slot), 0)
         for moment in ("midi", "soir"):
             p = by_slot.get((jour, moment))
             case: dict = {"jour": jour, "moment": moment}
             if p:
-                case["persons"] = _persons(p)
-            elif f"{jour}:{moment}" in off:
+                case["persons"] = _persons_of(p, default_persons)
+                case["main"] = _builder_item(p)
+            elif f"{jour}:{moment}" in off or jour > nb_jours:
                 case["persons"] = 0
             else:
-                case["persons"] = day_persons
-            main_item = _builder_item(p) if p else None
-            accs = [_builder_item(a) for a in plat_accompagnements(p)] if p else []
-            if moment == "midi":
-                sig = _signature(p)
-                if sig is not None and sig == prev_sig:
-                    case["group"] = prev_group
-                    main_item, accs = None, []   # repas porté par le 1er midi
-                else:
-                    case["group"] = jour
-                    prev_group = jour
-                prev_sig = sig
-            if main_item:
-                case["main"] = main_item
-            case["accompagnements"] = accs
-            out.append(case)
-    return out
+                ancien = prev.get((jour, moment), {}).get("persons", 0)
+                case["persons"] = ancien or day_persons or default_persons
+            case["accompagnements"] = ([_builder_item(a) for a in plat_accompagnements(p)]
+                                       if p else [])
+            cases[(jour, moment)] = case
+
+    sigs = {j: _plat_signature(by_slot.get((j, "midi"))) for j in range(1, 8)}
+    actifs = {j for j in range(1, 8) if cases[(j, "midi")]["persons"] > 0}
+    prev_midis = {j: c for (j, m), c in prev.items() if m == "midi"}
+    groups = _midi_groups(sigs, actifs, prev_midis)
+    porteurs: set[int] = set()
+    for jour in range(1, 8):
+        case = cases[(jour, "midi")]
+        case["group"] = groups[jour]
+        if jour in actifs and groups[jour] in porteurs:
+            case.pop("main", None)            # repas porté par le 1er midi du groupe
+            case["accompagnements"] = []
+        elif jour in actifs:
+            porteurs.add(groups[jour])
+    return [cases[(j, m)] for j in range(1, 8) for m in ("midi", "soir")]
 
 
 def _build_plat(item: dict, jour: int, moment: str, persons: int,
@@ -426,22 +574,6 @@ def _recipe_rows(plats: list[dict]) -> list[dict]:
         }
         for p in plats
     ]
-
-
-async def _load_slot(planning_id: int, jour, moment):
-    """Charge un planning et repère le repas (jour, moment) à modifier.
-
-    Renvoie (planning, planning_data, plats, cible), ou {"error": …} si le
-    planning ou le repas n'existe pas."""
-    planning = await db.get_planning_with_recipes(planning_id)
-    if not planning:
-        return {"error": "Planning introuvable"}
-    planning_data = json.loads(planning["data_json"])
-    plats = planning_data["plats"]
-    cible = next((p for p in plats if p["jour"] == jour and p["moment"] == moment), None)
-    if not cible:
-        return {"error": "Repas non trouvé dans le planning"}
-    return planning, planning_data, plats, cible
 
 
 def _plats_from_cases(actives: list[dict], by_id: dict[str, dict]) -> list[dict]:
@@ -672,6 +804,52 @@ def _nb_jours_from_cases(cases: list[dict]) -> int:
     return max((c["jour"] for c in cases if c["persons"] > 0), default=0)
 
 
+# ── Construction depuis le constructeur (POST /construire) ──────────────
+
+
+def parse_week_start(raw) -> str | None:
+    """Date du jour 1 saisie (AAAA-MM-JJ), normalisée, ou None si invalide."""
+    try:
+        return date.fromisoformat(str(raw or "").strip()).isoformat()
+    except ValueError:
+        return None
+
+
+async def planning_from_builder(meals: str, nb_jours: str) -> tuple[dict, int] | None:
+    """Données d'un planning depuis la grille du constructeur (champ `meals`).
+
+    Renvoie `(data, nb_personnes)` — plats, convives par jour, absences, liste
+    de courses rangée par rayon (clés d'article comprises), grille brute et
+    période — ou None si aucun repas n'est renseigné. Lit le catalogue Notion :
+    à appeler hors du verrou d'écriture."""
+    # services.shopping importe ce module : import local.
+    from app.services.shopping import _collect_shopping, finalize_items
+
+    cases = _parse_builder_meals(meals)
+    actives = [c for c in cases if c["persons"] > 0]
+    by_id = {r["id"]: r for r in await notion.get_all_recipes()}
+    plats = _plats_from_cases(actives, by_id)
+    if not plats:
+        return None
+
+    # Personnes de référence + per_day (repli d'affichage / anciens plannings).
+    nb_personnes = max((c["persons"] for c in actives), default=4)
+    per_day_list = _per_day_from_cases(cases, nb_personnes)
+    # Liste de courses ANCRÉE sur le cache DB, mise à l'échelle PAR REPAS.
+    collected, _ = await _collect_shopping(plats, per_day_list, nb_personnes)
+    data = {
+        "plats": plats,
+        "liste_courses": finalize_items(merge_ingredients(collected)),
+        "per_day": ",".join(str(x) for x in per_day_list),
+        "off_meals": sorted(f"{c['jour']}:{c['moment']}" for c in cases if c["persons"] <= 0),
+        # Grille brute du formulaire, pour ré-éditer ce brouillon.
+        "builder": _json_or_none(meals) or [],
+        "nb_jours": (_periode_saisie(nb_jours) or _nb_jours_from_cases(cases)
+                     or _nb_jours({"plats": plats})),
+    }
+    return data, nb_personnes
+
+
 # ── Édition groupée des repas (POST /api/planning/{id}/meals) ────────────
 
 MEAL_ACTIONS = ("set_main", "add_side", "remove_side")
@@ -716,9 +894,22 @@ def _new_plat(planning: dict, data: dict, slot: dict, nom: str,
     return _build_plat(item, slot["jour"], slot["moment"], persons, by_id)
 
 
-async def apply_meals_batch(planning: dict, data: dict, slots: list[dict],
-                            action: str, nom: str, remplace: str = "") -> str | None:
+async def resolve_meal_action(action: str, nom: str) -> dict | None:
+    """Ce que l'action place, lu dans Notion AVANT d'écrire (hors verrou) :
+    la recette du catalogue pour set_main (None : repas libre), l'accompagnement
+    résolu pour add_side, rien pour remove_side."""
+    if action == "set_main":
+        return _index_by_name(await notion.get_all_recipes()).get(nom.lower().strip())
+    if action == "add_side":
+        return await _resolve_side(nom)
+    return None
+
+
+def apply_meals_batch(planning: dict, data: dict, slots: list[dict], action: str,
+                      nom: str, remplace: str = "", resolved: dict | None = None) -> str | None:
     """Applique UNE action à plusieurs créneaux, EN MÉMOIRE (`data["plats"]`).
+
+    `resolved` : résultat de `resolve_meal_action` (recette ou accompagnement).
 
     Renvoie un message d'erreur (rien n'est persisté : l'appelant n'écrit pas)
     ou None si toutes les mutations ont réussi ; l'appelant régénère alors la
@@ -736,7 +927,7 @@ async def apply_meals_batch(planning: dict, data: dict, slots: list[dict],
         return "Repas non trouvé dans le planning"
 
     if action == "set_main":
-        recette = _index_by_name(await notion.get_all_recipes()).get(nom.lower().strip())
+        recette = resolved
         off = set(data.get("off_meals") or [])
         for s in slots:
             target = by_slot.get((s["jour"], s["moment"]))
@@ -757,7 +948,7 @@ async def apply_meals_batch(planning: dict, data: dict, slots: list[dict],
 
     cle = nom.lower().strip()
     ancien = remplace.lower().strip()
-    side = await _resolve_side(nom) if action == "add_side" else None
+    side = resolved if action == "add_side" else None
     for s in slots:
         target = by_slot[(s["jour"], s["moment"])]
         accs = plat_accompagnements(target)
@@ -769,3 +960,42 @@ async def apply_meals_batch(planning: dict, data: dict, slots: list[dict],
         target["accompagnements"] = accs
         target.pop("accompagnement", None)
     return None
+
+
+# ── Copie et aperçu d'un planning ────────────────────────────────────────
+
+
+def copy_data(data: dict, nb_personnes: int = 4) -> dict:
+    """Données d'un nouveau brouillon recopié d'un planning (« refaire » une
+    semaine) : mêmes plats, convives, absences et période, sans liste de
+    courses. La grille du constructeur est reprise, ou reconstruite depuis les
+    plats pour les anciens plannings qui n'en ont pas (pour « Reprendre »)."""
+    plats = data.get("plats", [])
+    off_meals = data.get("off_meals", [])
+    builder = data.get("builder")
+    if not isinstance(builder, list) or not builder:
+        builder = _builder_from_plats(plats, off_meals, nb_personnes)
+    new_data = {
+        "plats": plats, "liste_courses": [], "per_day": data.get("per_day", ""),
+        "off_meals": off_meals, "builder": builder,
+    }
+    if data.get("nb_jours"):
+        new_data["nb_jours"] = data["nb_jours"]
+    return new_data
+
+
+def apercu_jours(plats: list[dict], week_start: str) -> list[dict]:
+    """Aperçu compact d'une semaine : par jour portant un repas, son libellé
+    court (dérivé de la date du jour 1) et le nom des repas midi et soir."""
+    day_labels = _day_labels(week_start)
+    by = {(p.get("jour"), p.get("moment")): p for p in plats}
+    jours = []
+    for d in range(1, 8):
+        midi, soir = by.get((d, "midi")), by.get((d, "soir"))
+        if midi or soir:
+            jours.append({
+                "jour": day_labels[d - 1]["court"],
+                "midi": _meal_label(midi) if midi else "",
+                "soir": _meal_label(soir) if soir else "",
+            })
+    return jours

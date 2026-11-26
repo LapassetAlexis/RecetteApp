@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.deps import db, templates
+from app.services import store
 from app.services.planning import _day_labels, _per_day_list, _repas_libres
 from app.services.shopping import (
     _collect_shopping,
@@ -55,55 +56,39 @@ async def _liste_html(planning_id: int, data: dict) -> dict:
 
 @router.post("/generate-shopping/{planning_id}")
 async def generate_shopping(planning_id: int, request: Request):
-    """Génère la liste de courses pour un planning existant."""
-    try:
-        planning = await db.get_planning_with_recipes(planning_id)
-        if not planning:
-            return {"error": "Planning introuvable"}
+    """Génère la liste de courses pour un planning existant (sous le verrou
+    du planning : une coche simultanée n'est ni perdue ni réécrite)."""
 
-        planning_data = json.loads(planning["data_json"])
+    async def fn(planning: dict, planning_data: dict):
         plats = planning_data.get("plats", [])
-
         if not plats:
-            return {"error": "Aucun plat dans ce planning"}
-
+            return store.NoWrite({"error": "Aucun plat dans ce planning"})
         # Ingrédients ANCRÉS sur le cache DB (pas d'extraction LLM à l'aveugle),
-        # mis à l'échelle selon le nb de personnes de chaque jour.
-        per_day = _per_day_list(planning, planning_data)
+        # mis à l'échelle selon le nb de personnes de chaque repas, puis fusion
+        # déterministe (dédup + addition par nom+unité, union des recettes),
+        # rayon et clé de chaque article.
         collected, non_enrichis = await _collect_shopping(
-            plats, per_day, planning["nb_personnes"],
+            plats, _per_day_list(planning, planning_data), planning["nb_personnes"],
         )
-        # Fusion déterministe (dédup + addition par nom+unité, union des recettes).
-        liste_courses = merge_ingredients(collected)
-
-        # Ajouter les ingrédients forcés
-        force = planning.get("ingredients_force", "")
-        if force:
-            for f in [i.strip() for i in force.split(",") if i.strip()]:
-                if f.lower() not in {i["nom"].lower() for i in liste_courses}:
-                    liste_courses.append({"nom": f, "quantite": "", "unite": "", "recettes": []})
-
-        # Rayon de magasin et clé de chaque article (groupement et coches).
-        finalize_items(liste_courses)
-
-        # Sauvegarder la liste de courses dans le planning.
-        # NB : on n'écrit PAS cette liste dans Notion par recette — c'est une
-        # liste agrégée/dédupliquée de la semaine, pas les ingrédients d'une
-        # recette donnée (ceux-ci sont gérés à l'ajout / via enrich-all).
+        liste_courses = finalize_items(merge_ingredients(collected))
+        # NB : cette liste agrégée n'est PAS écrite dans Notion par recette.
         planning_data["liste_courses"] = liste_courses
         # Nouveaux items : on repart sans coche (sauf articles manuels, qui
-        # survivent à la régénération), masques orphelins retirés.
-        # (Le share_token éventuel est conservé tel quel.)
+        # survivent à la régénération), masques orphelins retirés. Le
+        # share_token éventuel est conservé tel quel.
         reset_checks(planning_data)
         purge_orphans(planning_data)
-        await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
-
         return {
             "success": True,
             "liste_courses": liste_courses,
             "non_enrichis": sorted(set(non_enrichis)),
         }
 
+    try:
+        data, res = await store.update_planning(planning_id, fn)
+        if data is None:
+            return {"error": "Planning introuvable"}
+        return res
     except Exception as e:
         logger.exception("Erreur génération liste courses")
         return {"error": str(e)}
@@ -140,19 +125,19 @@ async def shopping_check(planning_id: int, request: Request):
 @router.post("/planning/{planning_id}/partager")
 async def partager_liste(planning_id: int):
     """Génère (une fois) un token de partage public et renvoie l'URL relative."""
-    try:
-        planning = await db.get_planning_with_recipes(planning_id)
-        if not planning:
-            return {"error": "Planning introuvable"}
 
-        planning_data = json.loads(planning["data_json"])
+    def fn(_planning: dict, planning_data: dict):
         token = planning_data.get("share_token")
-        if not token:
-            token = secrets.token_urlsafe(8)
-            planning_data["share_token"] = token
-            await db.update_planning_data(planning_id, json.dumps(planning_data, ensure_ascii=False))
-        return {"url": f"/courses/{token}"}
+        if token:
+            return store.NoWrite(token)
+        planning_data["share_token"] = secrets.token_urlsafe(8)
+        return planning_data["share_token"]
 
+    try:
+        data, token = await store.update_planning(planning_id, fn)
+        if data is None:
+            return {"error": "Planning introuvable"}
+        return {"url": f"/courses/{token}"}
     except Exception as e:
         logger.exception("Erreur génération lien de partage")
         return {"error": str(e)}
