@@ -183,10 +183,215 @@
     const hasMainMeal = (state, activeDays) =>
         Object.values(state).some(c => activeDays.has(c.jour) && c.persons > 0 && c.main);
 
+    // Empreinte de la grille (période + cases sérialisées) : comparée à celle du
+    // dernier enregistrement pour l'alerte « modifications non enregistrées ».
+    function snapshot(state, activeDays, weekStart) {
+        return JSON.stringify([weekStart || '', serialize(state, activeDays)]);
+    }
+
+    // Convives − / + : pas de 1, borné 0..20 (comme le champ numérique).
+    function stepPersons(p, delta) {
+        return Math.max(0, Math.min(20, (parseInt(p) || 0) + delta));
+    }
+
+    // ── Copier / déplacer / restes ─────────────────────────────────────
+    const cloneItem = it => ({ ...it });
+    // Case active : jour dans la période et convives > 0.
+    const isActiveCell = (c, activeDays) => !!c && c.persons > 0 && activeDays.has(c.jour);
+
+    // Groupe « propre » pour le midi du jour `day` : un groupe sans autre midi
+    // actif (de préférence totalement inutilisé). Garde le groupe actuel s'il
+    // est déjà seul. Au-delà des 5 couleurs, un nouveau numéro (couleur recyclée).
+    function freeGroup(state, activeDays, day) {
+        const others = [];
+        for (let d = 1; d <= 7; d++) if (d !== day) others.push(state[d + ':midi']);
+        const usedActive = new Set(others.filter(c => isActiveCell(c, activeDays)).map(c => c.group));
+        const usedAll = new Set(others.map(c => c.group));
+        const own = state[day + ':midi'].group;
+        if (!usedActive.has(own)) return own;
+        const n = GROUP_COLORS.length;
+        for (let g = 1; g <= n; g++) if (!usedAll.has(g)) return g;
+        for (let g = 1; g <= n; g++) if (!usedActive.has(g)) return g;
+        return Math.max(n, ...usedAll) + 1;
+    }
+
+    // Sort le midi du jour `day` de son groupe vers un groupe propre. S'il
+    // portait le repas du groupe (jour éditeur), ce repas passe au midi actif
+    // suivant du groupe pour que les autres jours le gardent.
+    function detachMidi(state, activeDays, day) {
+        const cell = state[day + ':midi'];
+        const g = freeGroup(state, activeDays, day);
+        if (g === cell.group) return state;
+        if (midiEditorDay(state, activeDays, cell.group) === day && cell.main) {
+            for (let d = 1; d <= 7; d++) {
+                const c = state[d + ':midi'];
+                if (d !== day && c.group === cell.group && isActiveCell(c, activeDays)) {
+                    c.main = cell.main;
+                    c.accompagnements = cell.accompagnements.map(cloneItem);
+                    break;
+                }
+            }
+        }
+        cell.group = g;
+        return state;
+    }
+
+    // Midi qui ne porte pas lui-même le repas de son groupe (lecture seule).
+    function isFollowerMidi(state, activeDays, c) {
+        if (c.moment !== 'midi') return false;
+        const ed = midiEditorDay(state, activeDays, c.group);
+        return ed !== null && ed !== c.jour;
+    }
+
+    // Cases de la période vers lesquelles copier/déplacer le repas de `fromKey` :
+    // cases actives, hors la source et hors les midis du même groupe qu'elle
+    // (ils partagent déjà son repas). Ordre de la grille.
+    function mealTargets(state, activeDays, fromKey) {
+        const src = state[fromKey];
+        const out = [];
+        for (let d = 1; d <= 7; d++) {
+            for (const m of ['midi', 'soir']) {
+                const key = d + ':' + m;
+                const c = state[key];
+                if (key === fromKey || !isActiveCell(c, activeDays)) continue;
+                if (src.moment === 'midi' && m === 'midi' && c.group === src.group) continue;
+                out.push(key);
+            }
+        }
+        return out;
+    }
+
+    // Copie le repas (plat + accompagnements) de `fromKey` vers `toKey`. Un midi
+    // cible qui suivait le repas d'un autre jour est d'abord sorti de son groupe.
+    // Renvoie false si la copie est impossible (source vide, cible invalide).
+    function copyMeal(state, activeDays, fromKey, toKey) {
+        const src = state[fromKey];
+        const dst = state[toKey];
+        if (!src || !src.main || !dst || fromKey === toKey) return false;
+        if (!mealTargets(state, activeDays, fromKey).includes(toKey)) return false;
+        if (isFollowerMidi(state, activeDays, dst)) detachMidi(state, activeDays, dst.jour);
+        dst.main = cloneItem(src.main);
+        dst.accompagnements = src.accompagnements.map(cloneItem);
+        return true;
+    }
+
+    // Déplace : copie puis vide la source.
+    function moveMeal(state, activeDays, fromKey, toKey) {
+        if (!copyMeal(state, activeDays, fromKey, toKey)) return false;
+        state[fromKey].main = null;
+        state[fromKey].accompagnements = [];
+        return true;
+    }
+
+    // Midi du lendemain de la case `fromKey` (cible des restes), ou null s'il
+    // sort de la période ou est absent (0 convive).
+    function leftoversTarget(state, activeDays, fromKey) {
+        const src = state[fromKey];
+        if (!src || !src.main) return null;
+        const key = (src.jour + 1) + ':midi';
+        return isActiveCell(state[key], activeDays) ? key : null;
+    }
+
+    // Restes → midi suivant : le midi du lendemain passe dans un groupe propre
+    // puis reçoit le même plat et les mêmes accompagnements.
+    function applyLeftovers(state, activeDays, fromKey) {
+        const toKey = leftoversTarget(state, activeDays, fromKey);
+        if (!toKey) return null;
+        const src = state[fromKey];
+        const dst = state[toKey];
+        // Source midi du même groupe que la cible : on la détache d'abord, sinon
+        // la cible ne quitterait pas le repas partagé.
+        detachMidi(state, activeDays, dst.jour);
+        dst.main = cloneItem(src.main);
+        dst.accompagnements = src.accompagnements.map(cloneItem);
+        return toKey;
+    }
+
+    // ── Picker : filtres et tri du catalogue ───────────────────────────
+    const PICKER_PAGE = 60;           // cartes rendues par lot (« Afficher plus »)
+    const QUICK_MINUTES = 30;
+    const STALE_DAYS = 28;            // « Pas faite depuis 4 semaines »
+    const RECENT_DAYS = 28;           // badge « il y a … » en deçà
+    const SEASONS = ['Hiver', 'Hiver', 'Printemps', 'Printemps', 'Printemps', 'Été',
+                     'Été', 'Été', 'Automne', 'Automne', 'Automne', 'Hiver'];
+
+    // Saison (tag Notion) d'une date : découpage par mois.
+    const seasonOf = d => SEASONS[d.getMonth()];
+    // « ⭐⭐⭐ » → 3 (0 sans note).
+    const noteValue = note => (String(note || '').match(/⭐/g) || []).length;
+    // Jours écoulés depuis « AAAA-MM-JJ » (négatif si dans le futur), null si vide.
+    function daysSince(iso, today) {
+        const d = parseDate(iso);
+        if (!d || !today) return null;
+        const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        return Math.round((t - d) / 86400000);
+    }
+    // Badge des recettes planifiées récemment, null au-delà de 4 semaines.
+    function recencyLabel(last, today) {
+        const n = daysSince(last, today);
+        if (n === null || n >= RECENT_DAYS) return null;
+        if (n < 0) return 'déjà prévue';
+        if (n === 0) return "aujourd'hui";
+        if (n < 7) return `il y a ${n} j`;
+        return `il y a ${Math.floor(n / 7)} sem.`;
+    }
+    const lastOf = it => (it.usage && it.usage.last) || '';
+    const isQuick = it => (it.tags || []).includes('Rapide')
+        || ((it.duree || 0) > 0 && it.duree <= QUICK_MINUTES);
+    // De saison : tag de la saison courante, ou aucun tag de saison (toutes saisons).
+    function isInSeason(it, season) {
+        const tags = it.tags || [];
+        const seasonTags = tags.filter(t => SEASONS.includes(t));
+        return !seasonTags.length || seasonTags.includes(season);
+    }
+    const isToTry = it => it.etat === 'À essayer';
+    // Jamais planifiée, ou dernière fois il y a 4 semaines ou plus.
+    function isStale(it, today) {
+        const n = daysSince(lastOf(it), today);
+        return n === null || n >= STALE_DAYS;
+    }
+    // Filtres supplémentaires du picker (cumulables).
+    const EXTRA_FILTERS = [
+        { id: 'rapide', label: '⏱️ Rapide', test: it => isQuick(it) },
+        { id: 'saison', label: 'De saison', test: (it, ctx) => isInSeason(it, ctx.season) },
+        { id: 'essayer', label: '🧪 À essayer', test: it => isToTry(it) },
+        { id: 'ancienne', label: '🕰️ Pas faite depuis 4 sem.', test: (it, ctx) => isStale(it, ctx.today) },
+    ];
+
+    // Filtre le catalogue : mode ('main'|'side'), nature, base, texte, filtres
+    // supplémentaires (Set d'ids d'EXTRA_FILTERS), date du jour.
+    function filterCatalogue(items, opts) {
+        const o = opts || {};
+        const today = o.today || new Date();
+        const ctx = { today, season: o.season || seasonOf(today) };
+        const q = (o.q || '').trim().toLowerCase();
+        const extra = EXTRA_FILTERS.filter(f => o.extra && o.extra.has(f.id));
+        return (items || []).filter(it =>
+            (o.mode === 'side' ? isSideItem(it) : isMainItem(it))
+            && (!o.nature || it.nature === o.nature)
+            && (!o.base || (it.base || []).includes(o.base))
+            && (!q || it.nom.toLowerCase().includes(q))
+            && extra.every(f => f.test(it, ctx)));
+    }
+    // Tri par défaut : jamais planifiées, puis planifiées il y a le plus
+    // longtemps, puis meilleure note, puis nom. Renvoie une nouvelle liste.
+    function sortCatalogue(items) {
+        return (items || []).slice().sort((a, b) => {
+            const la = lastOf(a), lb = lastOf(b);
+            if (la !== lb) return la < lb ? -1 : 1;      // '' (jamais) en tête
+            const na = noteValue(a.note), nb = noteValue(b.note);
+            if (na !== nb) return nb - na;
+            return a.nom.localeCompare(b.nom);
+        });
+    }
+
     window.Builder = {
         GROUP_COLORS, BASES, NON_REPAS, parseDate, isoDate, dayInfo, isSideItem, isMainItem,
         initialState, nbDaysInitial, activeDaysFor, hydrateBuilder, midiEditorDay,
-        consolidateGroups, rangeDays, serialize, hasMainMeal,
+        consolidateGroups, rangeDays, serialize, hasMainMeal, snapshot, stepPersons,
+        freeGroup, detachMidi, mealTargets, copyMeal, moveMeal, leftoversTarget, applyLeftovers,
+        PICKER_PAGE, EXTRA_FILTERS, seasonOf, noteValue, daysSince, recencyLabel, isQuick,
+        isInSeason, isToTry, isStale, filterCatalogue, sortCatalogue,
     };
 
     // ══ Page (DOM) ══════════════════════════════════════════════════════
@@ -237,11 +442,21 @@
         let h = `<div class="b-cell${off ? ' off' : ''}" data-moment-label="${momentLabel}" data-key="${c.jour}:${c.moment}"`
               + (c.moment === 'midi' && !off ? ` style="border-color:${col}"` : '') + '>';
         h += '<div class="b-top">';
-        h += `<div><span class="b-pers-lbl">👥</span> <input type="number" class="b-pers" min="0" max="20" value="${c.persons}" title="Convives (0 = absent)" aria-label="Convives ${dayLabel(c.jour)} ${c.moment} (0 = absent)"></div>`;
+        const where = `${dayLabel(c.jour)} ${c.moment}`;
+        // − / + : affichés en mobile seulement (cf. builder.css), cibles 48 px.
+        h += `<div class="b-pers-wrap"><span class="b-pers-lbl">👥</span>`
+            + `<button type="button" class="b-step" data-step="-1" aria-label="Un convive de moins ${where}"${c.persons <= 0 ? ' disabled' : ''}>−</button>`
+            + `<input type="number" class="b-pers" min="0" max="20" value="${c.persons}" title="Convives (0 = absent)" aria-label="Convives ${where} (0 = absent)">`
+            + `<button type="button" class="b-step" data-step="1" aria-label="Un convive de plus ${where}"${c.persons >= 20 ? ' disabled' : ''}>+</button></div>`;
+        h += '<div class="b-tools">';
         if (c.moment === 'midi') {
             h += `<button type="button" class="b-group" style="background:${col}" title="Groupe : même couleur = même repas" aria-label="Groupe ${c.group} du midi ${dayLabel(c.jour)} : changer de groupe" aria-haspopup="true">G${c.group}</button>`;
         }
-        h += '</div>';
+        // Menu « ⋯ » (copier, déplacer, restes) : cases qui portent leur propre repas.
+        if (c.main && !off && !isFollowerMidi(state, activeDays, c)) {
+            h += `<button type="button" class="b-more" title="Copier, déplacer, restes…" aria-label="Actions sur le repas ${where}" aria-haspopup="menu" aria-expanded="false">⋯</button>`;
+        }
+        h += '</div></div>';
         // Midi suiveur (pas le jour éditeur du groupe) : repas en lecture seule.
         if (c.moment === 'midi' && !off) {
             const ed = midiEditorDay(state, activeDays, c.group);
@@ -342,8 +557,19 @@
             });
             // Blur : re-render complet (recalcule éditeur/suiveurs des groupes).
             pers.addEventListener('change', () => renderGrid());
+            cell.querySelectorAll('.b-step').forEach(sb => {
+                sb.addEventListener('click', () => {
+                    c.persons = stepPersons(c.persons, parseInt(sb.dataset.step));
+                    renderGrid();
+                    // Re-rendu : on rend le focus au même bouton de la nouvelle case.
+                    const again = document.querySelector(`.b-cell[data-key="${cell.dataset.key}"] .b-step[data-step="${sb.dataset.step}"]`);
+                    if (again && !again.disabled) again.focus();
+                });
+            });
             const gb = cell.querySelector('.b-group');
             if (gb) gb.addEventListener('click', e => { e.stopPropagation(); openGroupPicker(gb, c); });
+            const mb = cell.querySelector('.b-more');
+            if (mb) mb.addEventListener('click', e => { e.stopPropagation(); openMealMenu(mb, cell.dataset.key); });
             cell.querySelectorAll('[data-act]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const act = btn.dataset.act;
@@ -362,6 +588,7 @@
     document.addEventListener('click', closeGroupPicker);
     function openGroupPicker(gb, c) {
         closeGroupPicker();
+        closeMealMenu(false);
         const pop = document.createElement('div');
         pop.className = 'group-picker';
         GROUP_COLORS.forEach((col, idx) => {
@@ -388,9 +615,101 @@
         groupPicker = pop;
     }
 
-    // Échap : ferme d'abord le sélecteur de groupe, sinon le picker de recettes.
+    // ── Menu « ⋯ » d'une case : copier, déplacer, restes ───────────────
+    let mealMenu = null;
+    let mealMenuOpener = null;
+    function closeMealMenu(refocus) {
+        if (!mealMenu) return;
+        mealMenu.remove(); mealMenu = null;
+        if (mealMenuOpener) {
+            mealMenuOpener.setAttribute('aria-expanded', 'false');
+            if (refocus && document.contains(mealMenuOpener)) mealMenuOpener.focus();
+        }
+        mealMenuOpener = null;
+    }
+    document.addEventListener('click', () => closeMealMenu(false));
+
+    const cellLabel = key => {
+        const [d, m] = key.split(':');
+        return `${dayLabel(parseInt(d))} · ${m === 'midi' ? 'Midi' : 'Soir'}`;
+    };
+    function menuItem(label, onClick, disabled) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'b-menu-item';
+        b.setAttribute('role', 'menuitem');
+        b.innerHTML = label;
+        if (disabled) b.disabled = true;
+        else b.addEventListener('click', ev => { ev.stopPropagation(); onClick(); });
+        return b;
+    }
+    // Remplit le menu : actions, ou liste des cases cibles (copier / déplacer).
+    function fillMealMenu(fromKey, view) {
+        const pop = mealMenu;
+        pop.innerHTML = '';
+        const done = (msg, focusKey) => {
+            closeMealMenu(false);
+            renderGrid();
+            const target = focusKey && document.querySelector(`.b-cell[data-key="${focusKey}"]`);
+            if (target) target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            if (window.toast) toast(msg, 'success');
+        };
+        if (view === 'copy' || view === 'move') {
+            pop.appendChild(menuItem('← Retour', () => fillMealMenu(fromKey, 'root')));
+            const targets = mealTargets(state, activeDays, fromKey);
+            if (!targets.length) {
+                pop.insertAdjacentHTML('beforeend', '<div class="b-menu-empty">Aucune autre case dans la période.</div>');
+            }
+            targets.forEach(key => {
+                const c = state[key];
+                const repl = c.main && !isFollowerMidi(state, activeDays, c)
+                    ? ` <small>(remplace ${esc(c.main.nom)})</small>` : '';
+                pop.appendChild(menuItem(esc(cellLabel(key)) + repl, () => {
+                    const fn = view === 'copy' ? copyMeal : moveMeal;
+                    if (fn(state, activeDays, fromKey, key)) {
+                        done((view === 'copy' ? 'Copié vers ' : 'Déplacé vers ') + cellLabel(key), key);
+                    }
+                }));
+            });
+        } else {
+            const lt = leftoversTarget(state, activeDays, fromKey);
+            pop.appendChild(menuItem('📋 Copier vers…', () => fillMealMenu(fromKey, 'copy')));
+            pop.appendChild(menuItem('➡️ Déplacer vers…', () => fillMealMenu(fromKey, 'move')));
+            pop.appendChild(menuItem(
+                lt ? `🍱 Restes → ${esc(cellLabel(lt))}` : '🍱 Restes → midi suivant <small>(hors période)</small>',
+                () => {
+                    const to = applyLeftovers(state, activeDays, fromKey);
+                    if (to) done('Restes prévus ' + cellLabel(to), to);
+                }, !lt));
+        }
+        const first = pop.querySelector('.b-menu-item:not([disabled])');
+        if (first) first.focus();
+    }
+    function openMealMenu(btn, fromKey) {
+        closeGroupPicker();
+        closeMealMenu(false);
+        const pop = document.createElement('div');
+        pop.className = 'b-menu';
+        pop.setAttribute('role', 'menu');
+        pop.setAttribute('aria-label', 'Actions sur ' + cellLabel(fromKey));
+        pop.addEventListener('click', ev => ev.stopPropagation());
+        document.body.appendChild(pop);
+        mealMenu = pop;
+        mealMenuOpener = btn;
+        btn.setAttribute('aria-expanded', 'true');
+        fillMealMenu(fromKey, 'root');
+        // Sous le bouton, aligné à droite, sans déborder de l'écran (mobile).
+        const r = btn.getBoundingClientRect();
+        const w = pop.offsetWidth;
+        const left = Math.max(8, Math.min(r.right - w, document.documentElement.clientWidth - w - 8));
+        pop.style.left = (window.scrollX + left) + 'px';
+        pop.style.top = (window.scrollY + r.bottom + 4) + 'px';
+    }
+
+    // Échap : ferme d'abord le menu ⋯ ou le sélecteur de groupe, sinon le picker.
     document.addEventListener('keydown', e => {
         if (e.key !== 'Escape') return;
+        if (mealMenu) { closeMealMenu(true); return; }
         if (groupPicker) { closeGroupPicker(); return; }
         const pk = window.BuilderPicker;
         if (pk && pk.isOpen()) { e.preventDefault(); pk.close(); }
@@ -414,6 +733,7 @@
             toast('Choisis au moins un repas principal (case avec des convives).', 'error');
             return;
         }
+        submitting = true;   // départ volontaire : pas d'alerte « non enregistré »
         const btn = $(submitAction === 'brouillon' ? 'btn-draft' : 'btn-b');
         btn.disabled = true;
         btn.textContent = submitAction === 'brouillon' ? '⏳ Enregistrement…' : '⏳ Création…';
@@ -428,4 +748,15 @@
     $('week_end').addEventListener('change', applyRange);
 
     renderGrid();
+
+    // ── Alerte « modifications non enregistrées » ──────────────────────
+    // Empreinte prise après le premier rendu (état du dernier enregistrement) ;
+    // l'alerte du navigateur ne part que si la grille ou la période a changé.
+    let submitting = false;
+    const savedSnapshot = snapshot(state, activeDays, $('week_start').value);
+    window.addEventListener('beforeunload', e => {
+        if (submitting || snapshot(state, activeDays, $('week_start').value) === savedSnapshot) return;
+        e.preventDefault();
+        e.returnValue = '';
+    });
 })();

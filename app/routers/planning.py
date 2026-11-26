@@ -6,25 +6,30 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.categories import RAYON_ORDER, categorize, group_by_rayon
 from app.config import BASE_OPTIONS, REPAS_OPTIONS
 from app.deps import db, notion, templates
 from app.services.nutrition_week import _week_nutrition
 from app.services.planning import (
+    MEAL_ACTIONS,
     _alternatives,
     _brique_ingredients,
     _builder_from_plats,
     _day_labels,
-    _editable_draft_id,
+    _editable_planning,
     _group_week,
     _index_by_name,
     _json_or_none,
     _load_slot,
     _mark_non_enrichis,
     _meal_label,
+    _merge_existing_data,
+    _nb_jours,
+    _nb_jours_from_cases,
     _parse_builder_meals,
+    _parse_slots,
     _per_day_from_cases,
     _per_day_list,
     _place_brique,
@@ -34,6 +39,7 @@ from app.services.planning import (
     _resolve_side,
     _set_main,
     _week_label,
+    apply_meals_batch,
 )
 from app.services.shopping import (
     _collect_shopping,
@@ -69,8 +75,11 @@ async def construire(
     `action` :
       - « valider » (défaut) → redirige vers la page planning (flux existant) ;
       - « brouillon » → reste en mode brouillon, redirige vers `/?draft=<id>`.
-    `draft_id` (optionnel) : si fourni, on MET À JOUR ce brouillon au lieu d'en
-    créer un nouveau. Les brouillons multiples coexistent (aucune purge)."""
+    `draft_id` (optionnel) : si fourni, on MET À JOUR ce planning au lieu d'en
+    créer un nouveau. Les brouillons multiples coexistent (aucune purge). Une
+    semaine validée rouverte (`/?planning=<id>`) reste validée, et « brouillon »
+    renvoie alors vers `/?planning=<id>`.
+    `data["nb_jours"]` = dernier jour de la période (dernier jour à convives)."""
 
     def _error_ctx(message: str) -> dict:
         # On repasse la grille saisie (builder) + le draft_id pour ne pas perdre
@@ -122,13 +131,16 @@ async def construire(
             "per_day": per_day,
             "off_meals": off_meals,
             "builder": _json_or_none(meals) or [],
+            "nb_jours": _nb_jours_from_cases(cases) or _nb_jours({"plats": plats}),
         }
         recipes = _recipe_rows(plats)
 
-        # Mise à jour d'un brouillon existant (draft_id valide) plutôt que
-        # création d'un nouveau planning.
-        target_id = await _editable_draft_id(draft_id)
+        # Mise à jour d'un planning existant (draft_id valide) plutôt que
+        # création d'un nouveau : les autres clés de data_json sont gardées.
+        existing = await _editable_planning(draft_id)
+        target_id = existing["id"] if existing else 0
         if target_id:
+            data = _merge_existing_data(existing, data)
             await db.update_planning(
                 planning_id=target_id,
                 data_json=json.dumps(data, ensure_ascii=False),
@@ -148,8 +160,10 @@ async def construire(
             )
 
         if action == "brouillon":
-            # On RESTE en mode brouillon : retour au constructeur pré-rempli.
-            return RedirectResponse(url=f"/?draft={planning_id}&saved=1", status_code=303)
+            # On RESTE dans le constructeur pré-rempli (semaine validée : elle
+            # le reste, on la rouvre par ?planning=).
+            param = "planning" if existing and existing.get("valide", 0) else "draft"
+            return RedirectResponse(url=f"/?{param}={planning_id}&saved=1", status_code=303)
         return RedirectResponse(url=f"/planning/{planning_id}", status_code=303)
 
     except Exception as e:
@@ -178,6 +192,8 @@ async def voir_planning(request: Request, planning_id: int):
 
     # Libellés des 7 jours dérivés de la date du jour 1 (week_start).
     day_labels = _day_labels(planning.get("week_start", ""))
+    # Période affichée : jours 1..nb_jours (les jours hors période sont masqués).
+    nb_jours = _nb_jours(data)
 
     return templates.TemplateResponse(
         request,
@@ -197,6 +213,7 @@ async def voir_planning(request: Request, planning_id: int):
             "rayon_order": RAYON_ORDER,
             "per_day": per_day,
             "off_meals": data.get("off_meals", []),
+            "nb_jours": nb_jours,
             "creneaux_non_resolus": data.get("creneaux_non_resolus", []),
             "briques_manquantes": data.get("briques_manquantes", ""),
             "valide": bool(planning.get("valide", 0)),
@@ -230,6 +247,8 @@ async def dupliquer_planning(planning_id: int):
         "plats": plats, "liste_courses": [], "per_day": data.get("per_day", ""),
         "off_meals": off_meals, "builder": builder,
     }
+    if data.get("nb_jours"):
+        new_data["nb_jours"] = data["nb_jours"]
     new_id = await db.save_planning(
         week_start=week_start,
         saison=src.get("saison", ""),
@@ -288,6 +307,59 @@ async def api_planning_apercu(planning_id: int):
     return {"jours": jours}
 
 
+@router.post("/api/planning/{planning_id}/meals")
+async def api_planning_meals(planning_id: int, request: Request):
+    """Modifie PLUSIEURS créneaux en une requête, de façon atomique.
+
+    Corps JSON :
+      {"slots": [{"jour": 1-7, "moment": "midi"|"soir", "persons": int?}, ...],
+       "action": "set_main" | "add_side" | "remove_side",
+       "nom": str,            # recette (plat ou accompagnement)
+       "remplace": str?}      # add_side : accompagnement à retirer d'abord
+
+    - set_main : remplace le plat principal de chaque créneau (accompagnements
+      remis à zéro). Un créneau ENCORE VIDE (y compris « absent ») est créé :
+      convives = `persons` du slot, sinon ceux du jour, sinon du planning.
+      Sert aussi à l'ajout depuis une fiche recette (L11). Un nom inconnu du
+      catalogue Notion devient un repas libre.
+    - add_side / remove_side : sur des créneaux qui ont déjà un plat.
+
+    Toutes les mutations sont appliquées en mémoire, la liste de courses est
+    régénérée une fois et le planning écrit une seule fois : en cas d'erreur
+    (créneau manquant, exception…), rien n'est écrit.
+    Réponse : {"success": true, "liste_courses": [...], "plats": [...]} ;
+    erreurs : {"error": "..."} avec un statut 400 (corps invalide),
+    404 (planning ou repas introuvable) ou 500."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Corps JSON attendu"}, status_code=400)
+    slots = _parse_slots(body.get("slots"))
+    action = body.get("action")
+    nom = str(body.get("nom") or "").strip()
+    remplace = str(body.get("remplace") or "").strip()
+    if slots is None or action not in MEAL_ACTIONS or not nom:
+        return JSONResponse(
+            {"error": "Paramètres invalides (slots jour 1-7 / moment midi|soir, action, nom)"},
+            status_code=400,
+        )
+
+    planning = await db.get_planning_with_recipes(planning_id)
+    if not planning:
+        return JSONResponse({"error": "Planning introuvable"}, status_code=404)
+    try:
+        data = json.loads(planning["data_json"] or "{}")
+        erreur = await apply_meals_batch(planning, data, slots, action, nom, remplace)
+        if erreur:
+            return JSONResponse({"error": erreur}, status_code=404)
+        return await _refresh_shopping_and_save(planning, planning_id, data, data["plats"])
+    except Exception as e:
+        logger.exception("Erreur modification groupée des repas")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/api/alternatives/{planning_id}")
 async def api_alternatives(planning_id: int):
     """Retourne les recettes disponibles non utilisées dans ce planning."""
@@ -312,7 +384,10 @@ async def api_update_meal(
     planning_id: int,
     request: Request,
 ):
-    """Remplace un repas dans le planning et regénère la liste de courses."""
+    """Remplace un repas dans le planning et regénère la liste de courses.
+
+    Déprécié : utiliser POST /api/planning/{id}/meals (action set_main), qui
+    traite plusieurs créneaux en une écriture."""
 
     data = await request.json()
     jour = data.get("jour")
@@ -414,7 +489,9 @@ async def api_free_meal(planning_id: int, request: Request):
 @router.post("/api/add-side/{planning_id}")
 async def api_add_side(planning_id: int, request: Request):
     """Ajoute (APPEND) un accompagnement au repas ciblé. Doublon (même nom)
-    ignoré. JSON attendu : {jour:int, moment:str, nom:str}."""
+    ignoré. JSON attendu : {jour:int, moment:str, nom:str}.
+
+    Déprécié : utiliser POST /api/planning/{id}/meals (action add_side)."""
     data = await request.json()
     nom = (data.get("nom") or data.get("nouvelle_recette") or "").strip()
     if not nom:
@@ -432,7 +509,9 @@ async def api_add_side(planning_id: int, request: Request):
 @router.post("/api/remove-side/{planning_id}")
 async def api_remove_side(planning_id: int, request: Request):
     """Retire UN accompagnement du repas ciblé (par nom).
-    JSON attendu : {jour:int, moment:str, nom:str}."""
+    JSON attendu : {jour:int, moment:str, nom:str}.
+
+    Déprécié : utiliser POST /api/planning/{id}/meals (action remove_side)."""
     data = await request.json()
     nom = (data.get("nom") or "").strip().lower()
     if not nom:

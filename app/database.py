@@ -13,6 +13,29 @@ def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
     return dict(row) if row else {}
 
 
+def _share_token_of(data_json: str | None) -> str | None:
+    """Jeton de partage public porté par un data_json, None s'il n'y en a pas.
+
+    Lecture tolérante : un JSON illisible ou sans `share_token` donne None."""
+    try:
+        data = json.loads(data_json or "")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    token = data.get("share_token")
+    return str(token) if token else None
+
+
+# Colonnes exportées/importées (la colonne `share_token` n'y figure pas : elle
+# est dérivée du data_json et recalculée à l'import).
+PLANNING_COLUMNS = ("id", "week_start", "created_at", "saison", "nb_personnes",
+                    "ingredients_force", "data_json", "valide")
+PLANNING_RECIPE_COLUMNS = ("notion_id", "recipe_name", "repas_type", "jour", "moment")
+ENRICHED_COLUMNS = ("notion_id", "recipe_name", "ingredients", "cuisson_minutes", "saison",
+                    "dernier_usage", "nutrition", "base_servings")
+
+
 async def _insert_planning_recipes(
     conn: aiosqlite.Connection, planning_id: int, recipes: list[dict[str, Any]],
 ) -> None:
@@ -108,6 +131,26 @@ class Database:
                 await db.execute(
                     "ALTER TABLE enriched_recipes ADD COLUMN base_servings INTEGER DEFAULT 4"
                 )
+            if not await _has_column("planning_history", "share_token"):
+                # Jeton de partage public en colonne indexée (il n'était stocké
+                # que dans data_json, retrouvé en parcourant tous les plannings).
+                await db.execute("ALTER TABLE planning_history ADD COLUMN share_token TEXT")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_planning_history_share_token "
+                "ON planning_history(share_token)"
+            )
+            # Remplissage depuis data_json des lignes qui n'ont pas encore la
+            # colonne à jour (premier démarrage après migration). Idempotent.
+            rows = await db.execute_fetchall(
+                "SELECT id, data_json FROM planning_history "
+                "WHERE share_token IS NULL AND data_json LIKE '%share_token%'"
+            )
+            for pid, data_json in rows:
+                token = _share_token_of(data_json)
+                if token:
+                    await db.execute(
+                        "UPDATE planning_history SET share_token = ? WHERE id = ?", (token, pid)
+                    )
             await db.commit()
 
     # ── Historique des plannings ──────────────────────────────────
@@ -125,9 +168,10 @@ class Database:
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute(
                 """INSERT INTO planning_history
-                   (week_start, saison, nb_personnes, ingredients_force, data_json)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (week_start, saison, nb_personnes, ingredients_force, data_json),
+                   (week_start, saison, nb_personnes, ingredients_force, data_json, share_token)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (week_start, saison, nb_personnes, ingredients_force, data_json,
+                 _share_token_of(data_json)),
             )
             planning_id = cur.lastrowid
             await _insert_planning_recipes(db, planning_id, recipes)
@@ -146,7 +190,7 @@ class Database:
 
         `week_start` et `nb_personnes` ne sont modifiés que s'ils sont fournis
         (re-soumission d'un brouillon avec une autre date de début)."""
-        sets, params = ["data_json = ?"], [data_json]
+        sets, params = ["data_json = ?", "share_token = ?"], [data_json, _share_token_of(data_json)]
         if week_start:
             sets.append("week_start = ?")
             params.append(week_start)
@@ -166,11 +210,14 @@ class Database:
             await db.commit()
 
     async def update_planning_data(self, planning_id: int, data_json: str) -> None:
-        """Met à jour uniquement le data_json d'un planning (ex. liste de courses)."""
+        """Met à jour uniquement le data_json d'un planning (ex. liste de courses).
+
+        La colonne `share_token` suit le jeton éventuellement présent dans le
+        data_json (le partage l'y écrit)."""
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
-                "UPDATE planning_history SET data_json = ? WHERE id = ?",
-                (data_json, planning_id),
+                "UPDATE planning_history SET data_json = ?, share_token = ? WHERE id = ?",
+                (data_json, _share_token_of(data_json), planning_id),
             )
             await db.commit()
 
@@ -236,26 +283,17 @@ class Database:
             return planning
 
     async def get_planning_by_share_token(self, token: str) -> dict[str, Any] | None:
-        """Retrouve un planning dont le data_json contient ce share_token.
-
-        Pas de colonne dédiée : on filtre en Python sur le JSON (le nombre de
-        plannings reste petit, et le partage est une action ponctuelle)."""
+        """Retrouve le planning partagé sous ce jeton (colonne indexée
+        `share_token`, tenue à jour à chaque écriture du data_json)."""
         if not token:
             return None
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             rows = await db.execute_fetchall(
-                "SELECT * FROM planning_history ORDER BY id DESC"
+                "SELECT * FROM planning_history WHERE share_token = ? ORDER BY id DESC LIMIT 1",
+                (token,),
             )
-            for row in rows:
-                planning = _row_to_dict(row)
-                try:
-                    data = json.loads(planning["data_json"])
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if data.get("share_token") == token:
-                    return planning
-        return None
+        return _row_to_dict(rows[0]) if rows else None
 
     async def list_plannings(
         self, limit: int = 10
@@ -388,21 +426,137 @@ class Database:
 
         Lecture tolérante : un JSON illisible ou qui n'est pas un objet donne {}."""
         async with aiosqlite.connect(self.path) as db:
-            rows = await db.execute_fetchall("SELECT data_json FROM app_prefs WHERE id = 1")
-        if not rows:
-            return {}
-        try:
-            data = json.loads(rows[0][0])
-        except (json.JSONDecodeError, TypeError):
-            return {}
-        return data if isinstance(data, dict) else {}
+            return await _read_prefs(db)
 
     async def save_app_prefs(self, data: dict[str, Any]) -> None:
         """Remplace les réglages du foyer (ligne unique id = 1)."""
         async with aiosqlite.connect(self.path) as db:
-            await db.execute(
-                """INSERT INTO app_prefs (id, data_json) VALUES (1, ?)
-                   ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json""",
-                (json.dumps(data, ensure_ascii=False),),
-            )
+            await _write_prefs(db, data)
             await db.commit()
+
+    # ── Sauvegarde / restauration (cf. app/services/backup.py) ────
+
+    async def dump_all(self) -> dict[str, Any]:
+        """Lignes brutes de toutes les tables de données, pour l'export :
+        {"plannings": [... avec "recipes"], "enriched": [...], "prefs": {...}}."""
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            plannings = [
+                _row_to_dict(r) for r in await db.execute_fetchall(
+                    f"SELECT {', '.join(PLANNING_COLUMNS)} FROM planning_history ORDER BY id"
+                )
+            ]
+            recipes: dict[int, list[dict[str, Any]]] = {}
+            for r in await db.execute_fetchall(
+                f"SELECT planning_id, {', '.join(PLANNING_RECIPE_COLUMNS)} "
+                "FROM planning_recipes ORDER BY planning_id, id"
+            ):
+                row = _row_to_dict(r)
+                recipes.setdefault(row.pop("planning_id"), []).append(row)
+            for p in plannings:
+                p["recipes"] = recipes.get(p["id"], [])
+            enriched = [
+                _row_to_dict(r) for r in await db.execute_fetchall(
+                    f"SELECT {', '.join(ENRICHED_COLUMNS)} FROM enriched_recipes ORDER BY notion_id"
+                )
+            ]
+            prefs = await _read_prefs(db)
+        return {"plannings": plannings, "enriched": enriched, "prefs": prefs}
+
+    async def counts(self) -> dict[str, int]:
+        """Nombre de plannings validés, de brouillons et de recettes en cache."""
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall(
+                "SELECT COALESCE(SUM(valide = 1), 0), COALESCE(SUM(valide = 0), 0) FROM planning_history"
+            )
+            valides, brouillons = rows[0]
+            rows = await db.execute_fetchall("SELECT COUNT(*) FROM enriched_recipes")
+        return {"plannings": int(valides), "brouillons": int(brouillons), "enriched": int(rows[0][0])}
+
+    async def restore_all(
+        self,
+        plannings: list[dict[str, Any]],
+        enriched: list[dict[str, Any]],
+        prefs: dict[str, Any],
+        replace: bool,
+    ) -> dict[str, int]:
+        """Restaure des données exportées, en UNE transaction (tout ou rien).
+
+        - `replace=True` : vide les tables puis réinsère tout, ids d'origine
+          conservés (les liens /planning/<id> restent valides).
+        - `replace=False` (fusion) : ajoute les plannings absents (clé
+          week_start + created_at) sous un nouvel id, les recettes en cache
+          absentes (une entrée locale n'est jamais écrasée) et les réglages
+          dont la clé manque localement.
+
+        Les données doivent avoir été validées en amont. Retourne le nombre de
+        plannings et de recettes effectivement insérés."""
+        added = {"plannings": 0, "enriched": 0}
+        async with aiosqlite.connect(self.path) as db:
+            try:
+                if replace:
+                    for table in ("planning_recipes", "planning_history", "enriched_recipes", "app_prefs"):
+                        await db.execute(f"DELETE FROM {table}")
+                    existing: set[tuple[str, str]] = set()
+                    current_prefs: dict[str, Any] = {}
+                else:
+                    existing = {
+                        (w, c) for w, c in await db.execute_fetchall(
+                            "SELECT week_start, created_at FROM planning_history"
+                        )
+                    }
+                    current_prefs = await _read_prefs(db)
+
+                cols = [c for c in PLANNING_COLUMNS if replace or c != "id"]
+                for p in plannings:
+                    if (p["week_start"], p["created_at"]) in existing:
+                        continue
+                    cur = await db.execute(
+                        f"INSERT INTO planning_history ({', '.join(cols)}, share_token) "
+                        f"VALUES ({', '.join('?' * len(cols))}, ?)",
+                        (*(p.get(c) for c in cols), _share_token_of(p.get("data_json"))),
+                    )
+                    await _insert_planning_recipes(db, cur.lastrowid, p.get("recipes", []))
+                    added["plannings"] += 1
+                    if not replace:
+                        existing.add((p["week_start"], p["created_at"]))
+
+                verb = "INSERT" if replace else "INSERT OR IGNORE"
+                for e in enriched:
+                    cur = await db.execute(
+                        f"{verb} INTO enriched_recipes ({', '.join(ENRICHED_COLUMNS)}) "
+                        f"VALUES ({', '.join('?' * len(ENRICHED_COLUMNS))})",
+                        tuple(e.get(c) for c in ENRICHED_COLUMNS),
+                    )
+                    added["enriched"] += cur.rowcount
+
+                # Fusion : les réglages locaux l'emportent clé par clé.
+                merged_prefs = {**prefs, **current_prefs}
+                if merged_prefs:
+                    await _write_prefs(db, merged_prefs)
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
+        return added
+
+
+async def _read_prefs(db: aiosqlite.Connection) -> dict[str, Any]:
+    """Réglages du foyer lus sur une connexion ouverte ({} si absents ou illisibles)."""
+    rows = await db.execute_fetchall("SELECT data_json FROM app_prefs WHERE id = 1")
+    if not rows:
+        return {}
+    try:
+        data = json.loads(rows[0][0])
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+async def _write_prefs(db: aiosqlite.Connection, data: dict[str, Any]) -> None:
+    """Écrit la ligne unique de réglages (sans commit)."""
+    await db.execute(
+        """INSERT INTO app_prefs (id, data_json) VALUES (1, ?)
+           ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json""",
+        (json.dumps(data, ensure_ascii=False),),
+    )

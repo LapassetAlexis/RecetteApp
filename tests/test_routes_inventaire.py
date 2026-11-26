@@ -7,11 +7,14 @@ import app.main as main
 
 ROUTES_ATTENDUES = {
     ("GET", "/"),
+    ("GET", "/admin"),
+    ("GET", "/admin/export"),
     ("GET", "/ajouter"),
     ("GET", "/api/alternatives/{planning_id}"),
     ("GET", "/api/catalogue"),
     ("GET", "/api/enrich-all/stream"),
     ("GET", "/api/planning/{planning_id}/apercu"),
+    ("POST", "/api/planning/{planning_id}/meals"),
     ("GET", "/courses/{token}"),
     ("GET", "/courses/{token}/etat"),
     ("POST", "/courses/{token}/check"),
@@ -37,6 +40,8 @@ ROUTES_ATTENDUES = {
     ("HEAD", "/openapi.json"),
     ("HEAD", "/redoc"),
     ("MOUNT", "/static"),
+    ("POST", "/admin/import"),
+    ("POST", "/admin/rehydrater"),
     ("POST", "/ajouter-recette"),
     ("POST", "/api/add-side/{planning_id}"),
     ("POST", "/api/analyze-text"),

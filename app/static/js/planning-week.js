@@ -59,25 +59,26 @@
         $('alt-list').innerHTML = '<p class="empty">⏳</p>';
         loadAlternatives();
     }
-    const postSide = (url, body) => postJson(`${url}/${pid}`, body);
+    // Édition groupée : UNE requête pour tous les créneaux (jours fusionnés,
+    // sélection multiple) ; le serveur applique tout ou rien.
+    // sel = [{jours:[...], m}] ; extra = champs en plus (ex. remplace).
+    async function batchMeals(sel, action, nom, extra) {
+        const slots = [];
+        sel.forEach(s => s.jours.forEach(j => slots.push({jour: j, moment: s.m})));
+        try {
+            const d = await postJson(`/api/planning/${pid}/meals`, Object.assign({slots, action, nom}, extra || {}));
+            if (d.success) return true;
+            toast(d.error || 'Erreur lors de la modification', 'error');
+        } catch (e) { toast('Erreur réseau', 'error'); }
+        return false;
+    }
     // Depuis le picker : ➕ append ; ↻ remplace (retire l'ancien puis ajoute).
     async function setSide(slot, nom) {
-        for (const j of slot.jours) {
-            if (sideReplace) {
-                const d0 = await postSide('/api/remove-side', {jour: j, moment: slot.m, nom: sideReplace});
-                if (!d0.success) { toast(d0.error || 'Erreur accompagnement', 'error'); return; }
-            }
-            const d = await postSide('/api/add-side', {jour: j, moment: slot.m, nom});
-            if (!d.success) { toast(d.error || 'Erreur accompagnement', 'error'); return; }
-        }
-        window.location.reload();
+        const extra = sideReplace ? {remplace: sideReplace} : null;
+        if (await batchMeals([slot], 'add_side', nom, extra)) window.location.reload();
     }
     async function removeSide(slot, nom) {
-        for (const j of slot.jours) {
-            const d = await postSide('/api/remove-side', {jour: j, moment: slot.m, nom});
-            if (!d.success) { toast(d.error || 'Erreur accompagnement', 'error'); return; }
-        }
-        window.location.reload();
+        if (await batchMeals([slot], 'remove_side', nom)) window.location.reload();
     }
 
     // ── Alternatives (modale) ──────────────────────────────────────────
@@ -120,12 +121,8 @@
     }
     async function replaceMeals(n) {
         $('alt-list').innerHTML = '<p class="empty">⏳ Mise à jour...</p>';
-        let ok = true;
-        for (const s of selection) for (const j of s.jours) {
-            const last = await postJson(`/api/update-meal/${pid}`, {jour: j, moment: s.m, nouvelle_recette: n});
-            if (!last.success) { ok = false; toast(last.error || 'Erreur lors du remplacement', 'error'); break; }
-        }
-        if (ok) window.location.reload();
+        if (await batchMeals(selection, 'set_main', n)) window.location.reload();
+        else loadAlternatives();
     }
 
     // ── Repas libre : crée une recette minimale et la place dans le(s) créneau(x) ──

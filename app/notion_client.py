@@ -189,6 +189,13 @@ class NotionClient:
         except (TypeError, ValueError):
             base_servings = 4
 
+        # Ingrédients (rich_text) : copie texte écrite par update_ingredients
+        # (une ligne par ingrédient, tronquée à 2000 caractères). Sert à
+        # réhydrater le cache local si la base SQLite est perdue.
+        ingredients_text = "".join(
+            t.get("plain_text", "") for t in (p.get("Ingrédients", {}).get("rich_text") or [])
+        ).strip()
+
         # Image = couverture de la page (external ou fichier uploadé)
         image = ""
         cover = page.get("cover")
@@ -209,6 +216,7 @@ class NotionClient:
             "moment": moment,
             "base_servings": base_servings,
             "image": image,
+            "ingredients_text": ingredients_text,
         }
 
     # ── Création d'une fiche ──────────────────────────────────────
