@@ -1,21 +1,30 @@
 // Service Worker — Menu Planner
 // Stratégie :
-//  - assets statiques (/static/...) : stale-while-revalidate.
-//  - navigations (pages HTML) : network-first avec repli sur le cache, puis
-//    sur la page de secours /static/offline.html (pré-cachée). La liste de
-//    courses reste consultable sans réseau si elle a déjà été visitée.
+//  - assets statiques (/static/...) : stale-while-revalidate. Une seule
+//    entrée par chemin : ranger `style.css?v=B` retire `style.css?v=A` (et la
+//    copie pré-cachée sans `?v=`). Sans cela, chaque redémarrage du serveur
+//    (nouvel `asset_version`) ajouterait une copie de chaque fichier.
+//  - navigations (pages HTML) : réseau. Seule la liste de courses publique
+//    (/courses/<jeton>) est mise en cache, pour rester consultable sans
+//    réseau ; les autres pages (protégées par l'authentification) ne sont
+//    jamais conservées et tombent, hors ligne, sur la page de secours
+//    /static/offline.html (pré-cachée).
+//  - au plus MAX_PAGES listes publiques en cache : les plus anciennes sont
+//    retirées, avec leur état des coches.
 //  - état des coches de la liste publique (/courses/<jeton>/etat) : réseau
 //    puis cache ; la réponse tirée du cache porte l'en-tête X-SW-Cache: 1
 //    pour que la page sache qu'elle est hors ligne.
 //  - la page publique demande (message 'cache-urls') la mise en cache
 //    d'elle-même et de ses CSS/JS : lors de la toute première visite, elle
-//    n'est pas encore contrôlée par le service worker.
+//    n'est pas encore contrôlée par le service worker. Seules ces URL-là
+//    (statiques, liste publique, état) sont acceptées.
 //  - le reste (API POST, Notion, LLM) : réseau direct, jamais caché.
 // Seules les réponses 200 « normales » sont mises en cache : ni erreurs,
 // ni redirections (ex. renvoi vers /login quand l'auth est active).
 
-const CACHE = 'menu-planner-v4';
+const CACHE = 'menu-planner-v5';
 const OFFLINE_URL = '/static/offline.html';
+const MAX_PAGES = 20;
 // Inclut les CSS/JS de la liste de courses publique (demandés avec ?v=… :
 // repli ignoreSearch hors ligne).
 const PRECACHE = [
@@ -28,9 +37,49 @@ const PRECACHE = [
   '/static/js/courses-public.js',
 ];
 const ETAT_RE = /^\/courses\/[^/]+\/etat$/;
+const PAGE_RE = /^\/courses\/[^/]+\/?$/;
 
 function cacheable(res) {
   return res && res.status === 200 && !res.redirected && res.type === 'basic';
+}
+
+function toUrl(req) {
+  return new URL(typeof req === 'string' ? req : req.url, self.location.origin);
+}
+
+// Asset statique : range la réponse puis retire les autres versions du même
+// chemin (autre `?v=`, ou sans paramètre).
+function putStatic(cache, req, res) {
+  const url = toUrl(req);
+  return cache.put(url.href, res).then(() => cache.keys()).then((keys) => Promise.all(
+    keys.filter((k) => {
+      const u = new URL(k.url);
+      return u.pathname === url.pathname && u.href !== url.href;
+    }).map((k) => cache.delete(k))
+  ));
+}
+
+// Liste publique ou son état : rangé par chemin (sans paramètre), puis borne
+// MAX_PAGES. cache.put replace l'entrée en fin de liste : les premières clés
+// sont les plus anciennes.
+function putPage(cache, pathname, res) {
+  return cache.put(pathname, res).then(() => cache.keys()).then((keys) => {
+    const pages = keys.map((k) => new URL(k.url).pathname).filter((p) => PAGE_RE.test(p));
+    const excess = pages.slice(0, Math.max(0, pages.length - MAX_PAGES));
+    return Promise.all(excess.map((p) => Promise.all([
+      cache.delete(p),
+      cache.delete(p.replace(/\/$/, '') + '/etat'),
+    ])));
+  });
+}
+
+// Range une réponse selon le type d'URL ; ignore toute autre URL.
+function store(cache, req, res) {
+  const url = toUrl(req);
+  if (url.origin !== self.location.origin) return Promise.resolve();
+  if (url.pathname.startsWith('/static/')) return putStatic(cache, url.href, res);
+  if (PAGE_RE.test(url.pathname) || ETAT_RE.test(url.pathname)) return putPage(cache, url.pathname, res);
+  return Promise.resolve();
 }
 
 self.addEventListener('install', (event) => {
@@ -47,7 +96,9 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Mise en cache à la demande d'une page (URL de même origine uniquement).
+// Mise en cache à la demande d'une page (URL de même origine uniquement, et
+// seulement celles que `store` accepte). Une URL après l'autre : la purge des
+// versions et la borne des pages ne se croisent pas.
 self.addEventListener('message', (event) => {
   const data = event.data || {};
   if (data.type !== 'cache-urls' || !Array.isArray(data.urls)) return;
@@ -55,11 +106,11 @@ self.addEventListener('message', (event) => {
     try { return new URL(u, self.location.origin).origin === self.location.origin; } catch (e) { return false; }
   });
   event.waitUntil(
-    caches.open(CACHE).then((cache) => Promise.all(urls.map((u) =>
+    caches.open(CACHE).then((cache) => urls.reduce((chain, u) => chain.then(() =>
       fetch(u, { credentials: 'same-origin' })
-        .then((res) => { if (cacheable(res)) return cache.put(u, res); })
+        .then((res) => { if (cacheable(res)) return store(cache, u, res); })
         .catch(() => {})
-    )))
+    ), Promise.resolve()))
   );
 });
 
@@ -82,7 +133,7 @@ self.addEventListener('fetch', (event) => {
       caches.open(CACHE).then((cache) =>
         cache.match(req).then((hit) => {
           const fetching = fetch(req).then((res) => {
-            if (cacheable(res)) cache.put(req, res.clone());
+            if (cacheable(res)) event.waitUntil(putStatic(cache, req, res.clone()));
             return res;
           }).catch(() => hit || cache.match(req, { ignoreSearch: true })
             .then((any) => any || Response.error()));
@@ -99,7 +150,7 @@ self.addEventListener('fetch', (event) => {
       fetch(req).then((res) => {
         if (cacheable(res)) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(url.pathname, copy));
+          event.waitUntil(caches.open(CACHE).then((c) => putPage(c, url.pathname, copy)));
         }
         return res;
       }).catch(() =>
@@ -114,17 +165,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigations / pages : network-first, repli cache, puis page de secours.
+  // Navigations / pages : réseau. Hors ligne : la liste publique depuis le
+  // cache, toute autre page → page de secours (jamais de page privée gardée).
   if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
+    const publique = PAGE_RE.test(url.pathname);
     event.respondWith(
       fetch(req).then((res) => {
+        if (!publique) return res;
         if (cacheable(res)) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
+          event.waitUntil(caches.open(CACHE).then((c) => putPage(c, url.pathname, copy)));
         }
         return res;
       }).catch(() =>
-        caches.match(req, { ignoreVary: true })
+        (publique ? caches.match(url.pathname, { ignoreVary: true }) : Promise.resolve(undefined))
           .then((hit) => hit || caches.match(OFFLINE_URL))
           .then((page) => page || new Response(
             '<h1>Hors ligne</h1><p>Page non disponible sans connexion.</p>',
