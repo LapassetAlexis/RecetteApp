@@ -112,7 +112,7 @@
 
     <div class="form-g">
         <label for="ingredients_manual">🥦 Ingrédients</label>
-        <textarea id="ingredients_manual" name="ingredients_manual" rows="4" class="inp" placeholder="4 pommes, 200g farine..."></textarea>
+        <textarea id="ingredients_manual" name="ingredients_manual" rows="4" class="inp" placeholder="Un ingrédient par ligne : 200 g de farine"></textarea>
     </div>
 
     <div class="form-g">
@@ -141,25 +141,9 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/steps-editor.js?v={{ asset_version }}"></script>
 <script>
-// ── Éditeur d'étapes ────────────────────────────────
-function renumberSteps() {
-    document.querySelectorAll('#steps .step-num').forEach((e, i) => { e.textContent = (i + 1) + '.'; });
-}
-function bindDel(b) {
-    b.addEventListener('click', () => { b.closest('.step-row').remove(); renumberSteps(); });
-}
-function addStepRow(text) {
-    const row = document.createElement('div');
-    row.className = 'step-row';
-    row.innerHTML = '<span class="step-num"></span><textarea name="steps" rows="2" class="inp"></textarea>'
-        + '<button type="button" class="step-del" title="Supprimer l\'étape">✕</button>';
-    row.querySelector('textarea').value = text || '';
-    document.getElementById('steps').appendChild(row);
-    bindDel(row.querySelector('.step-del'));
-    renumberSteps();
-    return row;
-}
+// Éditeur d'étapes (renumberSteps, bindDel, addStepRow) : /static/js/steps-editor.js
 function splitInstructions(t) {
     t = (t || '').trim();
     if (!t) return [];
@@ -167,10 +151,6 @@ function splitInstructions(t) {
     if (lines.length > 1) return lines;
     return t.split(/(?<=[.!?])\s+(?=[A-ZÀ-Ý0-9])/).map(s => s.trim()).filter(Boolean);
 }
-document.getElementById('add-step')?.addEventListener('click', () => {
-    addStepRow('').querySelector('textarea').focus();
-});
-
 // ── Aperçu image ────────────────────────────────────
 const imgInput = document.getElementById('image_url');
 const imgPreview = document.getElementById('recipe-preview-img');
