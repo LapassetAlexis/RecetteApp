@@ -1,0 +1,36 @@
+<!-- Liste de courses -->
+<link rel="stylesheet" href="/static/css/courses.css?v={{ asset_version }}">
+<div class="card" id="shop-card">
+    <div class="shop-h">
+        <h2>🛒 Liste de courses</h2>
+        <div class="shop-tools">
+            <span class="shop-n" id="shop-n">{{ shop.nb_total }}</span>
+            {% if shop.articles or repas_libres %}
+            <button class="btn btn-ghost btn-sm" id="btn-copy" title="Copier la liste">📋 Copier</button>
+            {% endif %}
+            {% if shop.genere %}
+            <button class="btn btn-ghost btn-sm" id="btn-share" title="Lien de partage public : la personne qui le reçoit peut cocher les articles">🔗 Partager la liste</button>
+            <button class="btn btn-ghost btn-sm" id="btn-print" title="Imprimer la liste" aria-label="Imprimer la liste">🖨️</button>
+            <button class="btn btn-ghost btn-sm" id="btn-regen" title="Régénérer la liste" aria-label="Régénérer la liste">↻</button>
+            {% endif %}
+        </div>
+    </div>
+    {% if repas_libres %}
+    <div class="shop-libre" title="Repas libres : pas d'ingrédients en base, à acheter à la main.">
+        <strong>📝 Repas libres — pense à acheter les ingrédients :</strong>
+        <ul>
+            {% for r in repas_libres %}
+            <li>{{ r.nom }}{% if r.quand %} <span class="shop-libre-when">({{ r.quand }})</span>{% endif %}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    <form class="shop-add" id="shop-add" autocomplete="off">
+        <input type="text" id="shop-add-t" maxlength="120" enterkeyhint="done"
+               placeholder="Ajouter un article : 2 l lait, café…" aria-label="Ajouter un article à la liste">
+        <button type="submit" class="btn btn-ghost btn-sm">＋ Ajouter</button>
+    </form>
+    <div id="shop-body">
+        {% include "partials/_shopping_list.html" %}
+    </div>
+</div>

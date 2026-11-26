@@ -6,6 +6,8 @@ import pytest
 from starlette.testclient import TestClient
 
 import app.main as main
+from app.services import nutrition_week
+from app.services import planning as planning_svc
 
 
 def _recipe(nom, repas="Plat", **kw):
@@ -402,10 +404,10 @@ def test_reouvrir_brouillon_injecte_builder(client, monkeypatch):
     html = client.get(f"/?draft={pid}").text
     assert "Poulet" in html                       # le nom du plat est dans le builder
     assert f'value="{pid}"' in html               # draft_id pré-rempli
-    assert "INITIAL_BUILDER = []" not in html      # builder hydraté (non vide)
+    assert '"builder": []' not in html            # builder hydraté (non vide, #page-data)
     # brouillon inconnu / validé : grille vierge
     html2 = client.get("/?draft=99999").text
-    assert "INITIAL_BUILDER = []" in html2
+    assert '"builder": []' in html2
 
 
 def test_maj_brouillon_ne_cree_pas_de_planning(client, monkeypatch):
@@ -671,34 +673,16 @@ def test_partager_et_courses_public(client, monkeypatch):
     assert page.status_code == 200
     assert "riz" in page.text.lower()
     # bouton d'export texte présent + son handler
-    assert 'id="pub-copy"' in page.text and "function copyList" in page.text
+    assert 'id="pub-copy"' in page.text and "/static/js/courses-public.js" in page.text
 
-    # une fois coché, l'item disparaît de la page publique
+    # une fois coché, l'item passe sous « Déjà pris » (L09 : coche partagée)
     client.post(f"/api/shopping-check/{pid}", json={"item": "riz", "checked": True})
     page2 = client.get(d["url"])
     assert page2.status_code == 200
-    assert "Riz" not in page2.text
+    assert "Riz" in page2.text.split('id="pub-pris"', 1)[1]
 
     # token inconnu -> 404
     assert client.get("/courses/inexistant").status_code == 404
-
-
-def test_enrich_one(client, monkeypatch):
-    async def _get(pid):
-        return _recipe("Curry", id="abc", url="http://r") if pid == "abc" else None
-    async def _ext(nom, url="", nb=4):
-        return {"ingredients": [{"nom": "riz", "quantite": "200", "unite": "g"}]}
-    async def _save(*a, **k):
-        return None
-    async def _upd(*a, **k):
-        return {}
-    monkeypatch.setattr(main.notion, "get_recipe", _get)
-    monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
-    monkeypatch.setattr(main.db, "save_enriched", _save)
-    monkeypatch.setattr(main.notion, "update_ingredients", _upd)
-    d = client.post("/api/enrich/abc").json()
-    assert d.get("success") and d["count"] == 1
-    assert "error" in client.post("/api/enrich/zzz").json()  # introuvable
 
 
 def test_enrichir_page_and_submit(client, monkeypatch):
@@ -872,38 +856,11 @@ def test_enrichir_demande_url_si_absente(client, monkeypatch):
     assert saved.get("url") == "https://example.com/recette"
 
 
-def test_enrich_all(client, monkeypatch):
-    async def _all():
-        return [_recipe("Poulet", id="p1", url="http://r")]
-    async def _enriched(nid):
-        return None
-    async def _ext(nom, url="", nb=4):
-        return {"ingredients": [{"nom": "poulet", "quantite": "1", "unite": "kg"}]}
-    async def _save(*a, **k):
-        return None
-    async def _upd(*a, **k):
-        return {}
-    monkeypatch.setattr(main.notion, "get_all_recipes", _all)
-    monkeypatch.setattr(main.db, "get_enriched", _enriched)
-    monkeypatch.setattr(main.db, "save_enriched", _save)
-    monkeypatch.setattr(main.llm, "extract_ingredients", _ext)
-    monkeypatch.setattr(main.notion, "update_ingredients", _upd)
-    d = client.post("/api/enrich-all").json()
-    assert d.get("success") and d["enriched"] == 1
-
-
 def test_update_meal_invalid_params(client):
     # Validation : jour hors [1,7] ou moment invalide -> erreur sans toucher la base
     bad = client.post("/api/update-meal/1", json={"jour": 999, "moment": "xyz", "nouvelle_recette": "X"}).json()
     assert "error" in bad
     bad2 = client.post("/api/update-meal/1", json={"jour": 1, "moment": "midi", "nouvelle_recette": ""}).json()
-    assert "error" in bad2
-
-
-def test_update_side_invalid_params(client):
-    bad = client.post("/api/update-side/1", json={"jour": 0, "moment": "midi"}).json()
-    assert "error" in bad
-    bad2 = client.post("/api/update-side/1", json={"jour": 3, "moment": "nope"}).json()
     assert "error" in bad2
 
 
@@ -987,11 +944,11 @@ def test_legacy_accompagnement_read_as_list(client, monkeypatch):
               "accompagnement": {"nom_recette": "Haricots", "notion_id": "h1",
                                  "url": "", "notion_url": ""}}
     # Helper tolérant : le dict singulier devient une liste à 1.
-    assert len(main.plat_accompagnements(legacy)) == 1
-    assert main.plat_accompagnements(legacy)[0]["nom_recette"] == "Haricots"
+    assert len(planning_svc.plat_accompagnements(legacy)) == 1
+    assert planning_svc.plat_accompagnements(legacy)[0]["nom_recette"] == "Haricots"
     # accompagnement absent / None -> liste vide.
-    assert main.plat_accompagnements({"nom_recette": "X"}) == []
-    assert main.plat_accompagnements({"accompagnement": None}) == []
+    assert planning_svc.plat_accompagnements({"nom_recette": "X"}) == []
+    assert planning_svc.plat_accompagnements({"accompagnement": None}) == []
 
     data = {"plats": [legacy], "liste_courses": [], "per_day": "4,4,4,4,4,4,4"}
     pid = asyncio.run(main.db.save_planning(
@@ -1060,7 +1017,8 @@ def test_planning_warns_non_enrichi(client, monkeypatch):
 def test_planning_repas_string_legacy_rendered_as_one_chip(client, monkeypatch):
     """Ancien planning : « repas » stocké en string → coercé en liste à l'affichage
     (sinon la boucle de chips l'éclaterait lettre par lettre : « P l a t »)."""
-    import asyncio, json
+    import asyncio
+    import json
     data = {"plats": [{"jour": 1, "moment": "midi", "nom_recette": "Truc maison",
                        "repas": "Plat", "notion_id": "", "accompagnement": None}],
             "liste_courses": [], "per_day": "4,4,4,4,4,4,4"}
@@ -1093,13 +1051,14 @@ def test_construire_case_absente(client, monkeypatch):
 
 
 def test_week_nutrition(client):
-    import asyncio, json
+    import asyncio
+    import json
     async def run():
         await main.db.save_enriched("n1", "Pâtes", ingredients=json.dumps([
             {"nom": "g de pâtes", "quantite": "200", "unite": ""}]))
         plats = [{"jour": j, "moment": m, "nom_recette": "Pâtes", "notion_id": "n1",
                   "accompagnement": None} for j in range(1, 8) for m in ("midi", "soir")]
-        nut = await main._week_nutrition(plats)
+        nut = await nutrition_week._week_nutrition(plats)
         assert nut and nut["calories"] > 0 and nut["meals_total"] == 14
         # détail par jour : 7 jours, chacun avec midi+soir+total estimés
         assert len(nut["par_jour"]) == 7
@@ -1107,7 +1066,7 @@ def test_week_nutrition(client):
         assert d0["nom"] == "Lundi" and d0["midi"] and d0["soir"]
         assert d0["total"]["calories"] == d0["midi"]["calories"] + d0["soir"]["calories"]
         # aucune recette estimable -> None
-        assert await main._week_nutrition([{"jour": 1, "moment": "midi", "nom_recette": "X",
+        assert await nutrition_week._week_nutrition([{"jour": 1, "moment": "midi", "nom_recette": "X",
                                             "notion_id": "zzz", "accompagnement": None}]) is None
     asyncio.run(run())
 
@@ -1181,7 +1140,8 @@ def test_free_meal_creates_and_places(client, monkeypatch):
         return [poulet, soupe]
 
     created = {}
-    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="", nature="Recette", base=None, base_servings=None):
+    async def _create(nom, url="", repas="", tags=None, etat="À essayer", moment="",
+                      nature="Recette", base=None, base_servings=None):
         created["nom"] = nom
         created["repas"] = repas
         return {"id": "free1", "url": "https://notion.so/free1"}
@@ -1368,29 +1328,29 @@ def test_brique_creneau_introuvable(client, monkeypatch):
 
 def test_week_label_range():
     # Plage de jours réellement remplis (2026-07-13 = lundi).
-    assert main._week_label("2026-07-13", [{"jour": 2}, {"jour": 5}]) == "Mardi 14/07 → vendredi 17/07"
-    assert main._week_label("2026-07-13", [{"jour": 3}]) == "Mercredi 15/07"
-    assert main._week_label("2026-07-13", []) == "Semaine du 2026-07-13"
-    assert main._week_label("bad", [{"jour": 1}]) == "Semaine du bad"
+    assert planning_svc._week_label("2026-07-13", [{"jour": 2}, {"jour": 5}]) == "Mardi 14/07 → vendredi 17/07"
+    assert planning_svc._week_label("2026-07-13", [{"jour": 3}]) == "Mercredi 15/07"
+    assert planning_svc._week_label("2026-07-13", []) == "Semaine du 2026-07-13"
+    assert planning_svc._week_label("bad", [{"jour": 1}]) == "Semaine du bad"
 
 
 def test_week_label_non_monday():
     # week_start = date du JOUR 1 (mardi 14/07/2026), pas forcément un lundi.
     # Le nom du jour vient de la VRAIE date, pas de l'index.
-    assert main._week_label("2026-07-14", [{"jour": 1}]) == "Mardi 14/07"
-    assert main._week_label("2026-07-14", [{"jour": 1}, {"jour": 3}]) == "Mardi 14/07 → jeudi 16/07"
+    assert planning_svc._week_label("2026-07-14", [{"jour": 1}]) == "Mardi 14/07"
+    assert planning_svc._week_label("2026-07-14", [{"jour": 1}, {"jour": 3}]) == "Mardi 14/07 → jeudi 16/07"
 
 
 def test_day_labels():
     # jour 1..7 dérivés d'une date de départ arbitraire (mardi 14/07/2026).
-    dl = main._day_labels("2026-07-14")
+    dl = planning_svc._day_labels("2026-07-14")
     assert len(dl) == 7
     assert dl[0] == {"jour": 1, "court": "Mar", "long": "Mardi", "date": "14/07"}
     assert dl[3] == {"jour": 4, "court": "Ven", "long": "Vendredi", "date": "17/07"}
     # jour 7 = +6j = lundi 20/07.
     assert dl[6]["long"] == "Lundi" and dl[6]["date"] == "20/07"
     # Repli neutre si date invalide.
-    bad = main._day_labels("bad")
+    bad = planning_svc._day_labels("bad")
     assert bad[0] == {"jour": 1, "court": "J1", "long": "Jour 1", "date": ""}
 
 

@@ -1,5 +1,6 @@
 """Petites fonctions de nettoyage de texte partagées (app + extraction)."""
 
+import math
 import re
 import unicodedata
 
@@ -72,8 +73,11 @@ _ACCENT_FOLD = str.maketrans(
 # les formes longues avant les courtes). L'unité doit être suivie d'un espace ou
 # d'une fin (lookahead) pour ne pas manger un mot (« lardons », « cassonade »...).
 _UNIT_PATTERNS: list[tuple[str, str]] = [
-    ("c. à s.", r"cuilleres?\s+a\s+soupe|cuil\.?\s+a\s+soupe|c\.?\s*a\.?\s*s\.?|cas|cs"),
-    ("c. à c.", r"cuilleres?\s+a\s+cafe|cuil\.?\s+a\s+cafe|c\.?\s*a\.?\s*c\.?|cac|cc"),
+    # « cuillère(s) / cuillerée(s) / cuil. / c. » + « à soupe / à s. » (et café).
+    ("c. à s.", (r"(?:cuilleree?s?|cuil\.?|c\.?)\s*a\s+soupe"
+                 r"|(?:cuil\.?|c\.?)\s*a\.?\s*s\.?|cas|cs")),
+    ("c. à c.", (r"(?:cuilleree?s?|cuil\.?|c\.?)\s*a\s+cafe"
+                 r"|(?:cuil\.?|c\.?)\s*a\.?\s*c\.?|cac|cc")),
     ("kg", r"kilogrammes?|kilos?|kg"),
     ("mg", r"mg"),
     ("g", r"grammes?|grs?|g"),
@@ -157,6 +161,50 @@ def _clean_ingredient_name(nom: str) -> str:
     return s or original.strip()
 
 
+# Fractions Unicode → (numérateur, dénominateur).
+_UNICODE_FRACTIONS = {
+    "½": (1, 2), "¼": (1, 4), "¾": (3, 4), "⅓": (1, 3), "⅔": (2, 3), "⅛": (1, 8),
+}
+_UF = "[" + "".join(_UNICODE_FRACTIONS) + "]"
+_SIMPLE_NUM = r"\d+/\d+|\d+(?:[.,]\d+)?"
+# Quantité de tête, du plus spécifique au plus simple :
+#   intervalle « 2-3 », « 2 à 3 » (borne haute gardée) ; nombre mixte « 1 1/2 »,
+#   « 1½ » ; fraction Unicode seule « ½ » ; nombre simple « 200 », « 1,5 », « 1/2 ».
+_QTY_RANGE_RE = re.compile(
+    rf"^(?:{_SIMPLE_NUM})(?:\s*[-–—]\s*|\s+(?:à|a)\s+)(?P<hi>{_SIMPLE_NUM})(?![\d/.,])")
+_QTY_MIXED_RE = re.compile(r"^(?P<int>\d+)\s+(?P<num>\d+)/(?P<den>\d+)(?![\d/.,])")
+_QTY_MIXED_UF_RE = re.compile(rf"^(?P<int>\d+)\s*(?P<uf>{_UF})")
+_QTY_UF_RE = re.compile(rf"^(?P<uf>{_UF})")
+_QTY_SIMPLE_RE = re.compile(rf"^(?P<n>{_SIMPLE_NUM})")
+
+
+def _split_leading_qty(s: str) -> tuple[str, str]:
+    """(quantité normalisée, reste) si `s` commence par une quantité, sinon ("", s).
+
+    « 1 1/2 l » -> ("1.5", "l") ; « ½ citron » -> ("1/2", "citron") ;
+    « 2-3 carottes » -> ("3", "carottes") ; « 1,5 kg » -> ("1.5", "kg").
+    """
+    m = _QTY_RANGE_RE.match(s)
+    if m:
+        return m.group("hi").replace(",", "."), s[m.end():].strip()
+    m = _QTY_MIXED_RE.match(s)
+    if m and int(m.group("den")):
+        n = int(m.group("int")) + int(m.group("num")) / int(m.group("den"))
+        return _fmt_qty(n), s[m.end():].strip()
+    m = _QTY_MIXED_UF_RE.match(s)
+    if m:
+        a, b = _UNICODE_FRACTIONS[m.group("uf")]
+        return _fmt_qty(int(m.group("int")) + a / b), s[m.end():].strip()
+    m = _QTY_UF_RE.match(s)
+    if m:
+        a, b = _UNICODE_FRACTIONS[m.group("uf")]
+        return f"{a}/{b}", s[m.end():].strip()
+    m = _QTY_SIMPLE_RE.match(s)
+    if m:
+        return m.group("n").replace(",", "."), s[m.end():].strip()
+    return "", s
+
+
 def parse_ingredient_line(line: str) -> dict | None:
     """Transforme une ligne en {nom, quantite, unite} NORMALISÉ (en amont).
 
@@ -177,17 +225,14 @@ def parse_ingredient_line(line: str) -> dict | None:
     # Ancien format interne "nom : quantité unité"
     if " : " in s:
         nom, _, rest = s.partition(" : ")
-        m = re.match(r"^([\d.,/]+)\s*(.*)$", rest.strip())
-        if m:
-            unite, _ = _match_unit(m.group(2).strip()) if m.group(2).strip() else ("", "")
-            return {"nom": nom.strip(), "quantite": m.group(1).replace(",", "."),
-                    "unite": unite or m.group(2).strip()}
+        qty, unit_txt = _split_leading_qty(rest.strip())
+        if qty:
+            unite, _ = _match_unit(unit_txt) if unit_txt else ("", "")
+            return {"nom": nom.strip(), "quantite": qty, "unite": unite or unit_txt}
         return {"nom": nom.strip(), "quantite": "", "unite": ""}
-    # Format source "quantité unité nom". \s* pour gérer "200g de pâtes".
-    m = re.match(r"^([\d]+(?:[.,/]\d+)?)\s*(.*)$", s)
-    if m and m.group(2).strip():
-        qty, rest = m.group(1).replace(",", "."), m.group(2).strip()
-    else:
+    # Format source "quantité unité nom" ("200g de pâtes", "1 1/2 l", "½ citron").
+    qty, rest = _split_leading_qty(s)
+    if not qty or not rest:
         qty, rest = "", s
     unite, nom = _match_unit(rest)
     return {"nom": _clean_ingredient_name(nom), "quantite": qty, "unite": unite}
@@ -244,7 +289,7 @@ def split_instructions(text: str) -> list[str]:
     text = (text or "").strip()
     if not text:
         return []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
     if len(lines) > 1:
         return lines
     sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÀ-ÝÉÈ0-9])", text)
@@ -323,17 +368,107 @@ def _ingredient_sources(ing: dict) -> list[str]:
     return [one] if one else []
 
 
-def merge_ingredients(items: list[dict]) -> list[dict]:
-    """Fusionne une liste d'ingrédients par (nom, unité).
+# Unités convertibles : (famille, facteur vers l'unité de base g / ml).
+# Clés = forme normalisée (_normalize_form) de l'unité saisie.
+_CONVERTIBLE_UNITS: dict[str, tuple[str, float]] = {
+    "mg": ("masse", 0.001),
+    "g": ("masse", 1.0), "gr": ("masse", 1.0), "grs": ("masse", 1.0),
+    "gramme": ("masse", 1.0),
+    "kg": ("masse", 1000.0), "kilo": ("masse", 1000.0), "kilogramme": ("masse", 1000.0),
+    "ml": ("volume", 1.0), "cl": ("volume", 10.0), "dl": ("volume", 100.0),
+    "l": ("volume", 1000.0), "litre": ("volume", 1000.0),
+}
+# Unités de comptage (arrondies à l'entier supérieur sur la liste de courses).
+_COUNT_UNITS = {
+    "piece", "gousse", "tranche", "feuille", "sachet", "boite", "pot", "boule",
+    "botte", "bouquet", "brin", "barquette", "paquet", "tete",
+}
+_EPS = 1e-9
 
-    - additionne les quantités numériques (décimales/fractions) de même unité ;
-    - une même denrée en unités différentes reste sur 2 lignes (non additionnable) ;
+
+def _unit_info(unite: str) -> tuple[str, float] | None:
+    """(famille, facteur vers g/ml) si l'unité est une masse ou un volume."""
+    return _CONVERTIBLE_UNITS.get(_normalize_form(unite or ""))
+
+
+def _round_base_amount(n: float) -> float:
+    """Grammes / millilitres : arrondi à 5 près (au-dessus) au-delà de 50."""
+    if n > 50:
+        return math.ceil(n / 5 - _EPS) * 5
+    return n
+
+
+def _fmt_amount(n: float) -> str:
+    """Comme _fmt_qty mais jusqu'à 3 décimales (1,255 kg ne perd pas ses 5 g)."""
+    n = round(n, 3)
+    if n == int(n):
+        return str(int(n))
+    return f"{n:g}"
+
+
+def round_for_shopping(item: dict) -> dict:
+    """Arrondit la quantité d'un article de la liste de courses (nouveau dict).
+
+    - sans unité ou en unité de comptage (pièce, gousse, sachet…) → entier
+      supérieur (« 0.5 poulet » → 1) ;
+    - masse / volume → arrondi à 5 g / 5 ml près au-dessus de 50 (calculé dans
+      l'unité de base, puis ré-exprimé dans l'unité de l'article) ;
+    - autres unités (c. à s., pincée…) et quantités non numériques : inchangé.
+    Réservé à la liste de courses : la fiche recette garde les valeurs exactes
+    (scale_ingredients ne l'appelle pas).
+    """
+    new = dict(item)
+    n = _parse_qty(item.get("quantite", ""))
+    if n is None:
+        return new
+    unite = (item.get("unite") or "").strip()
+    info = _unit_info(unite)
+    if info:
+        factor = info[1]
+        new["quantite"] = _fmt_amount(_round_base_amount(n * factor) / factor)
+    elif not unite or _normalize_form(unite) in _COUNT_UNITS:
+        new["quantite"] = _fmt_qty(math.ceil(n - _EPS))
+    return new
+
+
+def _display_amount(family: str, base: float, units_seen: set[str]) -> tuple[str, str]:
+    """(quantité, unité) d'affichage pour un total exprimé en g ou en ml.
+
+    Masse : kg dès 1 000 g, mg si toutes les entrées étaient en mg (et < 1 g),
+    sinon g. Volume : l dès 1 000 ml, cl si une entrée était en cl, sinon ml.
+    """
+    if family == "masse":
+        if base >= 1000:
+            return _fmt_amount(base / 1000), "kg"
+        if units_seen == {"mg"} and base < 1:
+            return _fmt_amount(base * 1000), "mg"
+        return _fmt_amount(base), "g"
+    if base >= 1000:
+        return _fmt_amount(base / 1000), "l"
+    if "cl" in units_seen:
+        return _fmt_amount(base / 10), "cl"
+    return _fmt_amount(base), "ml"
+
+
+def merge_ingredients(items: list[dict]) -> list[dict]:
+    """Fusionne une liste d'ingrédients par (nom, famille d'unité).
+
+    - masses ramenées en grammes, volumes en millilitres, puis additionnés :
+      « 1 kg » + « 250 g » de tomates → une ligne « 1.25 kg » ; « 0.5 l » +
+      « 25 cl » de lait → « 75 cl » (kg / l dès 1 000 g / ml) ;
+    - unités non convertibles (pièce, sachet, c. à s.…) : regroupées par unité
+      exacte ; deux unités incompatibles restent sur 2 lignes ;
     - quantités non numériques : on garde la première renseignée ;
-    - union des recettes source (champ `recettes`), dans l'ordre de rencontre.
+    - union des recettes source (champ `recettes`), dans l'ordre de rencontre ;
+    - arrondi « courses » en sortie (round_for_shopping).
     Trie par nom.
     """
     out: dict[tuple[str, str], dict] = {}
     order: list[tuple[str, str]] = []
+    # Clés masse/volume : total en unité de base (None tant qu'aucune quantité
+    # numérique) et unités rencontrées (pour choisir l'unité d'affichage).
+    bases: dict[tuple[str, str], float | None] = {}
+    seen_units: dict[tuple[str, str], set[str]] = {}
     for ing in items:
         nom = (ing.get("nom") or "").strip()
         if not nom:
@@ -341,24 +476,43 @@ def merge_ingredients(items: list[dict]) -> list[dict]:
         unite = (ing.get("unite") or "").strip()
         qty = str(ing.get("quantite", "") or "").strip()
         srcs = _ingredient_sources(ing)
+        n = _parse_qty(qty)
+        info = _unit_info(unite)
+        # « quelques g » (quantité non numérique) : pas de conversion possible.
+        if info is not None and qty and n is None:
+            info = None
         # clé normalisée (forme) : regroupe singulier/pluriel + casse/accents,
         # mais conserve distinctes les variantes (oignon rouge / jaune).
-        key = (_normalize_form(nom), _normalize_form(unite))
+        key = (_normalize_form(nom), "~" + info[0] if info else _normalize_form(unite))
         if key not in out:
             out[key] = {
                 "nom": nom, "quantite": qty, "unite": unite,
                 "recettes": list(dict.fromkeys(srcs)),
             }
             order.append(key)
-            continue
-        existing = out[key]
-        a, b = _parse_qty(existing["quantite"]), _parse_qty(qty)
-        if a is not None and b is not None:
-            existing["quantite"] = _fmt_qty(a + b)
-        elif not existing["quantite"] and qty:
-            existing["quantite"] = qty
-        # sinon : non sommable → on conserve la première valeur
-        for s in srcs:
-            if s not in existing["recettes"]:
-                existing["recettes"].append(s)
-    return sorted((out[k] for k in order), key=lambda x: x["nom"].lower())
+            if info:
+                bases[key] = None
+                seen_units[key] = set()
+        else:
+            existing = out[key]
+            if not info:
+                a = _parse_qty(existing["quantite"])
+                if a is not None and n is not None:
+                    existing["quantite"] = _fmt_qty(a + n)
+                elif not existing["quantite"] and qty:
+                    existing["quantite"] = qty
+                # sinon : non sommable → on conserve la première valeur
+            for s in srcs:
+                if s not in existing["recettes"]:
+                    existing["recettes"].append(s)
+        if info and n is not None:
+            bases[key] = (bases[key] or 0.0) + n * info[1]
+            seen_units[key].add(_normalize_form(unite))
+    result: list[dict] = []
+    for k in order:
+        it = out[k]
+        if bases.get(k) is not None:
+            base = _round_base_amount(bases[k])
+            it["quantite"], it["unite"] = _display_amount(k[1][1:], base, seen_units[k])
+        result.append(round_for_shopping(it))
+    return sorted(result, key=lambda x: x["nom"].lower())

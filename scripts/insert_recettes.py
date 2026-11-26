@@ -76,7 +76,8 @@ async def run(apply: bool, path: str | Path = DEFAULT_JSON) -> dict[str, int]:
     notion = NotionClient()
 
     # Réutilise le cache local et le formatage Notion de l'app.
-    from app.main import db as app_db, _ingredients_to_text
+    from app.deps import db as app_db
+    from app.services.shopping import _ingredients_to_text
 
     existing = {r["nom"].strip().lower() for r in await notion.get_all_recipes()}
     to_create = [r for r in recipes if r["nom"].strip().lower() not in existing]

@@ -1,0 +1,22 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Les tests de bout en bout (navigateur) sont exclus par défaut :
+# `pytest -m e2e` les lance (le dernier -m de la ligne de commande l'emporte).
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: tests de bout en bout Playwright (tests/e2e/, navigateur requis)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "B008",  # Depends()/Form()/Query() en valeur par défaut : idiome FastAPI
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests"]

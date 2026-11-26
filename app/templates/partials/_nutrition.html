@@ -1,0 +1,63 @@
+<div class="card nutri">
+    <div class="nutri-head">
+        <h2>📊 Nutrition <small class="muted-sm">/ jour · personne</small></h2>
+        {% if week_nutrition %}<span class="nutri-tag conf-{{ week_nutrition.confiance|lower }}">Confiance : {{ week_nutrition.confiance }}</span>{% endif %}
+    </div>
+    {% if not week_nutrition %}
+    <div class="nutri-empty">
+        <p>🍃 Pas encore de données nutritionnelles pour cette semaine.</p>
+        <small class="muted-sm">Enrichis tes recettes (page <a href="/recettes">Recettes</a> → « 🔄 Enrichir toutes les recettes ») puis régénère un planning pour voir l'estimation par jour.</small>
+    </div>
+    {% else %}
+    <div class="nutri-grid">
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.calories }}</span><span class="nl">kcal</span></div>
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.proteines }}<small>g</small></span><span class="nl">protéines</span></div>
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.glucides }}<small>g</small></span><span class="nl">glucides</span></div>
+        <div class="nutri-item"><span class="nv">{{ week_nutrition.lipides }}<small>g</small></span><span class="nl">lipides</span></div>
+    </div>
+    <small class="muted-sm">Moyenne / jour estimée ({{ week_nutrition.meals_estimes }}/{{ week_nutrition.meals_total }} repas couverts) — enrichis les recettes pour affiner.</small>
+    {% if week_nutrition.par_jour %}
+    <details class="nutri-days">
+        <summary>📅 Détail par jour</summary>
+        <div class="nutri-days-scroll">
+            <table class="nutri-table">
+                <thead>
+                    <tr><th>Jour</th><th>Repas</th><th>kcal</th><th>Prot.</th><th>Gluc.</th><th>Lip.</th></tr>
+                </thead>
+                <tbody>
+                    {% for d in week_nutrition.par_jour %}
+                    {% set rows = [] %}
+                    {% if d.midi %}{% set _ = rows.append(('☀️ Midi', d.midi)) %}{% endif %}
+                    {% if d.soir %}{% set _ = rows.append(('🌙 Soir', d.soir)) %}{% endif %}
+                    {# total affiché seulement si 2 repas (sinon identique à l'unique repas) #}
+                    {% set show_total = d.total and rows|length > 1 %}
+                    {% set nrows = (rows|length + (1 if show_total else 0)) if rows else 1 %}
+                    {% set zebra = 'nd-odd' if loop.index is odd else 'nd-even' %}
+                    {% if rows %}
+                        {% for label, n in rows %}
+                        <tr class="nd-row {{ zebra }}{{ ' day-first' if loop.first else '' }}">
+                            {% if loop.first %}<td class="nd-day" rowspan="{{ nrows }}">{{ d.nom }}</td>{% endif %}
+                            <td class="nd-meal">{{ label }}</td>
+                            <td>{{ n.calories }}</td><td>{{ n.proteines }}<small>g</small></td><td>{{ n.glucides }}<small>g</small></td><td>{{ n.lipides }}<small>g</small></td>
+                        </tr>
+                        {% endfor %}
+                        {% if show_total %}
+                        <tr class="nd-row nd-total {{ zebra }}">
+                            <td class="nd-meal">Total</td>
+                            <td>{{ d.total.calories }}</td><td>{{ d.total.proteines }}<small>g</small></td><td>{{ d.total.glucides }}<small>g</small></td><td>{{ d.total.lipides }}<small>g</small></td>
+                        </tr>
+                        {% endif %}
+                    {% else %}
+                        <tr class="nd-row nd-empty {{ zebra }} day-first">
+                            <td class="nd-day">{{ d.nom }}</td>
+                            <td class="nd-meal muted-sm" colspan="5">— non estimé</td>
+                        </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+    {% endif %}
+    {% endif %}
+</div>

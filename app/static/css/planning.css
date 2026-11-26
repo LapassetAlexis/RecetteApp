@@ -1,0 +1,15 @@
+/* Page planning : la grille ne compte que les jours de la période
+   (--nb-jours, posé par _week_grid.html ; 7 par défaut). */
+.week-grid {
+    grid-template-columns: 46px repeat(var(--nb-jours, 7), minmax(88px, 1fr));
+    min-width: calc(46px + var(--nb-jours, 7) * 90px);
+}
+@media (max-width: 768px) {
+    .week-grid {
+        grid-template-columns: 40px repeat(var(--nb-jours, 7), minmax(70px, 1fr));
+        min-width: calc(40px + var(--nb-jours, 7) * 71px);
+    }
+}
+
+/* Barre d'actions sous le titre (validation / modification) */
+.week-toolbar { gap: 6px; flex-wrap: wrap; }

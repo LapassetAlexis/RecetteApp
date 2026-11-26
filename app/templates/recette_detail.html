@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ recette.nom | clean_title }}{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="/static/css/recettes.css?v={{ asset_version }}">
 <div class="detail">
     {% if recette.image %}<img class="detail-img" src="{{ recette.image }}" alt="{{ recette.nom | clean_title }}">{% else %}<div class="detail-img detail-img-ph" aria-hidden="true">🍽️</div>{% endif %}
     <div class="hero" style="padding-bottom:10px;">
@@ -14,16 +15,19 @@
             {% for t in recette.tags %}<span class="tag">{{ t }}</span>{% endfor %}
         </div>
         {% set note_len = (recette.note or '')|length %}
-        <div class="recipe-stars" data-id="{{ recette.id }}" data-note="{{ recette.note }}" style="margin-top:6px;justify-content:center;">
+        <div class="recipe-stars" role="group" aria-label="Note de la recette" data-id="{{ recette.id }}" data-note="{{ recette.note }}" style="margin-top:6px;justify-content:center;">
             {% for s in range(5) %}
-            <span class="star {{ '' if s < note_len else 'empty' }}" data-val="{{ s+1 }}">★</span>
+            <button type="button" class="star {{ '' if s < note_len else 'empty' }}" data-val="{{ s+1 }}" aria-label="Noter {{ s+1 }} sur 5" aria-pressed="{{ 'true' if s + 1 == note_len else 'false' }}">★</button>
             {% endfor %}
-            <button class="star-clear" title="Retirer la note" style="{{ '' if note_len else 'display:none;' }}">✕</button>
+            <button type="button" class="star-clear" title="Retirer la note" aria-label="Retirer la note"{{ '' if note_len else ' hidden' }}>✕</button>
         </div>
+        <p class="detail-usage">🍳 {{ usage_label or "Jamais planifiée dans une semaine validée" }}</p>
         <div class="detail-links">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-planifier">📅 Ajouter au planning</button>
+            {% if instructions or ingredients %}<a href="/recette/{{ recette.id }}/cuisine?portions={{ base_servings }}" class="btn btn-ghost btn-sm" id="btn-cuisine">👨‍🍳 Mode cuisine</a>{% endif %}
             {% if recette.url %}<a href="{{ recette.url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">🔗 Source</a>{% endif %}
             {% if recette.notion_url %}<a href="{{ recette.notion_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 Notion</a>{% endif %}
-            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">{% if ingredients %}✏️ Modifier{% else %}✨ Enrichir{% endif %}</a>
+            <a href="/recette/{{ recette.id }}/enrichir" class="btn btn-ghost btn-sm">✏️ Modifier</a>
             <button type="button" class="btn btn-ghost btn-sm" id="btn-delete">🗑 Supprimer</button>
         </div>
     </div>
@@ -90,12 +94,12 @@
 </div>
 
 <!-- Modale de confirmation de suppression -->
-<div id="del-modal" class="modal" style="display:none">
+<div id="del-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="del-title">
     <div class="modal-bg"></div>
     <div class="modal-box">
         <div class="modal-top">
-            <h3>🗑 Supprimer la recette</h3>
-            <button class="modal-x" type="button" id="del-x">✕</button>
+            <h3 id="del-title">🗑 Supprimer la recette</h3>
+            <button class="modal-x" type="button" id="del-x" aria-label="Fermer" title="Fermer">✕</button>
         </div>
         <div class="modal-body">
             <p>Supprimer « {{ recette.nom | clean_title }} » ? La recette sera archivée dans Notion et retirée de la liste.</p>
@@ -106,9 +110,57 @@
         </div>
     </div>
 </div>
+
+<!-- Modale « Ajouter au planning » : brouillon existant ou nouveau, jour, moment -->
+<div id="plan-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="plan-title">
+    <div class="modal-bg"></div>
+    <form class="modal-box" id="plan-form">
+        <div class="modal-top">
+            <h3 id="plan-title">📅 Ajouter au planning</h3>
+            <button class="modal-x" type="button" id="plan-x" aria-label="Fermer" title="Fermer">✕</button>
+        </div>
+        <div class="modal-body plan-body">
+            <div class="form-g">
+                <label for="plan-draft">Brouillon</label>
+                <select id="plan-draft" class="inp">
+                    {% for d in drafts %}<option value="{{ d.id }}">{{ d.label }}</option>{% endfor %}
+                    <option value="new"{% if not drafts %} selected{% endif %}>➕ Nouveau brouillon</option>
+                </select>
+            </div>
+            <div class="form-g" id="plan-day-g">
+                <label for="plan-day">Jour</label>
+                <select id="plan-day" class="inp"></select>
+            </div>
+            <div class="form-g" id="plan-date-g">
+                <label for="plan-date">Date du repas</label>
+                <input type="date" id="plan-date" class="inp">
+            </div>
+            <div class="form-g">
+                <label for="plan-moment">Moment</label>
+                <select id="plan-moment" class="inp">
+                    <option value="midi">☀️ Midi</option>
+                    <option value="soir"{% if recette.moment == 'Soir' %} selected{% endif %}>🌙 Soir</option>
+                </select>
+            </div>
+            <p class="plan-warn" id="plan-warn" hidden></p>
+            <p class="plan-done" id="plan-done" role="status" hidden>
+                ✅ <span id="plan-done-text"></span>
+                <a id="plan-done-link" href="#">Ouvrir le brouillon</a>
+            </p>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm" type="button" id="plan-cancel">Annuler</button>
+            <button class="btn btn-primary btn-sm" type="submit" id="plan-ok">📅 Ajouter</button>
+        </div>
+    </form>
+</div>
+<script type="application/json" id="page-data">{{ {"recette_id": recette.id, "drafts": drafts} | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/common.js?v={{ asset_version }}"></script>
+<script src="/static/js/rating.js?v={{ asset_version }}"></script>
+<script src="/static/js/recette-planifier.js?v={{ asset_version }}"></script>
 <script>
 const BASE_SERVINGS = {{ base_servings }};
 let servings = BASE_SERVINGS;
@@ -134,15 +186,20 @@ function render() {
         const raw = li.dataset.qty, unit = li.dataset.unit || '';
         const n = parseQty(raw);
         const scaled = n !== null ? fmtQty(n * ratio) : raw;
+        // Affichage : virgule décimale (« 1,5 kg ») ; Cooklang garde le point.
+        const shown = window.Common.qtyFr(scaled || '');
         const qEl = li.querySelector('.ing-q');
-        qEl.textContent = scaled ? (unit ? `${scaled} ${unit}` : `${scaled}`) : '';
+        qEl.textContent = shown ? (unit ? `${shown} ${unit}` : shown) : '';
         // ligne Cooklang
         const nom = li.querySelector('.ing-n').textContent;
         if (scaled && unit) cookLines.push(`@${nom}{${scaled}%${unit}}`);
         else if (scaled) cookLines.push(`@${nom}{${scaled}}`);
         else cookLines.push(`@${nom}`);
     });
-    document.getElementById('srv-n').textContent = servings;
+    const srvN = document.getElementById('srv-n');
+    if (srvN) srvN.textContent = servings;  // absent sans ingrédients
+    const ck = document.getElementById('btn-cuisine');
+    if (ck) ck.href = `/recette/{{ recette.id }}/cuisine?portions=${servings}`;
     const raw = document.getElementById('cook-raw');
     if (raw) raw.textContent = cookLines.join('\n');
 }
@@ -157,9 +214,32 @@ render();
 
 // ── Suppression (archive Notion) avec modale de confirmation ──
 const delModal = document.getElementById('del-modal');
-const closeDel = () => { if (delModal) delModal.style.display = 'none'; };
-document.getElementById('btn-delete')?.addEventListener('click', () => {
-    if (delModal) delModal.style.display = 'flex';
+let delOpener = null;  // élément qui a ouvert la modale (focus rendu à la fermeture)
+const delOpen = () => delModal && delModal.style.display !== 'none';
+const closeDel = () => {
+    if (!delOpen()) return;
+    delModal.style.display = 'none';
+    delOpener?.focus();
+    delOpener = null;
+};
+document.getElementById('btn-delete')?.addEventListener('click', function() {
+    if (!delModal) return;
+    delOpener = this;
+    delModal.style.display = 'flex';
+    document.getElementById('del-cancel')?.focus();
+});
+// Échap ferme la modale ; Tab reste piégé entre ses boutons.
+document.addEventListener('keydown', (e) => {
+    if (!delOpen()) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeDel(); return; }
+    if (e.key === 'Tab') {
+        const f = Array.from(delModal.querySelectorAll('button:not([disabled])'));
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        else if (!delModal.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    }
 });
 document.getElementById('del-x')?.addEventListener('click', closeDel);
 document.getElementById('del-cancel')?.addEventListener('click', closeDel);
@@ -181,46 +261,6 @@ document.getElementById('del-confirm')?.addEventListener('click', async function
         toast('Erreur réseau', 'error');
         this.disabled = false; this.textContent = '🗑 Supprimer';
     }
-});
-
-// ── Notation (survol + clic + effacer) ──────────────
-document.querySelectorAll('.recipe-stars').forEach(container => {
-    const stars = container.querySelectorAll('.star');
-    const clearBtn = container.querySelector('.star-clear');
-    const pageId = container.dataset.id;
-    let current = (container.dataset.note || '').length;
-    const paint = (n) => stars.forEach((s, i) => s.classList.toggle('empty', i >= n));
-    stars.forEach((star, idx) => {
-        star.addEventListener('mouseenter', () => paint(idx + 1));
-        star.addEventListener('click', async () => {
-            const val = '⭐'.repeat(idx + 1);
-            container.classList.add('saving');
-            try {
-                const r = await fetch(`/api/rate/${pageId}`, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({note: val})
-                });
-                const d = await r.json();
-                if (d.success) { current = idx + 1; paint(current); clearBtn.style.display = ''; toast('Noté ' + val, 'success'); if (d.warning) toast(d.warning, 'error'); }
-                else { toast(d.error || 'Erreur', 'error'); }
-            } catch(e) { toast('Erreur réseau', 'error'); }
-            finally { container.classList.remove('saving'); }
-        });
-    });
-    container.addEventListener('mouseleave', () => paint(current));
-    clearBtn.addEventListener('click', async () => {
-        container.classList.add('saving');
-        try {
-            const r = await fetch(`/api/rate/${pageId}`, {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({note: ''})
-            });
-            const d = await r.json();
-            if (d.success) { current = 0; paint(0); clearBtn.style.display = 'none'; toast('Note retirée', 'info'); }
-            else { toast(d.error || 'Erreur', 'error'); }
-        } catch(e) { toast('Erreur réseau', 'error'); }
-        finally { container.classList.remove('saving'); }
-    });
 });
 </script>
 {% endblock %}

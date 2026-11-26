@@ -1,0 +1,22 @@
+{% from "partials/_meal.html" import meal_inner %}
+{% set labels = {'midi':'☀️ Midi','soir':'🌙 Soir'} %}
+<!-- Liste empilée (mobile) : sections Midi / Soir, une carte par repas -->
+<div class="week-list">
+    {% for moment in ['midi','soir'] %}
+    <div class="wl-section {{ moment }}">
+        <h3 class="wl-h">{{ labels[moment] }}</h3>
+        {% for run in week_rows[moment] %}
+        {% set last = run.start + run.span - 1 %}
+        {% set daylabel = (day_labels[run.start-1].court ~ '–' ~ day_labels[last-1].court) if run.span > 1 else (day_labels[run.start-1].long ~ ' ' ~ day_labels[run.start-1].date) %}
+        <div class="meal {{ moment }}" data-jours="{{ run.jours | join(',') }}" data-moment="{{ moment }}">
+            {{ meal_inner(run, moment, run.plat, daylabel) }}
+        </div>
+        {% endfor %}
+        {% for d in range(1, (nb_jours | default(7)) + 1) %}
+        {% if (d ~ ':' ~ moment) in off_meals %}
+        <div class="meal off {{ moment }}"><span class="off-lbl">🚫 {{ day_labels[d-1].long }} {{ day_labels[d-1].date }} — Absent</span></div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>

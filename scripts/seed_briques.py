@@ -74,7 +74,8 @@ async def run(apply: bool) -> None:
                 mode, already, len(to_create))
 
     # Réutilise le cache local et le formatage Notion de l'app.
-    from app.main import db as app_db, _ingredients_to_text
+    from app.deps import db as app_db
+    from app.services.shopping import _ingredients_to_text
 
     created = 0
     for nom, base, qte, unite in to_create:

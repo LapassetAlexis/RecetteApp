@@ -3,7 +3,7 @@
 On teste `derive_changes` : à partir de l'état BRUT d'une page Notion, elle
 calcule les seules propriétés à changer (idempotente)."""
 
-from scripts.migrate_taxo import derive_changes, _changes_to_properties
+from scripts.migrate_taxo import _changes_to_properties, derive_changes
 
 
 def _raw(**kw):

@@ -5,13 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Menu Planner{% endblock %} — Tristabeau</title>
     <meta name="theme-color" content="#e67e22">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Menu Planner">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
-    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icon-180.png">
     <link rel="manifest" href="/static/manifest.json">
     <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
+    {% block head %}{% endblock %}
 </head>
 <body>
     {% set path = request.url.path %}
@@ -19,7 +21,7 @@
         <div class="nav-inner">
             <a href="/" class="nav-brand">🍽️ Menu Planner</a>
             <div class="nav-links">
-                <a href="/" class="{{ 'active' if path == '/' else '' }}">Générer</a>
+                <a href="/" class="{{ 'active' if path == '/' else '' }}"{% if path == '/' %} aria-current="page"{% endif %}>Planifier</a>
                 <a href="/recettes" class="{{ 'active' if path.startswith('/recette') else '' }}">Recettes</a>
                 <a href="/ajouter" class="{{ 'active' if path == '/ajouter' else '' }}">Ajouter</a>
                 <a href="/historique" class="{{ 'active' if path.startswith('/historique') or path.startswith('/planning') else '' }}">Historique</a>
@@ -33,7 +35,7 @@
     </main>
 
     <footer class="footer">
-        <p>Menu Planner v{{ version }} — hébergé sur le homelab Tristabeau ⚡</p>
+        <p>Menu Planner v{{ version }} — hébergé sur le homelab Tristabeau ⚡ · <a href="/admin" style="color:inherit"{% if path.startswith('/admin') %} aria-current="page"{% endif %}>Données</a></p>
     </footer>
 
     <!-- Barre de progression de navigation (retour visuel à chaque action) -->

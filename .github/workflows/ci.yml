@@ -20,8 +20,43 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Lint (ruff)
+        run: ruff check app tests scripts
+
       - name: Run tests with coverage
         # Seuil = garde anti-régression. Le code non couvert est surtout du
         # plumbing HTTP (Notion/Ollama/Gemini), intestable sans services live ;
         # toute la logique métier est couverte.
         run: pytest --cov=app --cov-report=term-missing --cov-fail-under=65
+
+  e2e:
+    # Parcours navigateur (Playwright, Chromium) : non bloquant pendant la
+    # période de rodage, à rendre bloquant ensuite (retirer continue-on-error).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: pytest -m e2e --tracing retain-on-failure --output test-results
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7

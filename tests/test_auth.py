@@ -6,6 +6,25 @@ import os
 import pytest
 from starlette.testclient import TestClient
 
+# Ordre de dépendance : les modules qui font `from app.config import settings`
+# (ou `from app.deps import db`) gardent sinon l'ancien objet.
+_MODULES = (
+    "app.config", "app.database", "app.notion_client", "app.llm_client", "app.deps",
+    "app.services.planning", "app.services.shopping", "app.services.nutrition_week",
+    "app.services.recettes", "app.services.creations",
+    "app.routers.pages", "app.routers.planning", "app.routers.courses",
+    "app.routers.recettes", "app.routers.catalogue", "app.routers.auth",
+    "app.main",
+)
+
+
+def _reload_app():
+    """Recharge la config, les instances partagées, les routeurs puis l'app."""
+    mod = None
+    for name in _MODULES:
+        mod = importlib.reload(importlib.import_module(name))
+    return mod
+
 
 def _client(tmp_path, auth_user="", auth_password=""):
     """Recharge la config + l'app avec l'environnement voulu, sans réseau Notion."""
@@ -14,15 +33,7 @@ def _client(tmp_path, auth_user="", auth_password=""):
     os.environ["AUTH_PASSWORD"] = auth_password
     os.environ["NOTION_TOKEN"] = ""  # ensure_ingredients_field échouera, c'est capturé
 
-    # Recharger en ordre de dépendance : les modules qui font
-    # `from app.config import settings` gardent sinon l'ancien singleton.
-    import app.config, app.database, app.notion_client, app.llm_client, app.main
-    importlib.reload(app.config)
-    importlib.reload(app.database)
-    importlib.reload(app.notion_client)
-    importlib.reload(app.llm_client)
-    main = importlib.reload(app.main)
-    return TestClient(main.app)
+    return TestClient(_reload_app().app)
 
 
 def test_auth_desactivee_par_defaut(tmp_path):
@@ -72,9 +83,4 @@ def _cleanup_env():
     # Restaurer un app.main propre (sans middleware d'auth) pour les autres
     # fichiers de tests : le reload ci-dessus laisse sinon l'auth activée sur le
     # module partagé.
-    import app.config, app.database, app.notion_client, app.llm_client, app.main
-    importlib.reload(app.config)
-    importlib.reload(app.database)
-    importlib.reload(app.notion_client)
-    importlib.reload(app.llm_client)
-    importlib.reload(app.main)
+    _reload_app()
