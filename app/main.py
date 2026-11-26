@@ -136,6 +136,12 @@ async def index(request: Request, draft: str = "", saved: str = ""):
                 try:
                     data = json.loads(planning["data_json"])
                     b = data.get("builder")
+                    if not isinstance(b, list):
+                        # Ancien brouillon sans grille : reconstruite depuis les plats.
+                        b = _builder_from_plats(
+                            data.get("plats", []), data.get("off_meals"),
+                            planning.get("nb_personnes") or 4,
+                        )
                     if isinstance(b, list):
                         builder = b
                         draft_id = str(did)
@@ -419,17 +425,27 @@ async def voir_planning(request: Request, planning_id: int):
 @app.post("/planning/{planning_id}/dupliquer")
 async def dupliquer_planning(planning_id: int):
     """Recopie un planning existant en nouveau brouillon (sans liste de courses),
-    daté de la semaine en cours. Permet de « refaire » une semaine appréciée."""
+    dont le jour 1 est aujourd'hui. Permet de « refaire » une semaine appréciée."""
     src = await db.get_planning_with_recipes(planning_id)
     if not src:
         return {"error": "Planning introuvable"}
     data = json.loads(src["data_json"])
     plats = data.get("plats", [])
-    today = date.today()
-    week_start = (today - timedelta(days=today.weekday())).isoformat()
+    off_meals = data.get("off_meals", [])
+    # week_start = date du jour 1 : la copie démarre aujourd'hui, mêmes indices
+    # de jour que l'original (plus de recalage sur le lundi).
+    week_start = date.today().isoformat()
+    # Grille du constructeur pour pouvoir « Reprendre » la copie ; reconstruite
+    # depuis les plats pour les anciens plannings qui n'en ont pas.
+    builder = data.get("builder")
+    if not isinstance(builder, list) or not builder:
+        builder = _builder_from_plats(plats, off_meals, src.get("nb_personnes") or 4)
 
     # Les brouillons multiples coexistent : on ne purge PAS les autres brouillons.
-    new_data = {"plats": plats, "liste_courses": [], "per_day": data.get("per_day", "")}
+    new_data = {
+        "plats": plats, "liste_courses": [], "per_day": data.get("per_day", ""),
+        "off_meals": off_meals, "builder": builder,
+    }
     new_id = await db.save_planning(
         week_start=week_start,
         saison=src.get("saison", ""),
@@ -633,6 +649,17 @@ async def _refresh_shopping_and_save(
     for it in liste_courses:
         it["rayon"] = categorize(it.get("nom", ""))
     planning_data["liste_courses"] = liste_courses
+    # La grille du constructeur suit les plats : un brouillon modifié depuis
+    # la page planning puis « Repris » garde les modifications.
+    planning_data["builder"] = _builder_from_plats(
+        plats, planning_data.get("off_meals"), planning.get("nb_personnes") or 4,
+    )
+    # Coches orphelines : on ne garde que celles d'un article encore présent.
+    if planning_data.get("courses_checked"):
+        noms = {str(it.get("nom", "")).strip().lower() for it in liste_courses}
+        planning_data["courses_checked"] = [
+            c for c in planning_data["courses_checked"] if str(c).lower() in noms
+        ]
 
     await db.update_planning(
         planning_id=planning_id,
@@ -1142,6 +1169,90 @@ def _parse_builder_meals(raw: str) -> list[dict]:
     return out
 
 
+def _builder_item(src: dict) -> dict:
+    """Item du constructeur {notion_id, nom, nature, libre} depuis un plat ou
+    un accompagnement du planning."""
+    nid = str(src.get("notion_id", "") or "")
+    return {
+        "notion_id": nid,
+        "nom": src.get("nom_recette", ""),
+        "nature": src.get("nature") or "Recette",
+        "libre": bool(src.get("libre")) or not nid,
+    }
+
+
+def _builder_from_plats(plats: list[dict], off_meals: list[str] | None = None,
+                        default_persons: int = 4) -> list[dict]:
+    """Reconstruit la grille du constructeur (`builder`) depuis les plats.
+
+    Sert aux anciens plannings sans `builder` et après une modification depuis
+    la page planning (le constructeur rechargerait sinon l'ancienne grille).
+    Une case par (jour, moment) sur 7 jours :
+    - case avec plat : `persons` du plat (repli `default_persons`), plat
+      principal + accompagnements ;
+    - case sans plat : absente (persons 0) si elle est dans `off_meals` ou si
+      le jour n'a aucun plat ; sinon vide avec les convives d'un plat du jour ;
+    - midis : `group` = jour, sauf midis CONSÉCUTIFS au même repas (même
+      plat, mêmes accompagnements) qui partagent le groupe du premier. Comme
+      dans le constructeur, seul le premier midi du groupe porte le repas."""
+    off = set(off_meals or [])
+    by_slot: dict[tuple[int, str], dict] = {}
+    for p in plats:
+        try:
+            key = (int(p.get("jour")), p.get("moment"))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= key[0] <= 7 and key[1] in ("midi", "soir"):
+            by_slot.setdefault(key, p)
+
+    def _persons(p: dict) -> int:
+        try:
+            n = int(p.get("persons") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        return n if n > 0 else default_persons
+
+    def _signature(p: dict | None):
+        if not p:
+            return None
+        return (
+            str(p.get("notion_id", "") or ""), p.get("nom_recette", ""),
+            tuple((str(a.get("notion_id", "") or ""), a.get("nom_recette", ""))
+                  for a in plat_accompagnements(p)),
+        )
+
+    out: list[dict] = []
+    prev_sig, prev_group = None, None
+    for jour in range(1, 8):
+        day_plats = [by_slot.get((jour, m)) for m in ("midi", "soir")]
+        day_persons = next((_persons(p) for p in day_plats if p), 0)
+        for moment in ("midi", "soir"):
+            p = by_slot.get((jour, moment))
+            case: dict = {"jour": jour, "moment": moment}
+            if p:
+                case["persons"] = _persons(p)
+            elif f"{jour}:{moment}" in off:
+                case["persons"] = 0
+            else:
+                case["persons"] = day_persons
+            main_item = _builder_item(p) if p else None
+            accs = [_builder_item(a) for a in plat_accompagnements(p)] if p else []
+            if moment == "midi":
+                sig = _signature(p)
+                if sig is not None and sig == prev_sig:
+                    case["group"] = prev_group
+                    main_item, accs = None, []   # repas porté par le 1er midi
+                else:
+                    case["group"] = jour
+                    prev_group = jour
+                prev_sig = sig
+            if main_item:
+                case["main"] = main_item
+            case["accompagnements"] = accs
+            out.append(case)
+    return out
+
+
 def _build_plat(item: dict, jour: int, moment: str, persons: int,
                 by_id: dict[str, dict]) -> dict:
     """Construit un plat du planning à partir d'un item choisi dans le catalogue.
@@ -1377,6 +1488,8 @@ async def construire(
                 planning_id=target_id,
                 data_json=json.dumps(data, ensure_ascii=False),
                 recipes=recipes,
+                week_start=week_start,
+                nb_personnes=nb_personnes,
             )
             planning_id = target_id
         else:
@@ -2244,11 +2357,27 @@ async def service_worker():
     )
 
 
+def _safe_next(url: str) -> str:
+    """Cible de redirection après login : uniquement un chemin LOCAL.
+
+    Accepte « /… » mais rejette « //hôte », « /\\hôte », tout schéma
+    (« https: », « javascript: ») et les caractères de contrôle → « / »
+    (évite une redirection ouverte vers un site externe)."""
+    if not url or not isinstance(url, str):
+        return "/"
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in url) or "\\" in url:
+        return "/"
+    if not url.startswith("/") or url.startswith("//"):
+        return "/"
+    return url
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, next: str = "/", error: str = ""):
     """Formulaire de connexion (session). Publique."""
+    next = _safe_next(next)
     if not settings.auth_enabled or request.session.get("authed"):
-        return RedirectResponse(url=next or "/", status_code=303)
+        return RedirectResponse(url=next, status_code=303)
     return templates.TemplateResponse(
         "login.html", {"request": request, "next": next, "error": error},
     )
@@ -2262,8 +2391,11 @@ async def login_submit(
     next: str = Form("/"),
 ):
     """Vérifie les identifiants → ouvre une session persistante (30 j)."""
-    ok = (secrets.compare_digest(username, settings.auth_user)
-          and secrets.compare_digest(password, settings.auth_password))
+    next = _safe_next(next)
+    # Comparaison en octets UTF-8 : compare_digest refuse les str non ASCII
+    # (un accent saisi provoquait une 500 au lieu d'un refus).
+    ok = (secrets.compare_digest(username.encode("utf-8"), settings.auth_user.encode("utf-8"))
+          and secrets.compare_digest(password.encode("utf-8"), settings.auth_password.encode("utf-8")))
     if not ok:
         return templates.TemplateResponse(
             "login.html",
@@ -2271,7 +2403,7 @@ async def login_submit(
             status_code=401,
         )
     request.session["authed"] = True
-    return RedirectResponse(url=next or "/", status_code=303)
+    return RedirectResponse(url=next, status_code=303)
 
 
 @app.get("/logout")

@@ -2,7 +2,7 @@
 
 import aiosqlite
 import json
-from datetime import date, datetime
+from datetime import date, timedelta
 from typing import Any
 
 from app.config import settings
@@ -132,12 +132,24 @@ class Database:
         planning_id: int,
         data_json: str,
         recipes: list[dict[str, Any]],
+        week_start: str | None = None,
+        nb_personnes: int | None = None,
     ) -> None:
-        """Met à jour un planning existant (data_json + recettes) sans en créer un nouveau."""
+        """Met à jour un planning existant (data_json + recettes) sans en créer un nouveau.
+
+        `week_start` et `nb_personnes` ne sont modifiés que s'ils sont fournis
+        (re-soumission d'un brouillon avec une autre date de début)."""
+        sets, params = ["data_json = ?"], [data_json]
+        if week_start:
+            sets.append("week_start = ?")
+            params.append(week_start)
+        if nb_personnes is not None:
+            sets.append("nb_personnes = ?")
+            params.append(nb_personnes)
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
-                "UPDATE planning_history SET data_json = ? WHERE id = ?",
-                (data_json, planning_id),
+                f"UPDATE planning_history SET {', '.join(sets)} WHERE id = ?",
+                (*params, planning_id),
             )
             await db.execute(
                 "DELETE FROM planning_recipes WHERE planning_id = ?",
@@ -168,36 +180,12 @@ class Database:
             )
             await db.commit()
 
-    async def get_recent_recipe_names(self, weeks: int = 4) -> set[str]:
-        """Retourne les noms de recettes utilisées dans les N dernières semaines."""
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            # SQLite ne connaît PAS le modificateur 'weeks' (renvoie NULL et
-            # n'exclut rien). On convertit en jours : N semaines + 7 j de marge.
-            rows = await db.execute_fetchall(
-                """SELECT DISTINCT recipe_name FROM planning_recipes pr
-                   JOIN planning_history ph ON pr.planning_id = ph.id
-                   WHERE ph.valide = 1 AND ph.created_at >= datetime('now', ? || ' days')""",
-                (f"-{weeks * 7 + 7}",),
-            )
-            return {r["recipe_name"] for r in rows}
-
     async def mark_planning_valid(self, planning_id: int) -> None:
         """Valide un planning (brouillon -> enregistré dans l'historique)."""
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 "UPDATE planning_history SET valide = 1 WHERE id = ?", (planning_id,)
             )
-            await db.commit()
-
-    async def delete_draft_plannings(self) -> None:
-        """Supprime les brouillons non validés (et leurs recettes liées)."""
-        async with aiosqlite.connect(self.path) as db:
-            await db.execute(
-                """DELETE FROM planning_recipes
-                   WHERE planning_id IN (SELECT id FROM planning_history WHERE valide = 0)"""
-            )
-            await db.execute("DELETE FROM planning_history WHERE valide = 0")
             await db.commit()
 
     async def list_drafts(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -232,29 +220,6 @@ class Database:
             if not rows:
                 return None
             return _row_to_dict(rows[0])
-
-    # ── Préférences de génération (mémorisées entre sessions) ─────
-
-    async def save_prefs(self, data_json: str) -> None:
-        """Mémorise les derniers paramètres de génération (1 seule ligne)."""
-        async with aiosqlite.connect(self.path) as db:
-            await db.execute(
-                "INSERT INTO app_prefs (id, data_json) VALUES (1, ?) "
-                "ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json",
-                (data_json,),
-            )
-            await db.commit()
-
-    async def get_prefs(self) -> dict[str, Any]:
-        """Retourne les derniers paramètres mémorisés ({} si aucun)."""
-        async with aiosqlite.connect(self.path) as db:
-            rows = await db.execute_fetchall("SELECT data_json FROM app_prefs WHERE id = 1")
-            if not rows:
-                return {}
-            try:
-                return json.loads(rows[0][0])
-            except (json.JSONDecodeError, TypeError):
-                return {}
 
     async def get_planning_with_recipes(
         self, planning_id: int
@@ -311,24 +276,72 @@ class Database:
             )
             return [_row_to_dict(r) for r in rows]
 
+    async def get_recipe_usage(self) -> dict[str, dict[str, Any]]:
+        """Usage des recettes dans les plannings VALIDÉS.
+
+        Retourne {notion_id: {"count": n, "last": "AAAA-MM-JJ"}} : `count` =
+        nombre de repas où la recette apparaît, `last` = date du repas le plus
+        récent (week_start = date du jour 1, donc date = week_start + jour − 1).
+        Les repas sans notion_id (repas libres) sont ignorés."""
+        async with aiosqlite.connect(self.path) as db:
+            rows = await db.execute_fetchall(
+                """SELECT pr.notion_id, pr.jour, ph.week_start
+                   FROM planning_recipes pr
+                   JOIN planning_history ph ON pr.planning_id = ph.id
+                   WHERE ph.valide = 1 AND pr.notion_id IS NOT NULL AND pr.notion_id != ''"""
+            )
+        usage: dict[str, dict[str, Any]] = {}
+        for nid, jour, week_start in rows:
+            entry = usage.setdefault(nid, {"count": 0, "last": ""})
+            entry["count"] += 1
+            try:
+                d = (date.fromisoformat(week_start) + timedelta(days=int(jour) - 1)).isoformat()
+            except (TypeError, ValueError):
+                continue
+            if d > entry["last"]:
+                entry["last"] = d
+        return usage
+
     # ── Recettes enrichies (cache local) ──────────────────────────
 
     async def save_enriched(
         self,
         notion_id: str,
         recipe_name: str,
-        ingredients: str = "",
-        cuisson_minutes: int = 0,
-        saison: str = "",
-        nutrition: str = "",
-        base_servings: int = 4,
+        ingredients: str | None = None,
+        cuisson_minutes: int | None = None,
+        saison: str | None = None,
+        nutrition: str | None = None,
+        base_servings: int | None = None,
     ) -> None:
+        """Crée ou met à jour l'entrée de cache d'une recette.
+
+        Upsert partiel : un champ laissé à `None` conserve la valeur déjà en
+        base (une ré-extraction d'ingrédients n'efface plus la durée, la
+        nutrition ni la base de portions). À la création, `base_servings`
+        retombe sur 4 (ancien BASE_SERVINGS global)."""
+        params = {
+            "nid": notion_id, "name": recipe_name, "ings": ingredients,
+            "cuisson": cuisson_minutes, "saison": saison,
+            "nutri": nutrition, "bs": base_servings,
+        }
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
-                """INSERT OR REPLACE INTO enriched_recipes
-                   (notion_id, recipe_name, ingredients, cuisson_minutes, saison, dernier_usage, nutrition, base_servings)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)""",
-                (notion_id, recipe_name, ingredients, cuisson_minutes, saison, nutrition, base_servings),
+                """INSERT INTO enriched_recipes
+                   (notion_id, recipe_name, ingredients, cuisson_minutes, saison,
+                    dernier_usage, nutrition, base_servings)
+                   VALUES (:nid, :name, COALESCE(:ings, ''), COALESCE(:cuisson, 0),
+                           COALESCE(:saison, ''), datetime('now'),
+                           COALESCE(:nutri, ''), COALESCE(:bs, 4))
+                   ON CONFLICT(notion_id) DO UPDATE SET
+                     recipe_name = excluded.recipe_name,
+                     dernier_usage = excluded.dernier_usage,
+                     ingredients = COALESCE(:ings, enriched_recipes.ingredients),
+                     cuisson_minutes = COALESCE(:cuisson, enriched_recipes.cuisson_minutes),
+                     saison = COALESCE(:saison, enriched_recipes.saison),
+                     nutrition = COALESCE(:nutri, enriched_recipes.nutrition),
+                     base_servings = COALESCE(:bs, enriched_recipes.base_servings)""",
+                params,
             )
             await db.commit()
 
