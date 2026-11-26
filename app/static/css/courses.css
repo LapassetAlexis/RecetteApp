@@ -25,6 +25,9 @@
 .shop-masques { margin-top:12px; border-top:1px solid var(--bo); padding-top:4px; }
 .shop-masques summary { cursor:pointer; color:var(--t2); font-size:0.88rem; min-height:44px;
     display:flex; align-items:center; }
+/* Summary en flex : Chrome n'affiche plus le triangle, on le redessine. */
+.shop-masques summary::before, .pub-pris summary::before { content:"▸"; margin-right:6px; }
+.shop-masques[open] summary::before, .pub-pris[open] summary::before { content:"▾"; }
 .shop-masques ul { list-style:none; margin:0; padding:0; }
 .shop-m { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 0;
     border-bottom:1px solid var(--bo); font-size:0.85rem; color:var(--t2); }
@@ -47,6 +50,8 @@
 .pub-copy:active { transform:scale(.97); }
 .pub-status { background:#fdecea; color:#a93226; border-radius:8px; padding:8px 12px; margin-bottom:12px;
     font-size:0.9rem; }
+/* Une colonne : liste lue en magasin, lignes sans retour à la ligne parasite. */
+.pub-wrap .shop-grid { grid-template-columns:1fr; }
 /* Cibles tactiles de 48 px : toute la ligne coche l'article. */
 .pub-i { min-height:48px; padding:8px 12px; font-size:1rem; background:var(--surface); }
 .pub-i .shop-c { width:26px; height:26px; }
