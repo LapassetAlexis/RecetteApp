@@ -18,6 +18,26 @@
 .b-cell.off { opacity: .5; filter: grayscale(1); }
 .b-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .b-pers { width: 62px; text-align: center; }
+.b-pers-wrap { display: flex; align-items: center; gap: 6px; }
+.b-tools { display: flex; align-items: center; gap: 6px; }
+/* − / + des convives : mobile uniquement (cf. media query). */
+.b-step { display: none; }
+.b-more { cursor: pointer; border: 1px solid var(--bo, #ccc); border-radius: 8px; background: transparent;
+    min-width: 34px; height: 30px; padding: 0 8px; font-size: 1.1rem; line-height: 1; color: var(--t1, #333); }
+.b-more:hover, .b-more[aria-expanded="true"] { border-color: var(--t1, #333); }
+
+/* Menu « ⋯ » d'une case : copier, déplacer, restes. */
+.b-menu { position: absolute; z-index: 60; display: flex; flex-direction: column; gap: 2px;
+    width: min(300px, calc(100vw - 16px)); max-height: 60vh; overflow-y: auto; padding: 6px;
+    background: var(--card, #fff); border: 1px solid var(--bo, #ddd); border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.b-menu-item { cursor: pointer; border: none; background: transparent; text-align: left;
+    min-height: 44px; padding: 8px 10px; border-radius: 8px; font: inherit; font-size: .92rem;
+    color: var(--t1, #333); }
+.b-menu-item:hover:not([disabled]), .b-menu-item:focus-visible { background: var(--bg3, #eee); }
+.b-menu-item[disabled] { cursor: default; opacity: .55; }
+.b-menu-item small { color: var(--t2, #777); }
+.b-menu-empty { padding: 8px 10px; font-size: .85rem; color: var(--t2, #777); }
 .b-pers-lbl { font-size: .8rem; color: var(--t2, #777); }
 .b-main, .b-side {
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
@@ -60,6 +80,16 @@
 .pk-f.sel { background: var(--pri, #2980b9); color: #fff; border-color: var(--pri, #2980b9); }
 .pk-list { overflow-y: auto; padding: 12px; }
 .pk-empty { padding: 20px; text-align: center; color: var(--t2, #999); }
+.pk-error p { margin-bottom: 10px; color: var(--t1, #333); }
+.pk-free { width: 100%; text-align: left; margin-bottom: 12px; }
+.pk-more { display: block; margin: 14px auto 4px; }
+/* Cartes du picker en <button> : remise à zéro des styles de bouton. */
+.pk-card { display: flex; flex-direction: column; justify-content: flex-start; width: 100%;
+    text-align: left; font: inherit; color: inherit;
+    border: 1px solid transparent; }
+.pk-card:hover, .pk-card:focus-visible { border-color: var(--pri, #2980b9); }
+.pk-card .recipe-title { display: block; font-size: .95rem; font-weight: 700; margin-bottom: 6px; line-height: 1.25; }
+.pk-recent { background: #fff4d6; color: #8a5a00; }
 .build-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .build-actions .btn { flex: 1 1 220px; }
 
@@ -73,6 +103,14 @@
         padding: 6px 10px; margin-top: 8px; border-radius: 8px;
         background: var(--bg3, #eee);
     }
+    /* Convives : − / + en grandes cibles (48 px) autour du champ. */
+    .b-step { display: inline-flex; align-items: center; justify-content: center;
+        width: 48px; height: 48px; padding: 0; border-radius: 10px; cursor: pointer;
+        border: 1.5px solid var(--bo, #ccc); background: var(--surface, #fff);
+        font-size: 1.4rem; line-height: 1; color: var(--t1, #333); }
+    .b-step:disabled { opacity: .4; cursor: default; }
+    .b-pers { width: 52px; height: 48px; padding: 4px; }
+    .b-more, .b-group { min-width: 48px; height: 48px; }
     .b-cell::before {
         content: attr(data-moment-label);
         font-size: .78rem; font-weight: 700; color: var(--t2, #777);
