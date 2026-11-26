@@ -7,6 +7,8 @@ import app.main as main
 
 ROUTES_ATTENDUES = {
     ("GET", "/"),
+    ("GET", "/admin"),
+    ("GET", "/admin/export"),
     ("GET", "/ajouter"),
     ("GET", "/api/alternatives/{planning_id}"),
     ("GET", "/api/catalogue"),
@@ -31,6 +33,8 @@ ROUTES_ATTENDUES = {
     ("HEAD", "/openapi.json"),
     ("HEAD", "/redoc"),
     ("MOUNT", "/static"),
+    ("POST", "/admin/import"),
+    ("POST", "/admin/rehydrater"),
     ("POST", "/ajouter-recette"),
     ("POST", "/api/add-side/{planning_id}"),
     ("POST", "/api/analyze-text"),
