@@ -308,30 +308,46 @@ class Database:
             )
             return [_row_to_dict(r) for r in rows]
 
-    async def get_recipe_usage(self) -> dict[str, dict[str, Any]]:
-        """Usage des recettes dans les plannings VALIDÉS.
+    async def get_recipe_usage(self, today: date | None = None) -> dict[str, dict[str, Any]]:
+        """Usage des recettes dans les plannings VALIDÉS, jusqu'à aujourd'hui.
 
         Retourne {notion_id: {"count": n, "last": "AAAA-MM-JJ"}} : `count` =
-        nombre de repas où la recette apparaît, `last` = date du repas le plus
-        récent (week_start = date du jour 1, donc date = week_start + jour − 1).
-        Les repas sans notion_id (repas libres) sont ignorés."""
+        nombre de fois où la recette a été cuisinée, `last` = date du repas le
+        plus récent (week_start = date du jour 1, donc date = week_start + jour − 1).
+
+        - seuls les repas dont la date est passée ou du jour comptent (une
+          semaine validée à venir n'est pas encore cuisinée) ;
+        - des midis consécutifs d'un même planning portant la même recette
+          (repas groupé : cuisiné une fois, mangé plusieurs jours) comptent
+          une seule fois ;
+        - les repas sans notion_id (repas libres) sont ignorés."""
+        today_iso = (today or date.today()).isoformat()
         async with aiosqlite.connect(self.path) as db:
             rows = await db.execute_fetchall(
-                """SELECT pr.notion_id, pr.jour, ph.week_start
+                """SELECT pr.planning_id, pr.notion_id, pr.jour, pr.moment, ph.week_start
                    FROM planning_recipes pr
                    JOIN planning_history ph ON pr.planning_id = ph.id
                    WHERE ph.valide = 1 AND pr.notion_id IS NOT NULL AND pr.notion_id != ''"""
             )
-        usage: dict[str, dict[str, Any]] = {}
-        for nid, jour, week_start in rows:
-            entry = usage.setdefault(nid, {"count": 0, "last": ""})
-            entry["count"] += 1
+        # Repas passés, regroupés par (planning, recette) : {clé: [(jour, moment, date)]}.
+        meals: dict[tuple[int, str], list[tuple[int, str, str]]] = {}
+        for planning_id, nid, jour, moment, week_start in rows:
             try:
-                d = (date.fromisoformat(week_start) + timedelta(days=int(jour) - 1)).isoformat()
+                j = int(jour)
+                d = (date.fromisoformat(week_start) + timedelta(days=j - 1)).isoformat()
             except (TypeError, ValueError):
                 continue
-            if d > entry["last"]:
-                entry["last"] = d
+            if d > today_iso:
+                continue
+            meals.setdefault((planning_id, nid), []).append((j, moment or "", d))
+        usage: dict[str, dict[str, Any]] = {}
+        for (_pid, nid), items in meals.items():
+            entry = usage.setdefault(nid, {"count": 0, "last": ""})
+            midis = sorted({j for j, moment, _d in items if moment == "midi"})
+            # Une suite de midis consécutifs = un seul repas cuisiné.
+            entry["count"] += sum(1 for i, j in enumerate(midis) if i == 0 or midis[i - 1] != j - 1)
+            entry["count"] += sum(1 for _j, moment, _d in items if moment != "midi")
+            entry["last"] = max(entry["last"], *(d for _j, _m, d in items))
         return usage
 
     # ── Recettes enrichies (cache local) ──────────────────────────

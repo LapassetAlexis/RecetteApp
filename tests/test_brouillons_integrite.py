@@ -338,7 +338,7 @@ def test_get_recipe_usage(tmp_path):
     asyncio.run(db.mark_planning_valid(p1))
     asyncio.run(db.mark_planning_valid(p2))
 
-    usage = asyncio.run(db.get_recipe_usage())
+    usage = asyncio.run(db.get_recipe_usage(today=date(2026, 12, 31)))
     assert usage == {
         "p1": {"count": 2, "last": (date(2026, 11, 25) + timedelta(days=2)).isoformat()},
         "s1": {"count": 1, "last": "2026-11-07"},
